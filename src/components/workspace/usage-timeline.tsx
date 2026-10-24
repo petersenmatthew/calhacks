@@ -31,7 +31,7 @@ export function UsageTimeline({ data }: { data: WorkspaceData }) {
       segments: [
         { from: 0, to: Math.min(checks.billedHours, checks.billableHours), className: "bg-zinc-700", text: hours(Math.min(checks.billedHours, checks.billableHours)) },
         ...(checks.billedHours > checks.billableHours
-          ? [{ from: checks.billableHours, to: checks.billedHours, className: "hatch-red ring-1 ring-rose-400 ring-inset", text: "+" + hours(checks.billedHours - checks.billableHours) }]
+          ? [{ from: checks.billableHours, to: checks.billedHours, className: "hatch-red ring-1 ring-destructive/30 ring-inset", text: "+" + hours(checks.billedHours - checks.billableHours) }]
           : []),
       ],
     },
@@ -39,16 +39,16 @@ export function UsageTimeline({ data }: { data: WorkspaceData }) {
       label: "Provider meter",
       segments: [
         { from: meterFrom, to: Math.min(meterTo, termH), className: "bg-zinc-400" },
-        ...(meterTo > termH + 0.01 ? [{ from: termH, to: meterTo, className: "hatch-red ring-1 ring-rose-400 ring-inset" }] : []),
+        ...(meterTo > termH + 0.01 ? [{ from: termH, to: meterTo, className: "hatch-red ring-1 ring-destructive/30 ring-inset" }] : []),
       ],
     },
     {
       label: "Instance lifecycle",
-      segments: [{ from: 0, to: termH, className: "bg-teal-500", text: hours(checks.lifecycleHours) }],
+      segments: [{ from: 0, to: termH, className: "bg-primary", text: hours(checks.lifecycleHours) }],
     },
     {
       label: "Training job",
-      segments: data.jobs.map((j) => ({ from: h(start, j.startedAt), to: h(start, j.endedAt), className: "bg-sky-500", text: hours(h(j.startedAt, j.endedAt)) })),
+      segments: data.jobs.map((j) => ({ from: h(start, j.startedAt), to: h(start, j.endedAt), className: "bg-zinc-600", text: hours(h(j.startedAt, j.endedAt)) })),
     },
   ];
 
@@ -66,13 +66,13 @@ export function UsageTimeline({ data }: { data: WorkspaceData }) {
               {row.segments.map((s, i) => (
                 <div
                   key={i}
-                  className={cn("absolute inset-y-0 flex items-center justify-center overflow-hidden rounded-[3px] text-[10px] font-medium text-white", s.className)}
+                  className={cn("absolute inset-y-0 flex items-center justify-center overflow-hidden rounded-[3px] text-[10px] font-medium text-white", s.className, s.className === "bg-primary" && "text-primary-foreground")}
                   style={{ left: pctOf(s.from), width: "calc(" + pctOf(s.to - s.from) + " - 1px)" }}
                 >
-                  {s.text ? <span className={cn("truncate px-1", s.className.includes("hatch") && "text-rose-700")}>{s.text}</span> : null}
+                  {s.text ? <span className={cn("truncate px-1", s.className.includes("hatch") && "text-destructive")}>{s.text}</span> : null}
                 </div>
               ))}
-              <div className="absolute inset-y-[-3px] border-l border-dashed border-rose-400" style={{ left: pctOf(termH) }} />
+              <div className="absolute inset-y-[-3px] border-l border-dashed border-destructive/30" style={{ left: pctOf(termH) }} />
             </div>
           </div>
         ))}
@@ -89,7 +89,7 @@ export function UsageTimeline({ data }: { data: WorkspaceData }) {
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-muted-foreground">
         <span className="flex items-center gap-1">
-          <span className="h-2.5 w-3 rounded-sm border-l border-dashed border-rose-400" /> TERMINATED event
+          <span className="h-2.5 w-3 rounded-sm border-l border-dashed border-destructive/30" /> TERMINATED event
         </span>
         <span className="flex items-center gap-1">
           <span className="hatch-red h-2.5 w-3 rounded-sm" /> billed or metered after termination

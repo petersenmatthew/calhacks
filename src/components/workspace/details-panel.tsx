@@ -5,12 +5,11 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { ChevronRight, FileSearch, LoaderCircle } from "lucide-react";
 import { postJson } from "@/lib/api";
-import { clockTime, dateOnly, dateTimeUtc, hours, money, periodLabel, relativeTime } from "@/lib/format";
-import { useNow } from "@/lib/use-now";
+import { clockTime, dateOnly, dateTimeUtc, hours, money, periodLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { InstanceChecks, ReservationChecks } from "@/server/db/schema";
 import type { WorkspaceData } from "@/server/queries";
-import { AgentAvatar, AgentStatusText, PRIORITY_LABEL, StateBadge } from "../status";
+import { AgentAvatar, PRIORITY_LABEL } from "../status";
 import { Button } from "../ui/button";
 import { AllocationTable, JournalPreview } from "./approval-card";
 import { SIMULATED_SOURCES, useWorkspace } from "./workspace-context";
@@ -26,12 +25,12 @@ const OUTCOME_LABEL: Record<string, string> = {
 };
 
 const STATUS_TEXT: Record<string, string> = {
-  PENDING_APPROVAL: "text-orange-700",
-  PROPOSED: "text-orange-700",
-  APPROVED: "text-emerald-700",
-  EXECUTED: "text-emerald-700",
-  REJECTED: "text-rose-600",
-  CHANGES_REQUESTED: "text-amber-700",
+  PENDING_APPROVAL: "text-brand-ink",
+  PROPOSED: "text-brand-ink",
+  APPROVED: "text-brand-ink",
+  EXECUTED: "text-brand-ink",
+  REJECTED: "text-destructive",
+  CHANGES_REQUESTED: "text-brand-ink",
 };
 
 function Section({ title, count, defaultOpen = false, children }: { title: string; count?: number; defaultOpen?: boolean; children: React.ReactNode }) {
@@ -66,30 +65,25 @@ function SourceButton({ sourceType, sourceId }: { sourceType: string; sourceId: 
   const ev = data.evidence.find((e) => e.sourceType === sourceType && e.sourceId === sourceId);
   if (!ev) return null;
   return (
-    <button type="button" onClick={() => openEvidence(ev.id)} className="mt-2 inline-flex items-center gap-1 text-[11.5px] text-blue-700 hover:underline">
+    <button type="button" onClick={() => openEvidence(ev.id)} className="mt-2 inline-flex items-center gap-1 text-[11.5px] text-brand-ink hover:underline">
       <FileSearch className="size-3.5" /> View source record
     </button>
   );
 }
 
 function Properties({ data }: { data: WorkspaceData }) {
-  const now = useNow();
   const item = data.item;
   const agentId = item.state !== "RESOLVED" ? item.assignedAgentId : null;
-  const agent = agentId ? data.agents.find((a) => a.agentId === agentId) : null;
-  const agentHere = agent && agent.currentWorkItemId === item.id ? agent.status : "idle";
   return (
     <div className="px-4 py-4">
       <KV
         rows={[
-          ["Status", <StateBadge key="s" state={item.state} />],
           [
             "Agent",
             agentId ? (
               <span key="a" className="flex items-center gap-1.5">
                 <AgentAvatar actorId={agentId} size="sm" />
                 <span className="truncate">{data.actors[agentId]?.name}</span>
-                {agentHere !== "idle" ? <AgentStatusText status={agentHere} /> : null}
               </span>
             ) : (
               <span key="a" className="text-muted-foreground">None</span>
@@ -100,8 +94,6 @@ function Properties({ data }: { data: WorkspaceData }) {
           ["Provider", data.providers[item.providerId]?.name],
           ["Resource", <span key="r" className="font-mono text-[11.5px]">{item.instanceId ?? item.reservationId}</span>],
           ["Period", periodLabel(item.period)],
-          ["Opened", relativeTime(item.createdAt, now)],
-          ["Agent runs", data.runs.length + " · " + data.activity.filter((e) => e.toolName).length + " tool calls"],
         ]}
       />
     </div>
@@ -121,7 +113,7 @@ function Numbers({ data }: { data: WorkspaceData }) {
             ["Expected", <span key="e" className="tnum">{money(item.expectedCents)} <span className="text-muted-foreground">({inst.billableHours} h x {money(inst.contractRateCents)})</span></span>],
             [
               "Difference",
-              <span key="d" className={cn("font-medium tnum", over ? "text-rose-600" : "text-emerald-700")}>
+              <span key="d" className={cn("font-medium tnum", over ? "text-destructive" : "text-brand-ink")}>
                 {money(item.discrepancyCents, { sign: true })}
                 <span className="font-normal text-muted-foreground"> {over ? "· " + hours(inst.billedHours - inst.billableHours) + " not supported" : "· matches contract"}</span>
               </span>,
@@ -170,7 +162,7 @@ function Outcome({ data }: { data: WorkspaceData }) {
         <div className="space-y-2">
           <KV
             rows={[
-              ["Dispute", <span key="d" className="tnum">{dispute.id} · {money(dispute.amountCents)} · <span className="text-rose-600">{dispute.status.toLowerCase()}</span></span>],
+              ["Dispute", <span key="d" className="tnum">{dispute.id} · {money(dispute.amountCents)} · <span className="text-destructive">{dispute.status.toLowerCase()}</span></span>],
               ["Vendor ref", dispute.vendorReference],
               ["Owed (AP)", <span key="ap" className="tnum">{money(data.apOutstandingCents)}{dispute.status === "SUBMITTED" ? " until credited" : ""}</span>],
             ]}
@@ -229,7 +221,7 @@ export function DetailsPanel() {
           {item.checks.flags.map((f) => (
             <li key={f.code} className="flex gap-2 text-[12px] leading-snug">
               <span
-                className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", f.severity === "high" ? "bg-rose-500" : f.severity === "medium" ? "bg-amber-500" : "bg-zinc-400")}
+                className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", f.severity === "high" ? "bg-destructive" : f.severity === "medium" ? "bg-primary" : "bg-zinc-400")}
               />
               <span className="text-zinc-700">{f.message}</span>
             </li>
@@ -282,7 +274,7 @@ export function DetailsPanel() {
                     <>
                       {" "}
                       · learned from{" "}
-                      <Link className="text-blue-700 hover:underline" href={"/investigations/" + p.learnedFromWorkItemId}>
+                      <Link className="text-brand-ink hover:underline" href={"/investigations/" + p.learnedFromWorkItemId}>
                         {p.learnedFromWorkItemId}
                       </Link>
                     </>
@@ -312,7 +304,7 @@ export function DetailsPanel() {
       ) : null}
 
       {data.reservation ? (
-        <Section title="Reservation agreement" defaultOpen>
+        <Section title="Reservation agreement">
           <KV
             rows={[
               ["Reservation", <span key="r" className="font-mono text-[11px]">{data.reservation.id}</span>],
@@ -324,7 +316,7 @@ export function DetailsPanel() {
           />
           <p className="mt-2 border-l-2 border-zinc-300 pl-3 text-[12px] leading-snug text-zinc-700">{data.reservation.internalTerms}</p>
           {data.policyFit ? (
-            <p className={cn("mt-2 text-[12px] leading-snug", data.policyFit.fit.consistent ? "text-emerald-700" : "text-amber-800")}>
+            <p className={cn("mt-2 text-[12px] leading-snug", data.policyFit.fit.consistent ? "text-brand-ink" : "text-brand-ink")}>
               <span className="font-medium">
                 {data.policyFit.policy ? data.policyFit.policy.policyKey + " v" + data.policyFit.policy.version : "No policy"}:
               </span>{" "}
@@ -410,11 +402,11 @@ export function DetailsPanel() {
       <Section title={"Contract " + contract.id} count={contract.clauses.length}>
         <ul className="space-y-2.5">
           {contract.clauses.map((c) => (
-            <li key={c.ref} className={cn("text-[12px] leading-snug", cited.has(c.ref) && "border-l-2 border-amber-400 pl-2.5")}>
+            <li key={c.ref} className={cn("text-[12px] leading-snug", cited.has(c.ref) && "border-l-2 border-primary/50 pl-2.5")}>
               <div className="flex items-center gap-1.5">
                 <span className="font-mono text-[10.5px] text-zinc-500">§{c.ref}</span>
                 <span className="font-medium text-zinc-800">{c.title}</span>
-                {cited.has(c.ref) ? <span className="ml-auto text-[10.5px] text-amber-700">cited</span> : null}
+                {cited.has(c.ref) ? <span className="ml-auto text-[10.5px] text-brand-ink">cited</span> : null}
               </div>
               <p className="mt-0.5 text-zinc-600">{c.text}</p>
             </li>

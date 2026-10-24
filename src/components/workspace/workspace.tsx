@@ -45,7 +45,7 @@ export function Workspace({ id }: { id: string }) {
       <div className="p-8 text-[13px]">
         <div className="font-medium">Could not open {id}</div>
         <div className="mt-1 text-muted-foreground">{String(error.message)}</div>
-        <Link href="/" className="mt-3 inline-block text-blue-700 hover:underline">
+        <Link href="/" className="mt-3 inline-block text-brand-ink hover:underline">
           Back to work
         </Link>
       </div>
@@ -79,7 +79,7 @@ export function Workspace({ id }: { id: string }) {
             <h1 className="text-[18px] leading-snug font-semibold tracking-tight">{item.title}</h1>
             <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-muted-foreground">
               <StateBadge state={item.state} />
-              {reworked ? <span className="text-amber-700">· Reworked after your feedback</span> : null}
+              {reworked ? <span className="text-brand-ink">· Reworked after your feedback</span> : null}
             </div>
           </div>
           <DecisionPanel />

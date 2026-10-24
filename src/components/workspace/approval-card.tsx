@@ -49,7 +49,7 @@ export function JournalPreview({ lines, projects }: { lines: Proposal["payload"]
           </tr>
         ))}
         <tr className="border-t font-medium">
-          <td className="py-1 text-emerald-700">{debits === credits ? "Balanced" : "Unbalanced"}</td>
+          <td className="py-1 text-brand-ink">{debits === credits ? "Balanced" : "Unbalanced"}</td>
           <td className="py-1 text-right tnum">{money(debits)}</td>
           <td className="py-1 text-right tnum">{money(credits)}</td>
         </tr>
@@ -126,10 +126,9 @@ export function ApprovalCard({ approval }: { approval: Approval }) {
         <div className="text-[14px] font-semibold">{title}</div>
         <div className="mt-1 flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
           <AgentAvatar actorId={approval.requestedBy} size="sm" />
-          {data.actors[approval.requestedBy]?.name} asked {relativeTime(approval.createdAt, now)}
-          <span className="font-mono">· {approval.id}</span>
+          {data.actors[approval.requestedBy]?.name} · {relativeTime(approval.createdAt, now)}
         </div>
-        {proposal?.kind === "VENDOR_DISPUTE" ? null : <p className="mt-2 text-[12.5px] leading-snug text-zinc-700">{approval.summary}</p>}
+        {proposal ? null : <p className="mt-2 text-[12.5px] leading-snug text-zinc-700">{approval.summary}</p>}
       </div>
 
       {proposal?.kind === "VENDOR_DISPUTE" && proposal.payload.dispute ? (
@@ -144,7 +143,7 @@ export function ApprovalCard({ approval }: { approval: Approval }) {
           </div>
           <div>
             <div className="text-muted-foreground">Disputed</div>
-            <div className="text-[14px] font-semibold text-rose-600 tnum">{money(proposal.payload.dispute.disputedCents)}</div>
+            <div className="text-[14px] font-semibold text-destructive tnum">{money(proposal.payload.dispute.disputedCents)}</div>
           </div>
         </div>
       ) : null}
@@ -157,13 +156,13 @@ export function ApprovalCard({ approval }: { approval: Approval }) {
       ) : null}
 
       {deviatesFromPolicy && currentPolicy ? (
-        <p className="text-[12px] leading-snug text-sky-800">
+        <p className="text-[12px] leading-snug text-brand-ink">
           Differs from {currentPolicy.policyKey} v{currentPolicy.version} ({METHOD_LABEL[currentPolicy.rule.method] ?? currentPolicy.rule.method}) and follows the
           reservation terms.
           {pendingPolicy ? " " + pendingPolicy.policyKey + " v" + pendingPolicy.version + " is proposed so future cases use this method." : ""}
         </p>
-      ) : proposal?.payload.policyFit && !proposal.payload.policyFit.consistent && !proposal.payload.policyFit.conflicts.every((c) => approval.summary.includes(c)) ? (
-        <p className="flex gap-1.5 text-[12px] leading-snug text-amber-800">
+      ) : proposal?.payload.policyFit && !proposal.payload.policyFit.consistent ? (
+        <p className="flex gap-1.5 text-[12px] leading-snug text-brand-ink">
           <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
           {proposal.payload.policyFit.conflicts.join(" ")}
         </p>
@@ -218,10 +217,10 @@ export function ApprovalCard({ approval }: { approval: Approval }) {
           <Button size="sm" variant="outline" onClick={() => decide("CHANGES_REQUESTED")} disabled={busy !== null}>
             {busy === "CHANGES_REQUESTED" ? <LoaderCircle className="animate-spin" /> : <Undo2 />} Request changes
           </Button>
-          <Button size="sm" variant="ghost" className="text-rose-600 hover:text-rose-700" onClick={() => decide("REJECTED")} disabled={busy !== null}>
+          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => decide("REJECTED")} disabled={busy !== null}>
             {busy === "REJECTED" ? <LoaderCircle className="animate-spin" /> : <X />} Reject
           </Button>
-          {isAllocation ? (
+          {isAllocation && reason.trim() ? (
             <Select value={directive} onValueChange={setDirective}>
               <SelectTrigger size="sm" className="ml-auto w-[280px] text-[12px]">
                 <SelectValue placeholder="Corrected allocation basis (optional)" />

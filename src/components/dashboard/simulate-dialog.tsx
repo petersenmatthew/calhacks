@@ -207,7 +207,7 @@ export function SimulateDialog({ onDone }: { onDone: () => void }) {
               </div>
               <div>
                 <div className="text-muted-foreground">Difference</div>
-                <div className={cn("font-semibold tnum", invoiced - expected >= 100 ? "text-rose-600" : "text-zinc-900")}>
+                <div className={cn("font-semibold tnum", invoiced - expected >= 100 ? "text-destructive" : "text-zinc-900")}>
                   {money(invoiced - expected, { sign: true })}
                 </div>
               </div>

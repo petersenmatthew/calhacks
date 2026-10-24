@@ -46,7 +46,7 @@ function ModeSwitcher({ data, onChange }: { data: StatusData | undefined; onChan
   return (
     <DropdownMenu>
       <DropdownMenuTrigger className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[12.5px] outline-none hover:bg-zinc-100">
-        <span className={cn("size-2 rounded-full", llm ? "bg-emerald-500" : "bg-zinc-400")} />
+        <span className={cn("size-2 rounded-full", llm ? "bg-primary" : "bg-zinc-400")} />
         <span className="min-w-0 flex-1 truncate text-zinc-700">{llm ? "LLM agents · " + settings?.model : "Deterministic replay"}</span>
         <ChevronsUpDown className="size-3.5 text-muted-foreground" />
       </DropdownMenuTrigger>
@@ -81,7 +81,7 @@ function AgentRow({ agent }: { agent: StatusData["agents"][number] }) {
       <div className="flex items-center gap-2">
         <AgentAvatar actorId={agent.agentId} size="sm" />
         <span className="flex-1 truncate text-[13px] text-zinc-800">{AGENT_NAMES[agent.agentId] ?? agent.agentId}</span>
-        <AgentStatusText status={agent.status} label={agent.status === "queued" ? agent.queued + " queued" : undefined} />
+        {busy ? <AgentStatusText status={agent.status} label={agent.status === "queued" ? agent.queued + " queued" : undefined} /> : null}
       </div>
       {busy && detail ? (
         <div className="mt-0.5 truncate pl-7 text-[11.5px] text-muted-foreground">
@@ -100,6 +100,24 @@ function AgentRow({ agent }: { agent: StatusData["agents"][number] }) {
   );
 }
 
+function AgentsMenu({ agents, summary, running }: { agents: StatusData["agents"]; summary: string; running: number }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger className="flex h-8 items-center gap-1.5 rounded-md px-2 text-[12.5px] outline-none hover:bg-zinc-100">
+        <span className={cn("size-2 rounded-full", running ? "animate-pulse bg-primary" : "bg-zinc-300")} />
+        <span className={cn("tnum", running ? "text-brand-ink" : "text-zinc-600")}>{summary}</span>
+        <ChevronsUpDown className="size-3.5 text-muted-foreground" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-72 p-1">
+        <DropdownMenuLabel className="text-xs">Agents</DropdownMenuLabel>
+        {agents.map((agent) => (
+          <AgentRow key={agent.agentId} agent={agent} />
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const connected = useLiveConnected();
@@ -113,81 +131,45 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const agentSummary = running || queued ? [running ? running + " running" : null, queued ? queued + " queued" : null].filter(Boolean).join(" · ") : "All idle";
 
   return (
-    <div className="flex h-dvh overflow-hidden">
-      <aside className="hidden w-[232px] shrink-0 flex-col border-r bg-zinc-50/70 md:flex">
-        <div className="flex h-12 items-center gap-2.5 px-4">
+    <div className="flex h-dvh flex-col overflow-hidden">
+      <header className="flex h-12 shrink-0 items-center gap-1 border-b px-4">
+        <Link href="/" className="mr-3 flex items-center gap-2">
           <span className="grid size-6 place-items-center rounded-md bg-zinc-900 text-[10px] font-semibold text-white">EL</span>
-          <div className="min-w-0 leading-tight">
-            <div className="truncate text-[13px] font-semibold tracking-tight">ExperimentLedger</div>
-            <div className="truncate text-[11px] text-muted-foreground">Atlas Research</div>
-          </div>
-        </div>
-
-        <nav className="space-y-px px-2 pt-1">
-          {NAV.map((item) => {
-            const active = isActive(item.href, pathname);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  "flex h-8 items-center gap-2.5 rounded-md px-2 text-[13px]",
-                  active ? "bg-zinc-200/60 font-medium text-zinc-900" : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900",
-                )}
-              >
-                <item.icon className="size-4 text-zinc-500" />
-                <span className="flex-1">{item.label}</span>
-                {item.href === "/" && needsYou > 0 ? (
-                  <span title="Waiting on your decision" className="rounded-full bg-orange-500 px-1.5 text-[10.5px] leading-[18px] font-semibold text-white tnum">
-                    {needsYou}
-                  </span>
-                ) : item.href === "/" && data?.openItems ? (
-                  <span title="Open work items" className="text-[11.5px] text-muted-foreground tnum">
-                    {data.openItems}
-                  </span>
-                ) : null}
-              </Link>
-            );
-          })}
-        </nav>
-
-        <div className="mt-5 flex items-center justify-between px-4 pb-1 text-[11.5px]">
-          <span className="font-medium text-zinc-500">Agents</span>
-          <span className={cn("tnum", running ? "text-blue-700" : "text-muted-foreground")}>{agentSummary}</span>
-        </div>
-        <div className="space-y-px px-2">
-          {agents.map((agent) => (
-            <AgentRow key={agent.agentId} agent={agent} />
-          ))}
-        </div>
-
-        <div className="mt-auto space-y-1 border-t p-2">
-          <ModeSwitcher data={data} onChange={() => mutate()} />
-          <div className="flex h-8 items-center gap-2 px-2">
-            <AgentAvatar actorId="human.controller" size="sm" />
-            <span className="min-w-0 flex-1 truncate text-[12.5px] text-zinc-700">Priya Natarajan</span>
-            <span
-              title={connected ? "Live updates connected" : "Reconnecting to live updates"}
-              className={cn("size-2 rounded-full", connected ? "bg-emerald-500" : "bg-zinc-300")}
-            />
-          </div>
-        </div>
-      </aside>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-12 items-center gap-4 border-b px-4 md:hidden">
-          <span className="grid size-6 place-items-center rounded bg-zinc-900 text-[10px] font-semibold text-white">EL</span>
-          {NAV.map((item) => (
-            <Link key={item.href} href={item.href} className="flex items-center gap-1.5 text-[13px] text-zinc-700">
+          <span className="hidden text-[13px] font-semibold tracking-tight sm:inline">ExperimentLedger</span>
+        </Link>
+        {NAV.map((item) => {
+          const active = isActive(item.href, pathname);
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={cn(
+                "flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px]",
+                active ? "bg-accent font-medium text-brand-ink" : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900",
+              )}
+            >
+              <item.icon className="size-4 text-zinc-500" />
               {item.label}
               {item.href === "/" && needsYou > 0 ? (
-                <span className="rounded-full bg-orange-500 px-1.5 text-[10.5px] font-semibold text-white tnum">{needsYou}</span>
+                <span title="Waiting on your decision" className="rounded-full bg-primary px-1.5 text-[10.5px] leading-[18px] font-semibold text-primary-foreground tnum">
+                  {needsYou}
+                </span>
               ) : null}
             </Link>
-          ))}
-          <span className="ml-auto text-[11.5px] text-muted-foreground">{agentSummary}</span>
-        </header>
-        <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
-      </div>
+          );
+        })}
+        <div className="ml-auto flex items-center gap-1">
+          <AgentsMenu agents={agents} summary={agentSummary} running={running} />
+          <div className="hidden w-[220px] md:block">
+            <ModeSwitcher data={data} onChange={() => mutate()} />
+          </div>
+          <span className="relative ml-1" title={"Priya Natarajan · " + (connected ? "live updates connected" : "reconnecting")}>
+            <AgentAvatar actorId="human.controller" size="sm" />
+            <span className={cn("absolute -right-0.5 -bottom-0.5 size-2 rounded-full ring-2 ring-white", connected ? "bg-primary" : "bg-zinc-300")} />
+          </span>
+        </div>
+      </header>
+      <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
     </div>
   );
 }

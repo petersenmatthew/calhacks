@@ -18,16 +18,16 @@ function Tag({ stage, item, agent }: { stage: BoardStage; item: Item; agent?: Ag
   const base = "inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium";
   if (agent?.status === "working") {
     return (
-      <span className={cn(base, "bg-blue-50 text-blue-700")}>
+      <span className={cn(base, "bg-accent text-brand-ink")}>
         <LoaderCircle className="size-3 animate-spin" />
         {AGENT_SHORT[agent.agentId]}
       </span>
     );
   }
-  if (agent?.status === "queued") return <span className={cn(base, "bg-amber-50 text-amber-700")}>Queued</span>;
-  if (stage === "needs_you") return <span className={cn(base, "bg-orange-50 text-orange-700")}>Your turn</span>;
-  if (stage === "vendor") return <span className={cn(base, "bg-rose-50 text-rose-700")}>Disputed</span>;
-  if (stage === "done") return <Check className="size-4 shrink-0 rounded-full bg-emerald-500 p-0.5 text-white" />;
+  if (agent?.status === "queued") return <span className={cn(base, "bg-accent text-brand-ink")}>Queued</span>;
+  if (stage === "needs_you") return <span className={cn(base, "bg-accent text-brand-ink")}>Your turn</span>;
+  if (stage === "vendor") return <span className={cn(base, "bg-destructive/10 text-destructive")}>Disputed</span>;
+  if (stage === "done") return <Check className="size-4 shrink-0 rounded-full bg-primary p-0.5 text-primary-foreground" />;
   return item.state === "NEW" ? <span className={cn(base, "bg-zinc-100 text-zinc-600")}>New</span> : null;
 }
 
@@ -39,7 +39,7 @@ function Card({ item, stage, data, agent }: { item: Item; stage: BoardStage; dat
   return (
     <Link
       href={"/investigations/" + item.id}
-      className={cn("card-soft block p-3 transition-transform hover:-translate-y-px animate-enter", working && "outline-2! outline-blue-300!", stage === "done" && "opacity-60 hover:opacity-100")}
+      className={cn("card-soft mx-auto block w-full max-w-[260px] p-3 transition-transform hover:-translate-y-px animate-enter", working && "outline-2! outline-primary!", stage === "done" && "opacity-60 hover:opacity-100")}
     >
       <div className="flex items-start gap-2.5">
         <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-zinc-50 ring-1 ring-zinc-200">
@@ -52,7 +52,7 @@ function Card({ item, stage, data, agent }: { item: Item; stage: BoardStage; dat
           <div className="mt-0.5 flex items-center justify-between gap-2">
             <span className="text-[11.5px] text-muted-foreground tnum">
               {money(item.amountCents, { cents: false })}
-              {variance ? <span className="text-rose-600"> {money(variance, { sign: true, cents: false })}</span> : null}
+              {variance ? <span className="text-destructive"> {money(variance, { sign: true, cents: false })}</span> : null}
             </span>
             <Tag stage={stage} item={item} agent={agent} />
           </div>
@@ -75,24 +75,24 @@ export function Board({ data }: { data: DashboardData }) {
   const agentFor = (id: string) => data.agents.find((a) => a.currentWorkItemId === id && a.status !== "idle");
   return (
     <div className="bg-dots h-full overflow-auto">
-      <div className="flex h-full min-w-max px-2 py-4">
+      <div className="flex min-h-full min-w-max px-4 py-6">
         {BOARD_STAGES.map(({ key, label }) => {
           const items = data.workItems.filter((i) => boardStage(i) === key);
           const shown = key === "done" ? items.slice(0, DONE_LIMIT) : items;
           return (
-            <div key={key} className="flex w-[208px] flex-1 flex-col border-r border-dashed border-zinc-200 px-2.5 last:border-r-0">
+            <div key={key} className="flex w-[208px] flex-1 flex-col border-r border-dashed border-zinc-200 px-5 last:border-r-0">
               <div className="mb-3 flex h-6 items-center justify-between">
                 <span
                   className={cn(
                     "rounded-md bg-white px-2 py-0.5 font-mono text-[10.5px] tracking-wider uppercase ring-1",
-                    key === "needs_you" && items.length ? "text-orange-600 ring-orange-200" : "text-zinc-500 ring-zinc-200",
+                    key === "needs_you" && items.length ? "text-brand-ink ring-primary/50" : "text-zinc-500 ring-zinc-200",
                   )}
                 >
                   {label}
                 </span>
                 <span className="font-mono text-[11px] text-zinc-400 tnum">{items.length}</span>
               </div>
-              <div className="space-y-2.5">
+              <div className="flex flex-1 flex-col justify-center gap-5 py-6">
                 {shown.map((item) => (
                   <Card key={item.id} item={item} stage={key} data={data} agent={agentFor(item.id)} />
                 ))}
