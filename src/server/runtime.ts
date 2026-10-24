@@ -2,22 +2,45 @@ import path from "node:path";
 import { getDefaultModel } from "@openai/agents";
 import { createAppContext, type AppContext, type CommsConfig } from "./context";
 import { ALL_TABLES, dropGuards, installGuards } from "./db/client";
+import { PEOPLE } from "./comms/directory";
 import { resetInboxCursor } from "./comms/inbox";
 import { Orchestrator } from "./orchestrator";
 import { authorize, guard } from "./security/authorize";
 import { isSeeded, seedEnvironment, upgradeEnvironment } from "./sim/seed";
 
-function parseUserIds(raw: string | undefined): Record<string, string> {
-  if (!raw) return {};
-  // A single member id means "send every mention and DM to this person" (handy for a one-person demo workspace).
-  if (/^[UW][A-Z0-9]+$/.test(raw.trim())) return { "*": raw.trim() };
-  try {
-    const parsed = JSON.parse(raw) as Record<string, string>;
-    return typeof parsed === "object" && parsed ? parsed : {};
-  } catch {
-    return {};
+/**
+ * Who is who in Slack. Accepts a member id or username per handle, as
+ * "priya=belinda, dana=matthewpetersen", JSON {"priya":"U0123"}, or a single
+ * id/username for everyone. Role keys expand: controller, cfo, leads, *.
+ */
+export function parseUserIds(raw: string | undefined): Record<string, string> {
+  const text = (raw ?? "").trim();
+  if (!text) return {};
+  let pairs: [string, string][] = [];
+  if (text.startsWith("{")) {
+    try {
+      pairs = Object.entries(JSON.parse(text) as Record<string, string>);
+    } catch {
+      return {};
+    }
+  } else if (!/[=:]/.test(text)) {
+    pairs = [["*", text]];
+  } else {
+    pairs = text
+      .split(/[,;\n]/)
+      .map((part) => part.split(/[=:]/).map((x) => x.trim().replace(/^["'@]+|["']+$/g, "")) as [string, string])
+      .filter(([k, v]) => k && v);
   }
+  const out: Record<string, string> = {};
+  for (const [key, value] of pairs) for (const handle of ROLE_KEYS[key.toLowerCase()] ?? [key.toLowerCase()]) out[handle] = value.replace(/^@/, "");
+  return out;
 }
+
+const ROLE_KEYS: Record<string, string[]> = {
+  controller: ["priya"],
+  cfo: ["dana"],
+  leads: PEOPLE.filter((p) => p.projectId).map((p) => p.handle),
+};
 
 /** Gmail uses the same app password for IMAP, so a Gmail SMTP_URL is enough to read replies too. */
 function imapFromSmtp(smtpUrl: string | undefined) {
@@ -44,7 +67,7 @@ function commsFromEnv(): CommsConfig {
     inboxPollMs: Number(env.INBOX_POLL_MS ?? 30_000),
     slackBotToken: env.SLACK_BOT_TOKEN || null,
     slackWebhookUrl: env.SLACK_WEBHOOK_URL || null,
-    slackUserIds: parseUserIds(env.SLACK_USER_IDS),
+    slackUserIds: { ...parseUserIds(env.SLACK_USER_IDS), ...parseUserIds(env.SLACK_USERS) },
     slackDmFallbackChannel: env.SLACK_DM_FALLBACK_CHANNEL || "finance-ops",
   };
 }

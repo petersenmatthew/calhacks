@@ -73,9 +73,49 @@ export async function sendEmail(ctx: AppContext, m: EmailMessage): Promise<Deliv
   return { status: "simulated" };
 }
 
+const resolvedUsers = new Map<string, string>();
+let usersLoaded = false;
+
+const isMemberId = (v: string) => /^[UW][A-Z0-9]{6,}$/.test(v);
+
+/** Slack member id for a handle, once resolveSlackUsers has run (ids configured directly work without it). */
 export function slackUserId(ctx: AppContext, handle: string) {
   const ids = ctx.config.comms.slackUserIds;
-  return ids[handle] ?? ids["*"] ?? null;
+  const raw = ids[handle] ?? ids["*"];
+  if (!raw) return null;
+  if (isMemberId(raw)) return raw;
+  return resolvedUsers.get(raw.toLowerCase()) ?? null;
+}
+
+/**
+ * Turn usernames in SLACK_USERS (e.g. "belinda") into member ids with
+ * users.list (needs the users:read scope). Matches the username, display name,
+ * or full name, case-insensitively. Cached for the life of the process.
+ */
+export async function resolveSlackUsers(ctx: AppContext, force = false) {
+  const names = [...new Set(Object.values(ctx.config.comms.slackUserIds))].filter((v) => !isMemberId(v)).map((v) => v.toLowerCase());
+  if (!names.length || !ctx.config.comms.slackBotToken || (usersLoaded && !force && names.every((n) => resolvedUsers.has(n)))) return resolvedUsers;
+  let cursor: string | undefined;
+  do {
+    const { json } = await slackApi(ctx, "users.list", { limit: 500, cursor });
+    for (const u of (json.members as { id: string; name?: string; real_name?: string; deleted?: boolean; is_bot?: boolean; profile?: { display_name?: string; real_name?: string } }[]) ?? []) {
+      if (u.deleted || u.is_bot) continue;
+      for (const n of [u.name, u.real_name, u.profile?.display_name, u.profile?.real_name]) {
+        const key = (n ?? "").trim().toLowerCase();
+        if (key && !resolvedUsers.has(key)) resolvedUsers.set(key, u.id);
+      }
+    }
+    cursor = (json.response_metadata as { next_cursor?: string } | undefined)?.next_cursor || undefined;
+  } while (cursor);
+  usersLoaded = true;
+  return resolvedUsers;
+}
+
+/** Each configured handle with the Slack user it resolved to, for the diagnostics page. */
+export function slackUserMap(ctx: AppContext) {
+  const out: Record<string, string> = {};
+  for (const [handle, raw] of Object.entries(ctx.config.comms.slackUserIds)) out[handle] = raw + " -> " + (slackUserId(ctx, handle) ?? "not found");
+  return out;
 }
 
 /** Turn <@handle> into a real Slack mention when the user id is known, else the person's name. */
@@ -126,7 +166,10 @@ export async function resolveSlackChannel(ctx: AppContext, name: string, create 
   const clean = name.replace(/^#/, "");
   if (/^[CG][A-Z0-9]{6,}$/.test(clean)) return { id: clean, created: false };
   const cached = channelIds.get(clean);
-  if (cached) return { id: cached, created: false };
+  if (cached) {
+    await inviteTeam(ctx, cached);
+    return { id: cached, created: false };
+  }
   let cursor: string | undefined;
   do {
     const { json } = await slackApi(ctx, "conversations.list", { types: "public_channel,private_channel", exclude_archived: true, limit: 1000, cursor });
@@ -155,7 +198,8 @@ const invited = new Set<string>();
 
 /** Add the people in SLACK_USER_IDS to a channel the bot uses (once per channel per process), so it shows in their sidebar. */
 async function inviteTeam(ctx: AppContext, channel: string) {
-  const people = [...new Set(Object.values(ctx.config.comms.slackUserIds))];
+  await resolveSlackUsers(ctx);
+  const people = [...new Set(Object.keys(ctx.config.comms.slackUserIds).map((h) => slackUserId(ctx, h)).filter((x): x is string => Boolean(x)))];
   if (!people.length || invited.has(channel)) return;
   invited.add(channel);
   // already_in_channel and similar are fine; the post itself does not depend on this.
@@ -164,6 +208,7 @@ async function inviteTeam(ctx: AppContext, channel: string) {
 
 export async function sendSlack(ctx: AppContext, destination: string, text: string): Promise<Delivery> {
   const c = ctx.config.comms;
+  if (c.slackBotToken) await resolveSlackUsers(ctx);
   const rendered = renderMentions(ctx, text);
   if (c.slackBotToken) {
     let channel: string;
@@ -207,4 +252,12 @@ export async function verifyEmail(ctx: AppContext): Promise<{ mode: string; ok: 
   }
   if (c.resendApiKey) return { mode: "resend", ok: true, detail: "Resend key set (checked on first send)" };
   return { mode: "none", ok: false, detail: "Set SMTP_URL or RESEND_API_KEY in .env.local" };
+}
+
+/** Forget cached channel and user ids (tests, or after changing Slack settings). */
+export function resetSlackCache() {
+  channelIds.clear();
+  invited.clear();
+  resolvedUsers.clear();
+  usersLoaded = false;
 }

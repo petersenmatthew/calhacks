@@ -3,7 +3,7 @@ import { CHANNELS } from "@/server/comms/directory";
 import { dispatchOutbox } from "@/server/comms/dispatch";
 import { pollVendorInbox, verifyInbox } from "@/server/comms/inbox";
 import { postSlack, queueEmail } from "@/server/comms/outbox";
-import { resolveSlackChannel, slackApi, verifyEmail } from "@/server/comms/transports";
+import { resolveSlackChannel, resolveSlackUsers, slackApi, slackUserMap, verifyEmail } from "@/server/comms/transports";
 import { tx } from "@/server/context";
 import { outbox } from "@/server/db/schema";
 import { getContext } from "@/server/runtime";
@@ -13,14 +13,20 @@ export const dynamic = "force-dynamic";
 async function diagnose() {
   const ctx = getContext();
   const c = ctx.config.comms;
-  const slack: Record<string, unknown> = { configured: Boolean(c.slackBotToken), userIds: c.slackUserIds };
+  const slack: Record<string, unknown> = { configured: Boolean(c.slackBotToken) };
   if (c.slackBotToken) {
     try {
       const { json, scopes } = await slackApi(ctx, "auth.test");
       slack.workspace = json.team;
       slack.bot = json.user;
       slack.scopes = scopes;
-      const needed = ["chat:write", "chat:write.public", "channels:read", "channels:manage", "channels:join"];
+      const needed = ["chat:write", "chat:write.public", "channels:read", "channels:manage", "channels:join", "users:read"];
+      try {
+        await resolveSlackUsers(ctx, true);
+      } catch (e) {
+        slack.usersError = e instanceof Error ? e.message : String(e);
+      }
+      slack.users = slackUserMap(ctx);
       slack.missingScopes = needed.filter((s) => !scopes.includes(s));
       slack.channels = [];
       for (const ch of CHANNELS) {
@@ -57,7 +63,7 @@ export async function POST() {
   const ctx = getContext();
   tx(ctx, () => {
     ctx.db.update(outbox).set({ status: "pending", attempts: 0, lastError: null }).where(and(eq(outbox.status, "failed"), inArray(outbox.channel, ["slack", "email"]))).run();
-    postSlack(ctx, { channel: "finance-ops", event: "comms.test", text: "Ledger is connected. Pings for Atlas Research finance will land in these channels." });
+    postSlack(ctx, { channel: "finance-ops", event: "comms.test", text: "Ledger is connected. Pings for Atlas Research finance will land in these channels. Controller: <@priya>. CFO: <@dana>. Team leads: <@maya> <@ravi> <@elena> <@diego>." });
     if (ctx.config.comms.vendorEmail) {
       queueEmail(ctx, {
         to: ctx.config.comms.vendorEmail,

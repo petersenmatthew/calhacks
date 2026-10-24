@@ -94,3 +94,40 @@ describe("delivery", () => {
     expect(sentBody.headers["X-Atlas-Outbox"]).toBe("1");
   });
 });
+
+describe("Slack users", () => {
+  it("reads who is who from usernames, role keys, JSON, or one id", async () => {
+    const { parseUserIds } = await import("@/server/runtime");
+    expect(parseUserIds("controller=belinda, cfo=matthewpetersen, leads=@matthewpetersen")).toEqual({
+      priya: "belinda",
+      dana: "matthewpetersen",
+      maya: "matthewpetersen",
+      ravi: "matthewpetersen",
+      elena: "matthewpetersen",
+      diego: "matthewpetersen",
+    });
+    expect(parseUserIds('{"priya":"U01PRIYA"}')).toEqual({ priya: "U01PRIYA" });
+    expect(parseUserIds("U0CBY1LDMNV")).toEqual({ "*": "U0CBY1LDMNV" });
+    expect(parseUserIds('"cfo":U0CBY1LDMNV')).toEqual({ dana: "U0CBY1LDMNV" });
+  });
+
+  it("looks usernames up in Slack and mentions the right person", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("users.list")) {
+        return new Response(JSON.stringify({ ok: true, members: [{ id: "UBELINDA1", name: "unicornbelinda", real_name: "belinda" }, { id: "UMATTHEW1", name: "matthewpetersen" }] }), { status: 200 });
+      }
+      if (url.includes("conversations.list")) return new Response(JSON.stringify({ ok: true, channels: [{ id: "C0FINOPS", name: "finance-ops", is_member: true }] }), { status: 200 });
+      return new Response(JSON.stringify({ ok: true, ts: "1.2" }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { setup } = await import("./helpers");
+    const { sendSlack, resetSlackCache } = await import("@/server/comms/transports");
+    resetSlackCache();
+    const { ctx } = setup(":memory:", { comms: { slackBotToken: "xoxb-test", slackUserIds: { priya: "belinda", dana: "matthewpetersen" } } as never });
+    await sendSlack(ctx, "#finance-ops", "<@priya> approve this; <@dana> FYI");
+    const post = fetchMock.mock.calls.find(([u]) => String(u).includes("chat.postMessage"))!;
+    expect(String((post as unknown as [string, RequestInit])[1].body)).toContain("<@UBELINDA1> approve this; <@UMATTHEW1> FYI");
+    const invite = fetchMock.mock.calls.find(([u]) => String(u).includes("conversations.invite"))!;
+    expect(String((invite as unknown as [string, RequestInit])[1].body)).toContain("UBELINDA1,UMATTHEW1");
+  });
+});
