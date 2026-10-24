@@ -18,6 +18,9 @@ function envMode(): "llm" | "deterministic" | undefined {
   return v === "llm" || v === "deterministic" ? v : undefined;
 }
 
+/** The app seeds one demo case; SEED=all loads every case, as the eval does. */
+const appSeed = () => (process.env.SEED === "all" ? "all" : "demo");
+
 /** Process-wide singleton: database, event bus, and durable worker. */
 export function getRuntime(): Runtime {
   if (!globalRef.__experimentLedger) {
@@ -32,7 +35,7 @@ export function getRuntime(): Runtime {
         defaultRunMode: process.env.RUN_MODE === "all" ? "all" : "one",
       },
     });
-    if (!isSeeded(ctx)) seedEnvironment(ctx);
+    if (!isSeeded(ctx)) seedEnvironment(ctx, appSeed());
     else ensureActors(ctx);
     const orchestrator = new Orchestrator(ctx);
     globalRef.__experimentLedger = { ctx, orchestrator };
@@ -59,7 +62,7 @@ export async function resetEnvironment(actorId: string) {
     ctx.sqlite.prepare("DELETE FROM sqlite_sequence").run();
   })();
   installGuards(ctx.sqlite);
-  seedEnvironment(ctx);
+  seedEnvironment(ctx, appSeed());
   orchestrator.resume();
   ctx.bus.emit("change", "reset");
 }

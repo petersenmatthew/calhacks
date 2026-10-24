@@ -33,8 +33,8 @@ async function fetchMany([, ...ids]: string[]) {
 export function SystemCanvas({ data, initialTask = null, onChanged }: { data: DashboardData; initialTask?: string | null; onChanged: () => void }) {
   const items = useMemo(() => data.workItems.filter((i) => i.period === data.period), [data]);
   const [picked, setPicked] = useState<string | null>(initialTask);
-  // In one-at-a-time mode the canvas opens on the case the team is on and stays
-  // there. When the team moves on, the person chooses when to follow.
+  // The canvas opens the case the team is on, including one that arrives while
+  // the page is open, and stays on it. The person chooses when to look elsewhere.
   const [autoOpen, setAutoOpen] = useState(initialTask === null);
   const live = data.activeWorkItemId && items.some((i) => i.id === data.activeWorkItemId) ? data.activeWorkItemId : null;
   if (autoOpen && live) {

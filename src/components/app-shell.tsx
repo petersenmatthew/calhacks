@@ -11,7 +11,6 @@ import { cn } from "@/lib/utils";
 import type { DashboardData } from "@/server/queries";
 import { dashboardKey, Metrics } from "./dashboard/dashboard";
 import { ResetButton } from "./dashboard/reset-button";
-import { RunModeSwitch } from "./dashboard/run-mode-switch";
 import { SimulateDialog } from "./dashboard/simulate-dialog";
 
 type View = "board" | "canvas";
@@ -82,7 +81,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           ) : null}
           <div className="ml-auto flex items-center gap-4">
             {data ? <Metrics data={data} /> : null}
-            {data ? <RunModeSwitch data={data} onDone={() => mutate()} /> : null}
             <div className="flex items-center gap-1.5">
               <ResetButton onDone={() => mutate()} />
               <SimulateDialog onDone={() => mutate()} />

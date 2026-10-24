@@ -16,9 +16,6 @@ import { ACTOR, ACTOR_SEED } from "../security/actors";
 import { ingestCase } from "./scenarios";
 import { SEED_CASES } from "./cases";
 
-/** Seeded first so the demo opens on them: the overbilling dispute, then the policy correction. */
-const DEMO_FIRST = ["O-01", "S-03"];
-
 export const PROJECTS = [
   { id: "PRJ-FLM", name: "Frontier Language Models", lead: "Dr. Maya Chen", costCenter: "CC-410", monthlyBudgetCents: 52_000_000 },
   { id: "PRJ-MMP", name: "Multimodal Perception", lead: "Ravi Shah", costCenter: "CC-420", monthlyBudgetCents: 24_000_000 },
@@ -239,16 +236,15 @@ export function ensureActors(ctx: AppContext) {
 }
 
 /**
- * Load the simulated environment. Every seeded case (see cases.ts) goes through
- * the real ingestion pipeline: clean lines auto-match, and the rest open work
- * items for the agents. The demo cases go first, so in one-at-a-time mode the
- * team opens on the overbilling dispute (WI-1001), then the shared reservation
- * the controller corrects into a new policy (WI-1002).
+ * Load the simulated environment through the real ingestion pipeline. "demo"
+ * loads only the clean lines, which auto-match and open no tasks, so the app
+ * starts quiet and the presenter triggers the one case to watch live. "all"
+ * loads every case in cases.ts for the eval and tests.
  */
-export function seedEnvironment(ctx: AppContext) {
+export function seedEnvironment(ctx: AppContext, cases: "demo" | "all" = "all") {
   tx(ctx, () => seedReferenceData(ctx));
-  const first = DEMO_FIRST.map((id) => SEED_CASES.find((c) => c.id === id)!);
-  for (const c of [...first, ...SEED_CASES.filter((c) => !DEMO_FIRST.includes(c.id))]) ingestCase(ctx, c.data);
+  const seeded = cases === "all" ? SEED_CASES : SEED_CASES.filter((c) => c.category === "clean");
+  for (const c of seeded) ingestCase(ctx, c.data);
   recordActivity(ctx, {
     actorId: ACTOR.simulator,
     type: "SYSTEM",

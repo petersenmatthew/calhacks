@@ -37,21 +37,20 @@ describe("seeded month", () => {
 });
 
 describe("Scenario 1: suspected GPU overbilling", () => {
-  it("in one-at-a-time mode, opens on the overbilling case and starts the next case only when it leaves the team", async () => {
+  it("in one-at-a-time mode, holds every later case until the current one leaves the team", async () => {
     const { ctx, orchestrator } = setup(":memory:", { defaultRunMode: "one" });
     await orchestrator.drain();
-    const opening = workItem(ctx, "WI-1001");
-    expect(opening.invoiceLineId).toBe("HEL-2026-10-133-L2");
-    expect(opening.state).toBe("NEEDS_APPROVAL");
-    const others = ctx.db.select().from(workItems).all().filter((i) => i.id !== "WI-1001");
-    expect(others.every((i) => i.state === "NEW")).toBe(true);
+    const items = () => ctx.db.select().from(workItems).all().sort((a, b) => a.id.localeCompare(b.id));
+    const current = items().find((i) => !["RESOLVED", "DISPUTED"].includes(i.state))!;
+    expect(current.state).toBe("NEEDS_APPROVAL");
+    expect(items().filter((i) => i.id > current.id).every((i) => i.state === "NEW")).toBe(true);
 
-    const [approval] = pendingApprovals(ctx, "WI-1001");
+    const [approval] = pendingApprovals(ctx, current.id);
     decideApproval(ctx, { approvalId: approval.id, actorId: ACTOR.controller, decision: "APPROVED" });
     await orchestrator.drain();
-    expect(workItem(ctx, "WI-1001").state).toBe("DISPUTED");
-    expect(workItem(ctx, "WI-1002").state).not.toBe("NEW");
-    expect(workItem(ctx, "WI-1003").state).toBe("NEW");
+    const later = items().filter((i) => i.id > current.id);
+    expect(later[0].state).not.toBe("NEW");
+    expect(later.at(-1)!.state).toBe("NEW");
   });
 
   it("disputes $1,200, waits for approval, and keeps the liability until the vendor credits", async () => {
