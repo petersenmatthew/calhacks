@@ -7,7 +7,9 @@ import { type Frame, type OrbitNodeId } from "@/lib/frames";
 import { cn } from "@/lib/utils";
 import type { DashboardData, WorkspaceData } from "@/server/queries";
 import { AgentAvatar } from "../status";
+import { PixelAgent, spriteTint } from "../pixel-agent";
 import { buildTime, DH, DW, FrameView } from "./frame-view";
+import { HandoffRunner, handoffsFrom } from "./handoff-runner";
 
 /* ------------------------------------------------------------------ geometry */
 
@@ -520,6 +522,7 @@ export function Orbit({
   const seatStyle = useSeatStyle();
   const live = Object.fromEntries(NODES.map((n) => [n.id, running(n.actorId)])) as Partial<Record<OrbitNodeId, boolean>>;
   const edges = flows(w);
+  const handoffs = handoffsFrom(w ? w.activity : overview.activity);
   const dimNode = (id: OrbitNodeId) => level !== "all" && focusNode !== id;
   const lit = (id: OrbitNodeId) => level !== "frame" && hover === id;
   const hoverOn = (id: OrbitNodeId) => (on: boolean) => setHover((h) => (on ? id : h === id ? null : h));
@@ -727,18 +730,19 @@ export function Orbit({
                   >
                     <span
                       className={cn(
-                        "absolute top-1/2 left-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-zinc-400 bg-[#fafafa] transition-colors",
-                        live[g.node.id] && "animate-pulse border-brand-ink bg-primary",
-                        lit(g.node.id) && "border-zinc-700",
+                        "absolute top-1/2 left-1/2 grid size-14 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-2xl border border-zinc-200 transition-[transform,border-color] duration-200 group-hover:-translate-y-[calc(50%+2px)] group-hover:border-zinc-300",
+                        lit(g.node.id) && "border-zinc-400",
+                        live[g.node.id] && "border-primary ring-4 ring-primary/25",
                       )}
-                    />
+                      style={{ background: spriteTint(g.node.actorId) }}
+                    >
+                      <PixelAgent actorId={g.node.actorId} size={40} working={Boolean(live[g.node.id])} />
+                    </span>
                     <span
                       className={cn(
                         "absolute flex flex-col gap-0.5 whitespace-nowrap",
-                        g.node.layout === "right" && "top-1/2 left-1/2 ml-3 -translate-y-1/2 items-start",
-                        g.node.layout === "left" && "top-1/2 right-1/2 mr-3 -translate-y-1/2 items-end",
-                        g.node.layout === "up" && "bottom-1/2 left-1/2 mb-3 -translate-x-1/2 items-center",
-                        g.node.layout === "down" && "top-1/2 left-1/2 mt-3 -translate-x-1/2 items-center",
+                        (g.node.layout === "right" || g.node.layout === "up" || g.node.layout === "down") && "top-1/2 left-1/2 ml-10 -translate-y-1/2 items-start",
+                        g.node.layout === "left" && "top-1/2 right-1/2 mr-10 -translate-y-1/2 items-end",
                       )}
                     >
                       <span className={cn("text-[15px] text-zinc-500 transition-colors group-hover:text-zinc-900", (lit(g.node.id) || live[g.node.id]) && "text-zinc-900")}>
@@ -759,10 +763,12 @@ export function Orbit({
 
           <div
             className="absolute z-20 transition-opacity duration-500"
-            style={{ left: CX - 90, top: CY - 36, width: 180, height: 72, opacity: level === "all" ? 1 : 0.15 }}
+            style={{ left: CX - 90, top: CY - 60, width: 180, height: 140, opacity: level === "all" ? 1 : 0.15 }}
           >
-            <YouCard here={Boolean(here)} label={w ? "Your call" : waiting + " need you"} onClick={onYou} />
+            <YouCard here={Boolean(here)} label={w ? (here ? "your call" : "all clear") : waiting ? waiting + (waiting === 1 ? " needs you" : " need you") : "all clear"} onClick={onYou} />
           </div>
+
+          <HandoffRunner handoffs={handoffs} seats={NODE} center={{ x: CX, y: CY }} radius={R} showMarks={Boolean(w)} hidden={level === "frame"} />
         </div>
       ) : null}
       </div>
@@ -784,6 +790,7 @@ export function Orbit({
   );
 }
 
+/** The centre seat: you, drawn like the employees. A quest marker pops up when something waits on you. */
 function YouCard({ here, label, onClick }: { here: boolean; label: string; onClick?: () => void }) {
   return (
     <button
@@ -793,13 +800,24 @@ function YouCard({ here, label, onClick }: { here: boolean; label: string; onCli
         e.stopPropagation();
         onClick?.();
       }}
-      className={cn(
-        "relative flex size-full flex-col items-center justify-center rounded-xl bg-[#fbfbf9] shadow-sm ring-1 ring-zinc-300 transition-colors",
-        here && "ring-2 ring-primary enabled:hover:bg-white",
-      )}
+      className="group relative flex size-full flex-col items-center justify-start pt-3 enabled:cursor-pointer"
     >
-      <span className="font-serif text-[22px] leading-none tracking-tight text-zinc-800">You</span>
-      {here ? <span className="mt-1 text-[11px] text-zinc-500 tnum">{label}</span> : null}
+      <span
+        className={cn(
+          "relative grid size-20 place-items-center rounded-[22px] border border-zinc-200 transition-[transform,border-color] duration-200 group-enabled:group-hover:-translate-y-0.5",
+          here && "border-primary ring-4 ring-primary/25",
+        )}
+        style={{ background: spriteTint("you") }}
+      >
+        <PixelAgent actorId="you" size={58} working={here} />
+        {here ? (
+          <span className="px-bob-fast absolute -top-3 -right-2 grid h-7 min-w-7 place-items-center rounded-md border-2 border-zinc-900 bg-primary px-1 font-mono text-[15px] leading-none font-bold text-zinc-900 shadow-[2px_2px_0_rgb(24_24_27)]">
+            !
+          </span>
+        ) : null}
+      </span>
+      <span className="mt-2 text-[15px] leading-none text-zinc-900">You</span>
+      <span className={cn("mt-1 font-mono text-[10px] tnum", here ? "text-zinc-600" : "text-zinc-400")}>{label}</span>
     </button>
   );
 }
