@@ -157,7 +157,17 @@ function projectName(ctx: AppContext, id: string | null | undefined) {
 }
 
 function requireEvidence(ctx: AppContext, item: WorkItemRow, ids: string[], min = 1) {
-  const unique = [...new Set(ids)];
+  // A finding on this work item stands for the evidence it cites, so citing
+  // "F-5001" is accepted and expanded to that finding's evidence ids.
+  const cited = [...new Set(ids)];
+  const findingRows = cited.length
+    ? ctx.db
+        .select({ id: findings.id, evidenceIds: findings.evidenceIds })
+        .from(findings)
+        .where(and(eq(findings.workItemId, item.id), inArray(findings.id, cited)))
+        .all()
+    : [];
+  const unique = [...new Set(cited.flatMap((id) => findingRows.find((f) => f.id === id)?.evidenceIds ?? [id]))];
   if (unique.length < min) fail("Cite at least " + min + " evidence id(s) returned by your tools.", "EVIDENCE_REQUIRED");
   if (!unique.length) return unique;
   const found = ctx.db
