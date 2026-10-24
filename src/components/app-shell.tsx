@@ -59,6 +59,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         ? "board"
         : "canvas";
 
+  // The landing page stands on its own: no app header, no intro dialog.
+  if (pathname === "/welcome") return <>{children}</>;
+
   return (
     <ShellContext.Provider value={{ period, setPeriod, lastView }}>
       <div className="flex h-dvh flex-col overflow-hidden">

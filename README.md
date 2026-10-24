@@ -53,6 +53,8 @@ railway up --detach                            # redeploy with the variables
 
 Or connect the GitHub repo in the Railway dashboard: it picks up `railway.json`; add the volume at `/data` and the same variables.
 
+Share `https://<your domain>/welcome` with judges: a landing page where the pixel team acts out a dispute, with one button that starts the sample case.
+
 `PUBLIC_DEMO=1` makes the app safe to share:
 
 - First-time visitors see a one-screen intro with **Start the sample case** (reopen it with the ? in the top bar).
