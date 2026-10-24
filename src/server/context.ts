@@ -15,7 +15,35 @@ export interface AppConfig {
   schedulerIntervalMs: number;
   /** Optional external billing feed polled by the scheduler. */
   feedUrl: string | null;
+  /** Email and Slack delivery. Empty values mean messages stay in the outbox as "simulated". */
+  comms: CommsConfig;
 }
+
+export interface CommsConfig {
+  appUrl: string;
+  vendorEmail: string | null;
+  emailFrom: string | null;
+  replyTo: string | null;
+  resendApiKey: string | null;
+  smtpUrl: string | null;
+  slackBotToken: string | null;
+  slackWebhookUrl: string | null;
+  slackUserIds: Record<string, string>;
+  slackDmFallbackChannel: string;
+}
+
+export const DEFAULT_COMMS: CommsConfig = {
+  appUrl: "http://localhost:3000",
+  vendorEmail: null,
+  emailFrom: null,
+  replyTo: null,
+  resendApiKey: null,
+  smtpUrl: null,
+  slackBotToken: null,
+  slackWebhookUrl: null,
+  slackUserIds: {},
+  slackDmFallbackChannel: "finance-ops",
+};
 
 export interface AppContext {
   sqlite: Database.Database;
@@ -46,6 +74,7 @@ export function createAppContext(options: { file: string; config?: Partial<AppCo
       defaultMode: options.config?.defaultMode ?? (llmAvailable ? "llm" : "deterministic"),
       schedulerIntervalMs: options.config?.schedulerIntervalMs ?? 0,
       feedUrl: options.config?.feedUrl ?? null,
+      comms: { ...DEFAULT_COMMS, ...(options.config?.comms ?? {}) },
     },
   };
 }

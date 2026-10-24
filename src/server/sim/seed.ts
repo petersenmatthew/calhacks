@@ -1,3 +1,4 @@
+import { and, eq, isNull } from "drizzle-orm";
 import type { AppContext } from "../context";
 import { tx } from "../context";
 import { appendAudit } from "../audit";
@@ -27,9 +28,9 @@ export const PROJECTS = [
 ];
 
 const PROVIDERS = [
-  { id: "PRV-HELIOS", name: "Helios Cloud", shortName: "Helios" },
-  { id: "PRV-STRATUS", name: "Stratus GPU", shortName: "Stratus" },
-  { id: "PRV-MERIDIAN", name: "Meridian Compute", shortName: "Meridian" },
+  { id: "PRV-HELIOS", name: "Helios Cloud", shortName: "Helios", billingEmail: "billing@helios-cloud.example" },
+  { id: "PRV-STRATUS", name: "Stratus GPU", shortName: "Stratus", billingEmail: "ar@stratusgpu.example" },
+  { id: "PRV-MERIDIAN", name: "Meridian Compute", shortName: "Meridian", billingEmail: "billing@meridian-compute.example" },
 ];
 
 const HELIOS_CLAUSES: ContractClause[] = [
@@ -271,6 +272,9 @@ export function upgradeEnvironment(ctx: AppContext) {
     if (history.n === 0) seedApHistory(ctx);
     const feed = ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM feed_events").get() as { n: number };
     if (feed.n === 0) seedFeedSchedule(ctx);
+    for (const p of PROVIDERS) {
+      ctx.db.update(providers).set({ billingEmail: p.billingEmail }).where(and(eq(providers.id, p.id), isNull(providers.billingEmail))).run();
+    }
   });
   scheduleOnboarding(ctx);
 }

@@ -8,7 +8,6 @@ import { fetcher } from "@/lib/api";
 import { clockTime, dateOnly, dateTimeUtc, money } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { AuditData } from "@/server/queries";
-import { AutonomyView } from "../autonomy/autonomy-view";
 import { JsonView } from "../json-view";
 import { useLiveRefresh } from "../live-events";
 import { AgentAvatar } from "../status";
@@ -298,7 +297,6 @@ export function AuditView() {
             <TabsTrigger value="events" className="text-[12px]">Events</TabsTrigger>
             <TabsTrigger value="policies" className="text-[12px]">Policies</TabsTrigger>
             <TabsTrigger value="ledger" className="text-[12px]">Ledger</TabsTrigger>
-            <TabsTrigger value="autonomy" className="text-[12px]">Evaluation & autonomy</TabsTrigger>
           </TabsList>
           {data ? (
             <span className={cn("ml-auto flex items-center gap-1.5 text-[12px]", data.chain.ok ? "text-brand-ink" : "text-destructive")}>
@@ -321,9 +319,6 @@ export function AuditView() {
             </TabsContent>
             <TabsContent value="ledger">
               <Ledger data={data} />
-            </TabsContent>
-            <TabsContent value="autonomy">
-              <AutonomyView />
             </TabsContent>
           </>
         )}

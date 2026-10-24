@@ -11,6 +11,30 @@ import { enqueueJob } from "./jobs";
 import { ACCOUNTS, allocationJournal, postJournalEntry } from "./ledger";
 import { resolveReconciliation, setReconciliationOutcome, setWorkItemOutcome } from "./reconciliation";
 import { assignAgent, getWorkItem, transitionWorkItem, type WorkItemRow } from "./work-items";
+import { contractForProvider } from "./checks";
+import { buildDisputeEvidence, renderEvidenceCsv, renderEvidenceText } from "./dispute-evidence";
+import { CONTROLLER, leadFor } from "../comms/directory";
+import { mention, postSlack, queueEmail, taskLink, vendorEmail } from "../comms/outbox";
+
+function escapeHtml(s: string) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** The plain-text letter in a readable HTML wrapper; monospace keeps the evidence columns aligned. */
+export function renderLetterHtml(text: string) {
+  const [letter, ...rest] = text.split("\n\nEVIDENCE\n");
+  const evidence = rest.join("\n\nEVIDENCE\n");
+  return (
+    '<div style="font-family:-apple-system,Segoe UI,sans-serif;font-size:14px;line-height:1.5;color:#18181b">' +
+    escapeHtml(letter).replace(/\n/g, "<br>") +
+    (evidence
+      ? '<h3 style="margin:24px 0 8px;font-size:13px;letter-spacing:.04em;color:#52525b">EVIDENCE</h3><pre style="font-family:ui-monospace,Menlo,monospace;font-size:12px;background:#f4f4f5;padding:12px;border-radius:8px;white-space:pre-wrap">' +
+        escapeHtml(evidence) +
+        "</pre>"
+      : "") +
+    "</div>"
+  );
+}
 
 type ProposalRow = typeof proposals.$inferSelect;
 type ApprovalRow = typeof approvalRequests.$inferSelect;
@@ -135,7 +159,7 @@ export function approvedDispute(ctx: AppContext, item: WorkItemRow) {
  * Submit an approved dispute through the ledger gateway. Called by the Vendor Liaison's
  * send tool; the gateway checks the controller approval itself.
  */
-export function submitApprovedDispute(ctx: AppContext, item: WorkItemRow, letter: string) {
+export function submitApprovedDispute(ctx: AppContext, item: WorkItemRow, letter: { subject: string; message: string }) {
   if (item.state !== "APPROVED") throw new ControlError("Work item is " + item.state + "; only approved disputes can be sent.", "STATE_MACHINE");
   const found = approvedDispute(ctx, item);
   if (!found || found.proposal.status !== "APPROVED") throw new ControlError("No controller-approved dispute to send.", "APPROVAL_REQUIRED");
@@ -148,6 +172,13 @@ export function submitApprovedDispute(ctx: AppContext, item: WorkItemRow, letter
   const provider = ctx.db.select().from(providers).where(eq(providers.id, dispute.providerId)).get();
   const disputeId = nextId(ctx, "DSP", 6001);
   const vendorReference = (provider?.shortName ?? "VND").toUpperCase() + "-CASE-" + disputeId.split("-")[1];
+  // The application attaches the evidence pack and clause text; the agent only writes the cover letter.
+  const contract = contractForProvider(ctx, dispute.providerId);
+  const evidence = item.checks.kind === "instance" ? buildDisputeEvidence(ctx, item) : null;
+  const subject = "[" + vendorReference + "] " + (letter.subject || "Billing dispute " + formatCents(dispute.disputedCents));
+  const body = letter.message.trim() + (evidence ? "\n\n" + renderEvidenceText(evidence, contract.name + " (" + contract.id + ")") : "") +
+    "\n\nPlease quote " + vendorReference + " in your reply.";
+  const to = vendorEmail(ctx, dispute.providerId);
   ctx.db
     .insert(vendorDisputes)
     .values({
@@ -162,8 +193,33 @@ export function submitApprovedDispute(ctx: AppContext, item: WorkItemRow, letter
       reason: dispute.reason,
       vendorReference,
       submittedAt: nowIso(),
+      letterSubject: subject,
+      letterBody: body,
+      evidence: evidence as unknown as Record<string, unknown> | null,
+      sentTo: to,
+      emailStatus: "queued",
     })
     .run();
+  queueEmail(ctx, {
+    to,
+    subject,
+    text: body,
+    html: renderLetterHtml(body),
+    event: "dispute.sent",
+    workItemId: item.id,
+    ref: disputeId,
+    attachments: evidence ? [{ filename: disputeId + "-evidence.csv", content: renderEvidenceCsv(evidence), contentType: "text/csv" }] : [],
+  });
+  postSlack(ctx, {
+    channel: "vendor-disputes",
+    event: "dispute.sent",
+    workItemId: item.id,
+    ref: disputeId,
+    mentions: [CONTROLLER],
+    text:
+      "Vendor Liaison sent " + (provider?.name ?? "the vendor") + " dispute " + disputeId + " for *" + formatCents(dispute.disputedCents) + "* on " +
+      taskLink(ctx, item.id) + " (approved by " + decider + "). Letter and evidence emailed to " + to + ". FYI " + mention(CONTROLLER),
+  });
   appendAudit(ctx, {
     actorId: ACTOR.ledger,
     action: "dispute.submit",
@@ -174,7 +230,7 @@ export function submitApprovedDispute(ctx: AppContext, item: WorkItemRow, letter
     approvalId: approval.id,
     rule: "APPROVAL",
     evidenceIds: proposal.evidenceIds,
-    details: { amountCents: dispute.disputedCents, provider: provider?.name ?? dispute.providerId, letterChars: letter.length },
+    details: { amountCents: dispute.disputedCents, provider: provider?.name ?? dispute.providerId, sentTo: to, subject, clauses: dispute.clauseRefs },
   });
   recordActivity(ctx, {
     workItemId: item.id,
@@ -182,7 +238,7 @@ export function submitApprovedDispute(ctx: AppContext, item: WorkItemRow, letter
     type: "DISPUTE",
     title: "Submitted dispute " + disputeId + " for " + formatCents(dispute.disputedCents) + " to " + (provider?.name ?? "vendor"),
     summary:
-      "Sent through the vendor portal (simulated). Accounts payable stays at " + formatCents(dispute.invoicedCents) +
+      "Letter and evidence emailed to " + to + ". Accounts payable stays at " + formatCents(dispute.invoicedCents) +
       " until the vendor issues a credit.",
     evidenceIds: proposal.evidenceIds,
     changes: ["Dispute " + disputeId + " SUBMITTED"],
@@ -236,6 +292,15 @@ export function recordVendorResponse(ctx: AppContext, input: { workItemId: strin
       summary: "The Vendor Liaison will read the reply and close the case.",
       changes: ["Dispute " + dispute.id + (accepted ? " CREDIT_ACCEPTED" : " DENIED")],
     });
+    postSlack(ctx, {
+      channel: "vendor-disputes",
+      event: "dispute.reply",
+      workItemId: item.id,
+      ref: dispute.id,
+      text: accepted
+        ? (provider?.name ?? "The vendor") + " accepted " + dispute.id + " and issued credit memo " + memoRef + " for *" + formatCents(dispute.amountCents) + "* (" + taskLink(ctx, item.id) + "). Vendor Liaison is booking it."
+        : (provider?.name ?? "The vendor") + " denied " + dispute.id + " (" + formatCents(dispute.amountCents) + ", " + taskLink(ctx, item.id) + "). Vendor Liaison is booking the charge to the owning team.",
+    });
     assignAgent(ctx, item.id, ACTOR.vendorLiaison);
     enqueueJob(ctx, { workItemId: item.id, kind: "AGENT_RUN", agentId: ACTOR.vendorLiaison, payload: { trigger: "vendor_reply", outcome: input.outcome } });
     return { outcome: accepted ? "CREDIT_ACCEPTED" : "DENIED" };
@@ -274,5 +339,17 @@ export function closeDispute(ctx: AppContext, item: WorkItemRow) {
   resolveReconciliation(ctx, item.invoiceLineId, outcome);
   setWorkItemOutcome(ctx, item.id, outcome);
   transitionWorkItem(ctx, item.id, "RESOLVED", ACTOR.orchestrator, "Vendor responded to " + dispute.id);
+  const lead = leadFor(item.ownerProjectId);
+  postSlack(ctx, {
+    channel: "vendor-disputes",
+    event: "dispute.closed",
+    workItemId: item.id,
+    ref: dispute.id,
+    mentions: accepted ? [] : [CONTROLLER, ...(lead ? [lead.handle] : [])],
+    text: accepted
+      ? "Closed " + dispute.id + ": " + formatCents(dispute.amountCents) + " credit booked (" + entryId + "). What Atlas owes the vendor dropped by that amount. " + taskLink(ctx, item.id)
+      : "Closed " + dispute.id + ": the vendor upheld the charge, so " + formatCents(dispute.amountCents) + " was charged to " + (lead ? mention(lead.handle) + "'s team" : "the owning team") +
+        " (" + entryId + "). " + mention(CONTROLLER) + " can reopen it with the vendor. " + taskLink(ctx, item.id),
+  });
   return { outcome, entryId, dispute };
 }

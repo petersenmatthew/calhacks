@@ -151,6 +151,8 @@ export const providers = sqliteTable("providers", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   shortName: text("short_name").notNull(),
+  /** Where disputes and follow-ups are emailed. VENDOR_EMAIL overrides it for demos. */
+  billingEmail: text("billing_email"),
 });
 
 export const contracts = sqliteTable("contracts", {
@@ -562,6 +564,12 @@ export const vendorDisputes = sqliteTable("vendor_disputes", {
   vendorReference: text("vendor_reference"),
   submittedAt: text("submitted_at").notNull(),
   resolvedAt: text("resolved_at"),
+  /** The letter exactly as sent, and the evidence pack the application attached to it. */
+  letterSubject: text("letter_subject"),
+  letterBody: text("letter_body"),
+  evidence: text("evidence", { mode: "json" }).$type<Record<string, unknown> | null>(),
+  sentTo: text("sent_to"),
+  emailStatus: text("email_status"), // queued | sent | simulated | failed
 });
 
 export const auditEvents = sqliteTable(
@@ -650,3 +658,32 @@ export const erpApHistory = sqliteTable("erp_ap_history", {
   note: text("note").notNull(),
   resolvedAt: text("resolved_at").notNull(),
 });
+
+/**
+ * Outbound messages (vendor email, Slack). Written in the same transaction as
+ * the action that caused them, then delivered by the scheduler, so a message
+ * is never sent for an action that rolled back and never lost if delivery fails.
+ */
+export const outbox = sqliteTable(
+  "outbox",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    channel: text("channel").notNull(), // email | slack
+    destination: text("destination").notNull(), // email address, #channel, or @handle for a DM
+    subject: text("subject"),
+    body: text("body").notNull(),
+    html: text("html"),
+    mentions: text("mentions", { mode: "json" }).$type<string[]>().notNull(),
+    attachments: text("attachments", { mode: "json" }).$type<{ filename: string; content: string; contentType: string }[]>().notNull(),
+    event: text("event").notNull(),
+    workItemId: text("work_item_id"),
+    ref: text("ref"),
+    status: text("status").notNull(), // pending | sent | simulated | failed
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    providerMessageId: text("provider_message_id"),
+    createdAt: text("created_at").notNull(),
+    sentAt: text("sent_at"),
+  },
+  (t) => [index("outbox_status_idx").on(t.status), index("outbox_channel_idx").on(t.channel, t.destination)],
+);

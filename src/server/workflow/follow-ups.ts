@@ -7,6 +7,8 @@ import { approvalRequests, followUps, vendorDisputes, workItems } from "../db/sc
 import { ACTOR, getActor } from "../security/actors";
 import { authorize } from "../security/authorize";
 import { enqueueJob } from "./jobs";
+import { CFO, CONTROLLER } from "../comms/directory";
+import { dmSlack, mention, postSlack, taskLink } from "../comms/outbox";
 
 /*
  * Time-based follow-ups. Nobody clicks these: the scheduler checks the
@@ -67,7 +69,7 @@ function remindApprovals(ctx: AppContext) {
           workItemId: a.workItemId,
           subjectId: a.id,
           actorId: ACTOR.scheduler,
-          details: { to: ACTOR.controller, channel: "email (simulated)", waited: formatDuration(age) },
+          details: { to: ACTOR.controller, channel: "slack", waited: formatDuration(age) },
         });
         appendAudit(ctx, {
           actorId: ACTOR.scheduler,
@@ -80,13 +82,20 @@ function remindApprovals(ctx: AppContext) {
           rule: "FOLLOW_UP",
           details: { waitedMs: age, to: ACTOR.controller },
         });
+        dmSlack(ctx, {
+          to: CONTROLLER,
+          event: "approval.reminder",
+          workItemId: a.workItemId,
+          ref: a.id,
+          text: "Reminder: " + a.id + " on " + taskLink(ctx, a.workItemId) + " has waited " + formatDuration(age) + " for your decision. " + a.summary,
+        });
         recordActivity(ctx, {
           workItemId: a.workItemId,
           actorId: ACTOR.scheduler,
           type: "APPROVAL_REQUEST",
           status: "pending",
           title: "Reminded " + controller + ": " + a.id + " has waited " + formatDuration(age),
-          summary: "Approval of " + subject + " is still open. Sent by email (simulated).",
+          summary: "Approval of " + subject + " is still open. Sent as a Slack DM.",
         });
       });
       acted += 1;
@@ -99,7 +108,7 @@ function remindApprovals(ctx: AppContext) {
           workItemId: a.workItemId,
           subjectId: a.id,
           actorId: ACTOR.scheduler,
-          details: { to: ACTOR.cfo, channel: "email (simulated)", waited: formatDuration(age) },
+          details: { to: ACTOR.cfo, channel: "slack", waited: formatDuration(age) },
         });
         appendAudit(ctx, {
           actorId: ACTOR.scheduler,
@@ -111,6 +120,23 @@ function remindApprovals(ctx: AppContext) {
           approvalId: a.id,
           rule: "FOLLOW_UP",
           details: { waitedMs: age, to: ACTOR.cfo },
+        });
+        dmSlack(ctx, {
+          to: CFO,
+          event: "approval.escalated",
+          workItemId: a.workItemId,
+          ref: a.id,
+          text:
+            "Escalation: " + a.id + " on " + taskLink(ctx, a.workItemId) + " has waited " + formatDuration(age) + " without a decision from " +
+            mention(CONTROLLER) + ". You can decide it as backup approver. " + a.summary,
+        });
+        postSlack(ctx, {
+          channel: "finance-approvals",
+          event: "approval.escalated",
+          workItemId: a.workItemId,
+          ref: a.id,
+          mentions: [CFO, CONTROLLER],
+          text: a.id + " (" + taskLink(ctx, a.workItemId) + ") escalated to " + mention(CFO) + " after " + formatDuration(age) + " waiting on " + mention(CONTROLLER) + ".",
         });
         recordActivity(ctx, {
           workItemId: a.workItemId,

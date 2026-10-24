@@ -3,6 +3,7 @@ import type { AppContext } from "./context";
 import { ACTOR } from "./security/actors";
 import { syncHttpFeed, syncSimulatedFeeds, type SyncSummary } from "./sync/feeds";
 import { runFollowUps } from "./workflow/follow-ups";
+import { dispatchOutbox } from "./comms/dispatch";
 
 /*
  * The part of the system that starts work on its own. On every tick it pulls
@@ -32,6 +33,11 @@ export async function runScheduledWork(ctx: AppContext, options: { feedUrl?: str
     followUps = runFollowUps(ctx);
   } catch (error) {
     report(ctx, "Follow-up rules failed", error);
+  }
+  try {
+    await dispatchOutbox(ctx);
+  } catch (error) {
+    report(ctx, "Message delivery failed", error);
   }
   return { feeds, followUps };
 }

@@ -50,6 +50,14 @@ Copy `.env.example` to `.env.local`. All are optional.
 | `SCHEDULER_INTERVAL_MS` | `5000` | How often the scheduler syncs billing feeds and runs follow-up rules. |
 | `AUTONOMY` | on | Set to `off` to disable the scheduler (agents still run when work is queued). |
 | `BILLING_FEED_URL` | unset | Optional external billing feed polled on a cursor: `GET <url>?after=<cursor>` returns `{ events, next_cursor }`. |
+| `VENDOR_EMAIL` | each provider's billing address | Send every vendor email to this inbox instead (use your own address for the demo). |
+| `RESEND_API_KEY` | unset | Send email through [Resend](https://resend.com). |
+| `SMTP_URL` | unset | Or send through any SMTP server, e.g. `smtps://you%40gmail.com:APP_PASSWORD@smtp.gmail.com:465`. |
+| `EMAIL_FROM`, `EMAIL_REPLY_TO` | Resend test sender / SMTP user | Sender and reply-to for vendor email. |
+| `SLACK_BOT_TOKEN` | unset | Post to a real Slack workspace (bot needs `chat:write`; invite it to the channels below). |
+| `SLACK_WEBHOOK_URL` | unset | Or post everything to one channel through an incoming webhook. |
+| `SLACK_USER_IDS` | `{}` | JSON map from handle to Slack user id, e.g. `{"priya":"U0123"}`, so mentions and DMs reach a real person. |
+| `APP_URL` | `http://localhost:3000` | Base for the links in Slack messages. |
 
 ### Execution modes
 
@@ -75,7 +83,7 @@ Copy `.env.example` to `.env.local`. All are optional.
 2. Wait two minutes, or use the clock in the top bar (**+1 hour**). The Helios and Meridian feeds publish new lines; the scheduler syncs them on a cursor and the agents work them: an exact match auto-posts, and a Helios A100 line billed $0.40/h over contract ($12) is accepted under the learned policy instead of disputed.
 3. **+3 days**: a Helios line billed 6 h after termination arrives and becomes a $600 dispute waiting for you. Approve it, and the Vendor Liaison writes the dispute letter and sends it.
 4. **+15 days**: Helios has not answered. The scheduler assigns the Vendor Liaison, which checks the dispute and sends a follow-up citing contract §7.2. **+16 days**: still nothing, so it escalates to the controller with a recommended next step. Leave an approval waiting and it is reminded after a day and escalated to the CFO after three.
-5. In **Audit trail → Evaluation & autonomy**, **Run** the evaluation: 14 planted cases scored against the answer key. The same tab has the full feed and follow-up history.
+5. Open **Slack**: the Atlas Research workspace shows each ping the bot sent and who it mentioned, and **Vendor email** shows every letter exactly as it went out.
 
 ## How it works
 
@@ -113,6 +121,26 @@ flowchart LR
 - **Follow-ups** (`workflow/follow-ups.ts`). Approval waiting 1 day: remind the controller. 3 days: escalate to the CFO (backup approver). Vendor dispute unanswered 14 days: the Vendor Liaison runs `get_dispute_status` and `send_vendor_follow_up`. 30 days: it runs `escalate_dispute` with a recommendation. Each action is keyed so it happens once, and every one is in the audit trail.
 - **Onboarding** (`workflow/onboarding.ts`). Before the first close the Policy Analyst runs `query_ap_history` over the ERP's AP export and `propose_materiality_policy`. The application rejects a threshold that would have accepted any variance the vendor later credited. Once the controller approves, the ledger gateway lets variances at or below the threshold post without a dispute.
 
+## Email and Slack
+
+Everything the system tells a person or a vendor goes through an outbox table, written in the same transaction as the action that caused it and delivered by the scheduler. A message is never sent for an action that rolled back, and a failed send is retried. With no mail server or Slack configured, messages are kept and marked "recorded", and the **Slack** tab shows them, so the demo works offline.
+
+**Vendor disputes.** When the controller approves a dispute, the Vendor Liaison writes the cover letter and the application attaches the evidence: the invoice line, the instance's PROVISIONED, STOP_REQUESTED and TERMINATED times with the provider's own API acknowledgment, the provider meter, the contract calculation, and the text of each cited clause with the reason it applies. Clauses are chosen by what is wrong with the line (billed after termination: termination and metering; wrong rate: rates; always the dispute-window clause), so a letter never cites one that does not apply. The letter, evidence, recipient, and delivery status are stored on the dispute record and shown on the task. The email carries a CSV of the same facts, and the subject carries the vendor case reference. Vendor follow-ups at 14 days go to the same address as replies.
+
+**Who gets pinged** (Atlas Research workspace):
+
+| Event | Where | Who |
+| --- | --- | --- |
+| Approval needed (proposal or learned policy) | #finance-approvals | Priya (controller) |
+| Approval waiting 1 day / 3 days | DM / DM + #finance-approvals | Priya / Dana (CFO, backup approver) |
+| An agent needs information (e.g. unknown owner) | #finance-ops | Priya |
+| Dispute sent, vendor followed up, vendor replied | #vendor-disputes | FYI to Priya |
+| Dispute unanswered 30 days | #vendor-disputes + DM | Priya |
+| Dispute denied, charge moved to a team | #vendor-disputes | Priya and that team's lead |
+| Team trending over budget | #budget-alerts | Team lead, plus Priya when at risk or over |
+
+**Connecting the real thing.** For email, sign up for Resend with the address you put in `VENDOR_EMAIL` and set `RESEND_API_KEY` (Resend's test sender can only email the account owner), or use a Gmail app password in `SMTP_URL`. For Slack, create a free workspace, add an app with the `chat:write` scope, install it, set `SLACK_BOT_TOKEN`, create the four channels and invite the bot, and set `SLACK_USER_IDS` for whoever should be mentioned.
+
 ### Agents and tools
 
 | Agent | Tools |
@@ -141,16 +169,7 @@ All arithmetic is application code: billable hours, expected charges, allocation
 
 **What is real:** every agent decision, tool call, approval, policy, journal entry, follow-up, and audit event is application state, enforced by the same gateway in both execution modes. **What is simulated:** the provider feeds, scheduler, infrastructure controller, meters, experiment tracker, ERP, AP history, and vendor portal.
 
-There are two evaluations. The main one is the seeded-case harness (see [Evaluation](#evaluation)). A second, smaller check targets autonomy and judgment:
-
-**Planted-error key.** `src/server/eval/answer-key.ts` plants 14 situations in invoice lines and states the correct outcome in hand-computed numbers: four real overcharges (billed after termination, rate above contract, wrong rate card, one extra hour), four correct invoices that look wrong (idle time after a job, an 8-hour contract minimum, per-started-hour metering, an exact match), and judgment calls (a $10 variance below materiality, an under-billing, a missing owner, a duplicate webhook, a shared reservation that fits policy, and one whose terms contradict policy). Each case runs in its own sandbox.
-
-```bash
-npm run eval:planted            # deterministic replay, writes docs/eval-report.md
-npm run eval:planted -- --llm   # LLM agents, writes docs/eval-report-llm.md (needs OPENAI_API_KEY)
-```
-
-Deterministic replay scores 14/14 ([report](docs/eval-report.md)): 4/4 overcharges caught, no correct invoice disputed. That run checks the controls, arithmetic, and plumbing end to end; it is a scripted policy, so it is not evidence of model judgment. The LLM run is the meaningful score. **Audit trail → Evaluation & autonomy** can also run both.
+The seeded-case harness scores the agents against an answer key for every case (see [Evaluation](#evaluation)).
 
 ## Tests
 
@@ -159,7 +178,7 @@ npm test
 ```
 
 - **Autonomy:** feed sync on a cursor with no duplicates, onboarding proposes the $50 threshold the history supports, the learned policy changes the outcome of a $12 variance, approval reminders and escalations fire once, waiting time is measured from the request, and an unanswered dispute is chased at 14 days and escalated at 30.
-- **Planted-error key:** deterministic replay matches all 14 hand-computed outcomes.
+- **Email and Slack:** a dispute cites only the clauses that apply and carries the lifecycle evidence, the letter is stored on the dispute and emailed with a CSV attachment, the controller is pinged in Slack, and delivery through Resend and a Slack bot token is exercised with a stubbed network.
 - **Arithmetic:** exact allocation sums and contract billable hours.
 - **Correct billing:** an instance whose job ended early is explained with no dispute.
 - **Scenario 1:** the Vendor Liaison sends the $1,200 dispute, and the liability stays unchanged until the Liaison books the vendor's credit.
@@ -194,12 +213,11 @@ src/server/domain      money, billing, allocation, state machine
 src/server/security    actors, permissions, guard
 src/server/sim         seed data, demo scenarios, feed schedule, AP history (simulated source systems)
 src/server/sync        billing feed sync with cursors (simulated outbox and HTTP adapter)
-src/server/eval        answer key and evaluation runner
+src/server/comms       people and channels, the outbox, email and Slack delivery
 src/server/scheduler.ts, clock.ts   what starts work on its own, and the business clock
 src/app                pages and API routes (SSE at /api/stream)
 src/components         dashboard, investigation workspace, autonomy page, audit trail
 scripts/eval.ts        npm run eval (seeded-case harness)
-scripts/eval-planted.ts  npm run eval:planted (planted-error key)
 drizzle/               SQL migrations
 tests/                 Vitest suite
 ```
@@ -208,7 +226,7 @@ tests/                 Vitest suite
 
 - **LLM mode:** no OpenAI key was available while building, so LLM mode was verified through the SDK's scripted model, not live model calls. Deterministic replay is the default when no key is set.
 - **One demo user:** there is no login. Every human action is taken as the controller, Priya Natarajan.
-- **Simulated systems:** source systems, the ERP, AP history, the billing feeds, and the vendor portal are simulated, and vendor responses are triggered from the UI. Reminders and vendor messages are recorded, not actually emailed.
+- **Simulated systems:** source systems, the ERP, AP history, the billing feeds, and the vendor portal are simulated, and vendor responses are triggered from the UI. Email and Slack are delivered only when a mail server or Slack is configured; otherwise they are recorded. Vendor replies are not read from the inbox; use the vendor buttons on the task.
 - **Investigation page:** the Flow tab on an investigation still shows only the Compute Investigator and the Cost Accountant. The Canvas shows all six.
 - **Existing databases:** actors are append-only, so a database created before the rename keeps the old names "Compute Agent" and "Finance Agent" until **Reset demo**. New employees are added automatically at startup.
 - **Runs while the server runs:** SQLite runs on one node, and the worker and scheduler run inside the Next.js server process, so nothing happens while it is stopped (queued jobs and due follow-ups resume on restart); restart the dev server after changing server code.

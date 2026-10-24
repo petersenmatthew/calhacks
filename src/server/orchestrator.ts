@@ -3,6 +3,7 @@ import type { AppContext } from "./context";
 import { RunAbortedError } from "./agents/gateway";
 import { runAgentJob } from "./agents/runner";
 import { runScheduledWork } from "./scheduler";
+import { dispatchOutbox, recoverOutbox } from "./comms/dispatch";
 import { ACTOR, getActor } from "./security/actors";
 import { guard } from "./security/authorize";
 import { executeDecision } from "./workflow/decisions";
@@ -56,14 +57,30 @@ export class Orchestrator {
   private scheduling = false;
   private active = new Set<Promise<void>>();
   private paused = false;
+  private dispatching = false;
   private readonly onChange = (topic: string) => {
     if (topic === "jobs") this.tick();
+    if (topic === "outbox" && this.timer) void this.deliver();
   };
+
+  /** Send newly queued email and Slack messages right away instead of waiting for the next schedule tick. */
+  private async deliver() {
+    if (this.dispatching || this.paused) return;
+    this.dispatching = true;
+    try {
+      await dispatchOutbox(this.ctx);
+    } catch {
+      /* retried on the next schedule tick */
+    } finally {
+      this.dispatching = false;
+    }
+  }
 
   constructor(private ctx: AppContext, private concurrency = 3) {}
 
   start() {
     if (this.timer) return;
+    recoverOutbox(this.ctx);
     const recovered = recoverInterruptedJobs(this.ctx);
     if (recovered > 0) {
       recordActivity(this.ctx, {

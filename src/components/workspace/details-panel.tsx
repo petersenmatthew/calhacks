@@ -13,6 +13,7 @@ import { AgentAvatar, PRIORITY_LABEL } from "../status";
 import { Button } from "../ui/button";
 import { AllocationTable, JournalPreview } from "./approval-card";
 import { SIMULATED_SOURCES, useWorkspace } from "./workspace-context";
+import { DisputeLetter } from "../comms/dispute-letter";
 
 const OUTCOME_LABEL: Record<string, string> = {
   CHARGE_EXPLAINED: "Charge explained and allocated under standing policy",
@@ -168,6 +169,7 @@ function Outcome({ data }: { data: WorkspaceData }) {
               ["Owed (AP)", <span key="ap" className="tnum">{money(data.apOutstandingCents)}{dispute.status === "SUBMITTED" ? " until credited" : ""}</span>],
             ]}
           />
+          <DisputeLetter dispute={dispute} />
           {dispute.status === "SUBMITTED" ? (
             <div className="flex items-center gap-1.5 pt-1">
               <span className="mr-1 text-[11.5px] text-muted-foreground">Simulate vendor:</span>

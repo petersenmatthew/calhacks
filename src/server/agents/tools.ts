@@ -52,6 +52,10 @@ import { assignAgent, transitionWorkItem, type WorkItemRow } from "../workflow/w
 import { businessAgeMs, DAY_MS, formatDuration } from "../clock";
 import { followUpsFor, recordFollowUp } from "../workflow/follow-ups";
 import { MATERIALITY_POLICY_KEY, ONBOARDING_ID } from "../workflow/onboarding";
+import { buildDisputeEvidence, relevantClauses } from "../workflow/dispute-evidence";
+import { CONTROLLER, leadFor } from "../comms/directory";
+import { dmSlack, mention, postSlack, queueEmail, taskLink } from "../comms/outbox";
+import { renderLetterHtml } from "../workflow/decisions";
 
 export interface AgentRunContext {
   runId: string;
@@ -678,6 +682,13 @@ const requestHumanInfo = defineTool({
       .set({ pendingQuestion: { agentId: run.agentId, question, askedBy: run.agentId } })
       .where(eq(workItems.id, item.id))
       .run();
+    postSlack(ctx, {
+      channel: "finance-ops",
+      event: "info.requested",
+      workItemId: item.id,
+      mentions: [CONTROLLER],
+      text: mention(CONTROLLER) + " " + (getActor(ctx, run.agentId)?.name ?? "An agent") + " has a question on " + taskLink(ctx, item.id) + ": " + question,
+    });
     return {
       result: { status: "NEEDS_INFO" },
       title: (getActor(ctx, run.agentId)?.name ?? "Agent") + " requested information from the controller",
@@ -1007,7 +1018,7 @@ const proposeVendorDispute = defineTool({
   permission: "dispute:propose",
   category: "write",
   description:
-    "Draft a vendor dispute for the amount not supported by the instance lifecycle and contract. The application computes the disputed amount and allocates the undisputed amount to the owner. Requires compute findings that the charge is not explained.",
+    "Draft a vendor dispute for the amount not supported by the instance lifecycle and contract. The application computes the disputed amount, allocates the undisputed amount to the owner, and chooses the contract clauses that apply to what is wrong with the line (clauses you cite that do not apply are dropped). Requires compute findings that the charge is not explained.",
   schema: z.object({
     work_item_id: workItemId,
     rationale: z.string(),
@@ -1032,6 +1043,11 @@ const proposeVendorDispute = defineTool({
       { projectId: owner, amountCents: undisputed, weight: 1, basis: "Contract-supported " + checks.billableHours + " h" },
     ];
     const rationale = args.rationale.trim().slice(0, 1200);
+    const line = ctx.db.select().from(invoiceLines).where(eq(invoiceLines.id, item.invoiceLineId)).get();
+    const issued = line ? ctx.db.select().from(invoices).where(eq(invoices.id, line.invoiceId)).get()?.issuedAt ?? null : null;
+    const applicable = relevantClauses(contractForProvider(ctx, item.providerId).clauses, checks, issued);
+    const clauseRefs = applicable.map((c) => c.ref);
+    const dropped = args.clause_refs.map((r) => r.replace(/^§\s*/, "")).filter((r) => !clauseRefs.includes(r));
     supersedeDrafts(ctx, item);
     const { version, previousId } = nextProposalVersion(ctx, item);
     const payload: ProposalPayload = {
@@ -1047,7 +1063,7 @@ const proposeVendorDispute = defineTool({
         undisputedCents: undisputed,
         invoicedCents: checks.invoicedCents,
         reason: rationale,
-        clauseRefs: args.clause_refs,
+        clauseRefs,
       },
     };
     const id = nextId(ctx, "PR", 2001);
@@ -1078,6 +1094,8 @@ const proposeVendorDispute = defineTool({
         version,
         disputed_amount: formatCents(disputed),
         undisputed_amount: formatCents(undisputed),
+        clauses_cited: applicable.map((c) => ({ ref: c.ref, title: c.title, why: c.why })),
+        clauses_dropped: dropped,
         liability_note: "Accounts payable stays at " + formatCents(checks.invoicedCents) + " until the vendor issues a credit.",
         next_step: "request_human_approval",
       },
@@ -1333,6 +1351,11 @@ const getDisputePackage = defineTool({
         undisputed_amount: formatCents(d.undisputedCents),
         reason: d.reason,
         clauses: clauses.map((c) => ({ ref: c.ref, title: c.title, text: c.text })),
+        evidence_pack: item.checks.kind === "instance" ? (() => {
+          const e = buildDisputeEvidence(ctx, item);
+          return { grounds: e.grounds.map((g) => g.statement), calculation: e.calculation, instance: e.instance, invoice: e.invoice };
+        })() : null,
+        evidence_note: "The application attaches the evidence pack and the cited clause text to your letter. Your letter should state the disputed amount, the instance id, and the grounds in a sentence or two.",
         vendor_dispute: record
           ? { id: record.id, status: record.status, vendor_reference: record.vendorReference, submitted_at: record.submittedAt, replied_at: record.resolvedAt }
           : null,
@@ -1353,7 +1376,7 @@ const sendVendorDispute = defineTool({
   category: "write",
   terminal: true,
   description:
-    "Send the approved dispute to the provider with the letter you wrote. The ledger gateway submits it and checks the controller approval. The letter must state the approved disputed amount. Ends your run.",
+    "Send the approved dispute to the provider with the letter you wrote. The ledger gateway submits it, checks the controller approval, attaches the evidence pack and clause text, stores the letter on the dispute record, and emails it to the provider's billing contact. The letter must state the approved disputed amount and the instance id. Ends your run.",
   schema: z.object({ work_item_id: workItemId, subject: z.string(), message: z.string().describe("The letter to the provider's billing team.") }),
   handler: ({ ctx, item }, args) => {
     const found = approvedDispute(ctx, item);
@@ -1362,7 +1385,8 @@ const sendVendorDispute = defineTool({
     const message = args.message.trim().slice(0, 3000);
     if (message.length < 80) fail("The letter is too short to send.");
     if (!message.includes(amount)) fail("The letter must state the approved disputed amount, " + amount + ".", "ARITHMETIC_CHECK");
-    const sent = submitApprovedDispute(ctx, item, message);
+    if (item.instanceId && !message.includes(item.instanceId)) fail("The letter must name the instance, " + item.instanceId + ", so the provider can find it.", "EVIDENCE_REQUIRED");
+    const sent = submitApprovedDispute(ctx, item, { subject: args.subject.trim().slice(0, 200), message });
     return {
       result: { dispute_id: sent.disputeId, vendor_reference: sent.vendorReference, provider: sent.provider, disputed_amount: amount },
       title: "Vendor Liaison sent " + sent.provider + " a dispute for " + amount,
@@ -1528,6 +1552,17 @@ const recordBudgetNote = defineTool({
         createdAt: nowIso(),
       })
       .run();
+    const lead = leadFor(b.project.id);
+    if (b.status !== "on_track") {
+      const who = [...(lead ? [lead.handle] : []), ...(b.status === "at_risk" || b.status === "over" ? [CONTROLLER] : [])];
+      postSlack(ctx, {
+        channel: "budget-alerts",
+        event: "budget." + b.status,
+        workItemId: item.id,
+        mentions: who,
+        text: who.map(mention).join(" ") + " " + b.project.name + " is *" + b.status.replace("_", " ") + "*: " + summary + " (" + taskLink(ctx, item.id) + ")",
+      });
+    }
     return {
       result: { finding_id: id, status: b.status, projected_month_end: formatCents(b.projected) },
       title: "Budget Analyst: " + b.project.name + " is " + b.status.replace("_", " "),
@@ -1623,16 +1658,27 @@ const sendVendorFollowUp = defineTool({
     const provider = ctx.db.select().from(providers).where(eq(providers.id, item.providerId)).get();
     const n = prior.length + 1;
     const daysOpen = Math.floor(businessAgeMs(ctx, dispute.submittedAt) / DAY_MS);
+    const to = dispute.sentTo ?? ctx.config.comms.vendorEmail ?? "billing@" + (provider?.shortName ?? "vendor").toLowerCase() + ".example";
+    const subject = "Re: " + (dispute.letterSubject ?? "[" + dispute.vendorReference + "] Billing dispute " + dispute.id);
+    const body = message + "\n\nReference: " + dispute.vendorReference + " (dispute " + dispute.id + ", " + formatCents(dispute.amountCents) + ", submitted " + dispute.submittedAt.slice(0, 10) + ").";
+    queueEmail(ctx, { to, subject, text: body, html: renderLetterHtml(body), event: "dispute.follow_up", workItemId: item.id, ref: dispute.id });
+    postSlack(ctx, {
+      channel: "vendor-disputes",
+      event: "dispute.follow_up",
+      workItemId: item.id,
+      ref: dispute.id,
+      text: "No reply from " + (provider?.name ?? "the vendor") + " on " + dispute.id + " after " + daysOpen + " days. Vendor Liaison sent follow-up #" + n + " to " + to + ". " + taskLink(ctx, item.id),
+    });
     recordFollowUp(ctx, {
       key: "vendor-message:" + dispute.id + ":" + n,
       kind: "VENDOR_MESSAGE",
       workItemId: item.id,
       subjectId: dispute.id,
       actorId: run.agentId,
-      details: { message, to: dispute.vendorReference, channel: "vendor portal (simulated)", number: n, daysOpen, evidenceIds: cited },
+      details: { message, to, subject, channel: "email", number: n, daysOpen, evidenceIds: cited },
     });
     return {
-      result: { sent: true, follow_up_number: n, channel: "vendor portal (simulated)", days_open: daysOpen },
+      result: { sent: true, follow_up_number: n, channel: "email", to, days_open: daysOpen },
       title: "Vendor Liaison followed up with " + (provider?.name ?? "the vendor") + " on " + dispute.id + " (day " + daysOpen + ", no response)",
       summary: message,
       activityType: "DISPUTE",
@@ -1663,6 +1709,16 @@ const escalateDispute = defineTool({
     const cited = requireEvidence(ctx, item, args.evidence_ids, 1);
     const daysOpen = Math.floor(businessAgeMs(ctx, dispute.submittedAt) / DAY_MS);
     const controller = getActor(ctx, ACTOR.controller)?.name ?? "the controller";
+    const note = args.summary.trim().slice(0, 600) + " Recommended: " + args.recommended_action.trim().slice(0, 400);
+    postSlack(ctx, {
+      channel: "vendor-disputes",
+      event: "dispute.escalated",
+      workItemId: item.id,
+      ref: dispute.id,
+      mentions: [CONTROLLER],
+      text: mention(CONTROLLER) + " " + dispute.id + " (" + taskLink(ctx, item.id) + ") is still unanswered after " + daysOpen + " days. " + note,
+    });
+    dmSlack(ctx, { to: CONTROLLER, event: "dispute.escalated", workItemId: item.id, ref: dispute.id, text: "Vendor dispute " + dispute.id + " needs you: " + note + " " + taskLink(ctx, item.id) });
     recordFollowUp(ctx, {
       key: "dispute-escalation-note:" + dispute.id,
       kind: "ESCALATION_NOTE",

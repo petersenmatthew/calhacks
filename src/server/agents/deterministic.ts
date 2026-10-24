@@ -316,14 +316,21 @@ async function vendorPolicy(c: Caller) {
   const pkg = await c.call("get_dispute_package", {});
   const vendor = pkg.provider.name as string;
   if (wi.work_item.state === "APPROVED" && !pkg.vendor_dispute) {
-    const clauses = (pkg.clauses as Json[]).map((cl) => cl.ref + " (" + cl.title + ")").join(", ");
+    const ev = pkg.evidence_pack as Json | null;
+    const grounds = ((ev?.grounds as string[] | undefined) ?? []).join(" ");
+    const all = pkg.clauses as Json[];
+    const procedural = all.find((cl) => /dispute/i.test(cl.title));
+    const clauses = all.filter((cl) => cl !== procedural).map((cl) => "section " + cl.ref + " (" + cl.title + ")").join(" and ");
     const message =
       "Hello " + vendor + " billing team,\n\n" +
-      "We are disputing " + pkg.disputed_amount + " on invoice line " + pkg.invoice_line + ", which billed " + pkg.invoiced + ".\n\n" +
-      pkg.reason +
-      (clauses ? "\n\nThis follows our agreement, clauses " + clauses + "." : "") +
-      "\n\nWe accept the undisputed " + pkg.undisputed_amount + ". Please issue a credit memo for " + pkg.disputed_amount + ".\n\n" +
-      "Atlas Research Finance";
+      "Atlas Research disputes " + pkg.disputed_amount + " of the " + pkg.invoiced + " billed on invoice line " + pkg.invoice_line +
+      (ev?.instance ? " for instance " + ev.instance.id : "") + ".\n\n" +
+      (grounds || pkg.reason) +
+      (clauses ? "\n\nUnder " + clauses + " of our agreement, the supported charge is " + pkg.undisputed_amount + "." : "") +
+      (procedural ? " We raise this under section " + procedural.ref + " (" + procedural.title + ")." : "") +
+      "\n\nWe will pay the undisputed " + pkg.undisputed_amount + ". Please issue a credit memo for " + pkg.disputed_amount +
+      ". The supporting records and the calculation are below and attached.\n\n" +
+      "Atlas Research Accounts Payable";
     await c.call("send_vendor_dispute", { subject: "Billing dispute: " + pkg.invoice_line + " (" + pkg.disputed_amount + ")", message });
     return;
   }

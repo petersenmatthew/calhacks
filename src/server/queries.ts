@@ -39,6 +39,9 @@ import { followUps } from "./db/schema";
 import { feedStatus } from "./sync/feeds";
 import { FOLLOW_UP_RULES } from "./workflow/follow-ups";
 import { ONBOARDING_ID } from "./workflow/onboarding";
+import { outbox } from "./db/schema";
+import { BOT, CHANNELS, PEOPLE } from "./comms/directory";
+import { emailConfigured, slackConfigured } from "./comms/transports";
 
 function lookups(ctx: AppContext) {
   const projectRows = ctx.db.select().from(projects).all();
@@ -411,5 +414,21 @@ export function getAgentView(ctx: AppContext, agentId: string) {
 export type AgentView = NonNullable<ReturnType<typeof getAgentView>>;
 export type StatusData = ReturnType<typeof getStatus>;
 export type AutonomyData = ReturnType<typeof getAutonomy>;
+export type CommsData = ReturnType<typeof getComms>;
 export type AgentStatus = ReturnType<typeof getAgentStatuses>[number];
 export type ActivityRow = typeof activityEvents.$inferSelect;
+
+/** The simulated Atlas Research Slack workspace and the email outbox, built from the outbox table. */
+export function getComms(ctx: AppContext) {
+  const rows = ctx.db.select().from(outbox).orderBy(desc(outbox.id)).limit(400).all().reverse();
+  const slack = rows.filter((r) => r.channel === "slack");
+  return {
+    workspace: "Atlas Research",
+    delivery: { slack: slackConfigured(ctx), email: emailConfigured(ctx), vendorEmail: ctx.config.comms.vendorEmail },
+    channels: CHANNELS.map((c) => ({ ...c, count: slack.filter((m) => m.destination === "#" + c.name).length })),
+    people: PEOPLE.map((p) => ({ handle: p.handle, name: p.name, title: p.title, count: slack.filter((m) => m.destination === "@" + p.handle).length })),
+    bot: BOT,
+    messages: slack,
+    emails: rows.filter((r) => r.channel === "email"),
+  };
+}
