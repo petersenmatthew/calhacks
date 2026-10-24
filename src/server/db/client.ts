@@ -14,6 +14,29 @@ function migrationsFolder() {
   return path.join(process.cwd(), "drizzle");
 }
 
+const migrated = globalThis as unknown as { __ledgerJournalMtime?: number };
+
+function journalMtime() {
+  try {
+    return fs.statSync(path.join(migrationsFolder(), "meta", "_journal.json")).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Apply migrations added since the database was opened. In development the
+ * server keeps its database connection across hot reloads, so new code can
+ * arrive before its schema change; this runs any new migration first.
+ */
+export function migrateIfChanged(db: DB) {
+  const mtime = journalMtime();
+  if (mtime === migrated.__ledgerJournalMtime) return false;
+  migrate(db, { migrationsFolder: migrationsFolder() });
+  migrated.__ledgerJournalMtime = mtime;
+  return true;
+}
+
 export function openDatabase(file: string) {
   if (file !== ":memory:") fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
   const sqlite = new Database(file);
@@ -21,6 +44,7 @@ export function openDatabase(file: string) {
   sqlite.pragma("busy_timeout = 5000");
   const db = drizzle(sqlite, { schema });
   migrate(db, { migrationsFolder: migrationsFolder() });
+  migrated.__ledgerJournalMtime = journalMtime();
   installGuards(sqlite);
   return { sqlite, db };
 }
