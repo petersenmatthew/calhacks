@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { X } from "lucide-react";
+import { ArrowRight, LoaderCircle, X } from "lucide-react";
 import { postJson } from "@/lib/api";
 import { FLOWER_COLORS, Flower, MeadowStrip } from "./landing/meadow";
 import { PixelAgent } from "./pixel-agent";
@@ -64,62 +64,63 @@ export function Onboarding({ open, publicDemo, onClose, onStarted }: { open: boo
   };
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-[#1f3a17]/35 p-4" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
-      {/* eslint-disable-next-line @next/next/no-page-custom-font */}
-      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" />
-      <div className="animate-enter relative w-full max-w-[500px] overflow-hidden border-[3px] border-[#2a2420] bg-[#fffaf0] shadow-[0_6px_0_#2a2420]">
-        <div className="relative h-[104px]">
+    <div className="fixed inset-0 z-50 grid place-items-center bg-zinc-900/30 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+      <div className="animate-enter relative w-full max-w-[520px] overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-zinc-200">
+        {/* a little meadow with the team in it: the only pixel art on the card */}
+        <div className="relative h-[92px]">
           <MeadowStrip className="absolute inset-0 size-full" />
           <div className="absolute inset-x-0 bottom-2 flex items-end justify-center gap-2" aria-hidden>
             {CREW.map((id) => (
-              <PixelAgent key={id} actorId={id} size={id === "you" ? 34 : 26} />
+              <PixelAgent key={id} actorId={id} size={id === "you" ? 32 : 24} />
             ))}
           </div>
           <button
             type="button"
             onClick={close}
             aria-label="Close"
-            className="absolute top-2 right-2 grid size-7 place-items-center border-2 border-[#2a2420] bg-[#fffaf0] text-[#2a2420] hover:bg-white"
+            className="absolute top-2.5 right-2.5 grid size-7 place-items-center rounded-lg bg-white/80 text-zinc-500 backdrop-blur-sm hover:bg-white hover:text-zinc-900"
           >
-            <X className="size-3.5" strokeWidth={3} />
+            <X className="size-4" />
           </button>
         </div>
 
-        <div className="border-t-[3px] border-[#2a2420] px-6 pt-5 pb-6">
-          <h1 id="onboarding-title" className="text-[30px] leading-[1.1] font-semibold text-[#2a2420]" style={{ fontFamily: "'Fraunces', Georgia, serif" }}>
+        <div className="px-7 pt-6 pb-7">
+          <h1 id="onboarding-title" className="text-[24px] leading-[1.15] font-semibold tracking-[-0.02em] text-zinc-950">
             Meet your tiny finance team
           </h1>
-          <p className="mt-1.5 text-[14px] leading-relaxed text-[#5b524a]">Six AI accountants run GPU payables for Atlas Research. You&rsquo;re the controller: you just make the calls.</p>
+          <p className="mt-1.5 text-[14px] leading-relaxed text-zinc-600">Six AI accountants run GPU payables for Atlas Research. You&rsquo;re the controller: you just make the calls.</p>
 
           <ol className="mt-5 space-y-3.5">
             {STEPS.map((s, i) => (
               <li key={s.title} className="flex gap-3">
-                <Flower petal={FLOWER_COLORS[(i + 1) % FLOWER_COLORS.length].petal} eye={FLOWER_COLORS[(i + 1) % FLOWER_COLORS.length].eye} size={18} className="mt-0.5 shrink-0" />
+                <Flower petal={FLOWER_COLORS[(i + 1) % FLOWER_COLORS.length].petal} eye={FLOWER_COLORS[(i + 1) % FLOWER_COLORS.length].eye} size={15} className="mt-0.5 shrink-0" />
                 <div className="min-w-0">
-                  <div className="text-[14px] font-semibold text-[#2a2420]">{s.title}</div>
-                  <div className="text-[13px] leading-snug text-[#5b524a]">{s.body}</div>
+                  <div className="text-[14px] font-medium text-zinc-900">{s.title}</div>
+                  <div className="text-[13px] leading-snug text-zinc-500">{s.body}</div>
                 </div>
               </li>
             ))}
           </ol>
 
-          <div className="mt-6 flex flex-wrap items-center gap-3">
+          <div className="mt-7 flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={start}
               disabled={busy}
-              className="border-[3px] border-[#2a2420] bg-[#c6d600] px-5 py-2 font-mono text-[14px] font-bold tracking-[0.12em] text-[#2a2420] uppercase shadow-[0_4px_0_#2a2420] transition-transform hover:-translate-y-0.5 hover:shadow-[0_6px_0_#2a2420] active:translate-y-1 active:shadow-[0_1px_0_#2a2420] disabled:opacity-70"
+              className="inline-flex h-10 items-center gap-2 rounded-lg bg-zinc-900 px-4 text-[14px] font-medium text-white hover:bg-zinc-800 disabled:opacity-60"
             >
-              {busy ? "Starting\u2026" : "Start \u25B8"}
+              {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+              Start the sample case
+              {!busy ? <ArrowRight className="size-4" /> : null}
             </button>
-            <button type="button" onClick={close} className="px-2 py-2 font-mono text-[13px] font-semibold tracking-wider text-[#5b524a] uppercase hover:text-[#2a2420]">
-              Look around
+            <button type="button" onClick={close} className="h-10 rounded-lg px-3 text-[14px] text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
+              Look around first
             </button>
           </div>
 
           {publicDemo ? (
-            <p className="mt-5 border-t-2 border-dashed border-[#d9d0bf] pt-3 text-[12px] leading-snug text-[#7a7064]">
-              Shared demo: others may be playing at the same time. Slack and email are recorded here, not sent. Reset demo starts everything over.
+            <p className="mt-5 border-t border-zinc-100 pt-4 text-[12px] leading-snug text-zinc-500">
+              Shared demo: other people may be using it at the same time. Slack and email are recorded on each task here, not sent. <b className="font-medium text-zinc-700">Reset demo</b> starts everything over.
             </p>
           ) : null}
         </div>

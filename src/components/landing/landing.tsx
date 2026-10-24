@@ -3,15 +3,11 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { PixelAgent } from "../pixel-agent";
-import { Field } from "./meadow";
+import { MeadowScene, Roamers } from "./scene";
 
 /*
  * The front door: a pixel meadow, a title, one line, one button.
  */
-
-/** The team out in the field; "you" stands in the middle. */
-const CREW = ["agent.capacity", "agent.compute", "agent.finance", "you", "agent.vendor", "agent.budget", "agent.policy"];
 
 export function Landing() {
   const router = useRouter();
@@ -35,39 +31,30 @@ export function Landing() {
   };
 
   return (
-    <div className="relative h-dvh overflow-hidden bg-[#62b34c]">
+    <div className="relative h-dvh overflow-hidden bg-[#6cc8f2]">
       {/* eslint-disable-next-line @next/next/no-page-custom-font */}
       <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" />
-      <Field />
+      <MeadowScene />
+      <Roamers />
 
-      <main className="relative z-10 flex h-full flex-col items-center justify-center px-6 pb-[16vh] text-center">
-        <h1
-          className="text-[52px] leading-[1.02] font-semibold tracking-[-0.01em] text-[#fffaf0] sm:text-[88px]"
-          style={{ fontFamily: "'Fraunces', Georgia, serif", textShadow: "0 3px 0 rgb(35 80 25 / 0.35)" }}
-        >
+      <main className="relative z-[200] flex flex-col items-center px-6 pt-[12vh] text-center">
+        <h1 className="text-[52px] leading-[1.02] font-semibold tracking-[-0.01em] text-white sm:text-[92px]" style={{ fontFamily: "'Fraunces', Georgia, serif" }}>
           Mixture of
           <br />
           Accountants
         </h1>
-        <p className="mt-5 max-w-[460px] text-[16px] leading-relaxed font-medium text-[#fffaf0] sm:text-[18px]" style={{ textShadow: "0 1px 0 rgb(35 80 25 / 0.45)" }}>
+        <p className="mt-5 max-w-[440px] text-[16px] leading-relaxed font-medium text-white sm:text-[18px]">
           Six tiny AI accountants catch your GPU overbilling, chase the vendor, and get your money back. You just make the calls.
         </p>
         <button
           type="button"
           onClick={start}
           disabled={busy}
-          className="mt-9 border-[3px] border-[#2a2420] bg-[#fffaf0] px-8 py-3 font-mono text-[16px] font-bold tracking-[0.12em] text-[#2a2420] uppercase shadow-[0_5px_0_#2a2420] transition-transform hover:-translate-y-0.5 hover:shadow-[0_7px_0_#2a2420] active:translate-y-1 active:shadow-[0_1px_0_#2a2420] disabled:opacity-70"
+          className="mt-8 rounded-xl bg-white px-7 py-3 text-[15px] font-semibold text-[#1f3b5a] shadow-[0_4px_0_rgb(31_59_90/0.18)] transition-transform hover:-translate-y-0.5 active:translate-y-0.5 disabled:opacity-70"
         >
-          {busy ? "Starting…" : "Start ▸"}
+          {busy ? "Starting\u2026" : "Start \u2192"}
         </button>
       </main>
-
-      {/* the crew, standing in the grass */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-[6vh] z-10 flex items-end justify-center gap-3 sm:gap-6" aria-hidden>
-        {CREW.map((id) => (
-          <PixelAgent key={id} actorId={id} size={id === "you" ? 64 : 48} className={id === "you" ? "h-auto w-[44px] sm:w-[64px]" : "h-auto w-[34px] sm:w-[48px]"} />
-        ))}
-      </div>
     </div>
   );
 }

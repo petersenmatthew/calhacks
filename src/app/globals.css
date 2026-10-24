@@ -373,18 +373,30 @@
   }
 }
 
-/* Landing meadow: clouds drift, front flowers sway in hard steps. */
+/* Landing meadow: clouds drift, birds cross, wheat and leaves sway, all in hard steps. */
+.pxl-cloud-a { animation: pxl-drift 40s steps(20, end) infinite; }
+.pxl-cloud-b { animation: pxl-drift 55s steps(24, end) infinite reverse; }
 @keyframes pxl-drift {
   0%, 100% { transform: translateX(0); }
-  50% { transform: translateX(6px); }
+  50% { transform: translateX(14px); }
 }
-@keyframes pxl-sway {
-  0%, 100% { transform: translateX(0); }
-  50% { transform: translateX(0.5px); }
+.pxl-birds { animation: pxl-fly 38s linear infinite; }
+@keyframes pxl-fly {
+  from { transform: translateX(-90px); }
+  to { transform: translateX(330px); }
 }
-.pxl-drift-a { animation: pxl-drift 18s steps(6, end) infinite; }
-.pxl-drift-b { animation: pxl-drift 24s steps(8, end) infinite reverse; }
-.pxl-sway { animation: pxl-sway 2.4s steps(1, end) infinite; }
+.pxl-flap { transform-box: fill-box; transform-origin: 50% 50%; animation: pxl-flap 0.5s steps(1, end) infinite; }
+@keyframes pxl-flap {
+  0%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(-1); }
+}
+.pxl-wheat, .pxl-leaf, .pxl-sway { transform-box: fill-box; transform-origin: 50% 100%; }
+.pxl-wheat { animation: pxl-wheat 3.2s steps(4, end) infinite; }
+.pxl-leaf { animation: pxl-wheat 4.6s steps(3, end) infinite reverse; }
+@keyframes pxl-wheat {
+  0%, 100% { transform: rotate(-2deg); }
+  50% { transform: rotate(3deg); }
+}
 @media (prefers-reduced-motion: reduce) {
-  .pxl-drift-a, .pxl-drift-b, .pxl-sway { animation: none; }
+  .pxl-cloud-a, .pxl-cloud-b, .pxl-birds, .pxl-flap, .pxl-wheat, .pxl-leaf { animation: none; }
 }
