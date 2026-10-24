@@ -32,6 +32,43 @@ export function setExecutionMode(ctx: AppContext, actorId: string, mode: Executi
   });
 }
 
+/** "one": the team finishes each case before starting the next. "all": cases run in parallel. */
+export type RunMode = "one" | "all";
+
+export function getRunMode(ctx: AppContext): RunMode {
+  const row = ctx.db.select().from(settings).where(eq(settings.key, "run_mode")).get();
+  return (row?.value as RunMode | undefined) ?? ctx.config.defaultRunMode;
+}
+
+export function setRunMode(ctx: AppContext, actorId: string, mode: RunMode) {
+  return guard(ctx, { actorId, action: "settings.run_mode" }, () => {
+    authorize(ctx, actorId, "settings:update");
+    ctx.db
+      .insert(settings)
+      .values({ key: "run_mode", value: mode })
+      .onConflictDoUpdate({ target: settings.key, set: { value: mode } })
+      .run();
+    appendAudit(ctx, { actorId, action: "settings.run_mode", category: "system", details: { mode } });
+    notifyChange(ctx, "jobs");
+    return mode;
+  });
+}
+
+/** A case to run next in one-at-a-time mode, such as a newly simulated invoice. */
+export function getFocusWorkItem(ctx: AppContext): string | null {
+  const row = ctx.db.select().from(settings).where(eq(settings.key, "focus_work_item")).get();
+  return typeof row?.value === "string" ? row.value : null;
+}
+
+export function setFocusWorkItem(ctx: AppContext, workItemId: string) {
+  ctx.db
+    .insert(settings)
+    .values({ key: "focus_work_item", value: workItemId })
+    .onConflictDoUpdate({ target: settings.key, set: { value: workItemId } })
+    .run();
+  notifyChange(ctx, "jobs");
+}
+
 /** Per-employee settings the controller can change from the canvas. */
 export interface AgentSettings {
   /** Paused employees keep their queued work; nothing new starts until they are resumed. */

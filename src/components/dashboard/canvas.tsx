@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useState } from "react";
 import useSWR from "swr";
 import { toast } from "sonner";
+import { Radio } from "lucide-react";
 import { fetcher } from "@/lib/api";
 import { buildDecision, shortTitle } from "@/lib/decision";
 import { buildFrames, type Frame } from "@/lib/frames";
@@ -32,14 +33,26 @@ async function fetchMany([, ...ids]: string[]) {
  */
 export function SystemCanvas({ data, initialTask = null, onChanged }: { data: DashboardData; initialTask?: string | null; onChanged: () => void }) {
   const items = useMemo(() => data.workItems.filter((i) => i.period === data.period), [data]);
-  const [task, setTaskState] = useState<string | null>(initialTask);
+  const [picked, setPicked] = useState<string | null>(initialTask);
+  // In one-at-a-time mode the canvas follows the case the team is on, until the person picks another view.
+  const [follow, setFollow] = useState(initialTask === null);
+  const live = data.activeWorkItemId && items.some((i) => i.id === data.activeWorkItemId) ? data.activeWorkItemId : null;
+  const following = follow && live !== null;
+  const task = following ? live : picked;
   const [focus, setFocus] = useState<Focus>(null);
 
   const setTask = useCallback((id: string | null) => {
-    setTaskState(id);
+    setPicked(id);
+    setFollow(false);
     setFocus(null);
     window.history.replaceState(null, "", id ? "/canvas?task=" + id : "/canvas");
   }, []);
+
+  const followLive = () => {
+    setFollow(true);
+    setFocus(null);
+    window.history.replaceState(null, "", "/canvas");
+  };
 
   const recentIds = items.slice(0, RECENT).map((i) => i.id);
   const recent = useSWR<WorkspaceData[]>(task ? null : ["canvas-frames", ...recentIds], fetchMany, { keepPreviousData: true });
@@ -84,6 +97,16 @@ export function SystemCanvas({ data, initialTask = null, onChanged }: { data: Da
           }}
         />
         <Caption data={data} />
+        {live && !following ? (
+          <button
+            type="button"
+            onClick={followLive}
+            className="card-soft absolute top-4 right-4 z-40 flex h-9 items-center gap-1.5 px-3 text-[12.5px] font-medium text-zinc-700 hover:text-zinc-950"
+          >
+            <Radio className="size-3.5 text-primary" />
+            Follow live case
+          </button>
+        ) : null}
         {task ? <ReviewSwitcher taskId={task} current="sidebar" className="absolute right-4 bottom-4 z-40" /> : null}
       </div>
       <Sidebar
@@ -94,6 +117,8 @@ export function SystemCanvas({ data, initialTask = null, onChanged }: { data: Da
         onTask={setTask}
         onDecided={async () => {
           onChanged();
+          // While following, the team's next step decides what shows next.
+          if (following) return;
           // Let the confirmation read for a beat. Stay when the same task still has
           // something waiting, such as a new rule plus the redone split.
           await new Promise((r) => window.setTimeout(r, 900));

@@ -197,7 +197,7 @@ export const SEED_CASES: SeedCase[] = [
     key: { outcome: "AUTO_MATCHED", disputeCents: 0, allocation: { "PRJ-MMP": 240_000 }, policyId: AUTO },
   },
 
-  /* ---------- The opening work item (WI-1001): job ended early, charge is correct ---------- */
+  /* ---------- Job ended early, charge is correct ---------- */
   {
     id: "E-01", category: "idle_explained", title: "Lambda H100 up 24 h, job ran 18 h",
     data: buildInstanceCase({

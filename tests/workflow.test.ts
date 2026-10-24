@@ -26,16 +26,34 @@ describe("seeded month", () => {
   it("auto-matches clean lines and explains a correctly billed instance whose job ended early", async () => {
     const { ctx, orchestrator } = setup();
     await orchestrator.drain();
-    const item = workItem(ctx, "WI-1001");
+    const id = ctx.db.select().from(workItems).where(eq(workItems.invoiceLineId, "HEL-2026-10-121-L1")).get()!.id;
+    const item = workItem(ctx, id);
     expect(item.state).toBe("RESOLVED");
     expect(item.outcome).toBe("CHARGE_EXPLAINED");
-    expect(ctx.db.select().from(vendorDisputes).all()).toHaveLength(0);
-    expect(proposalsFor(ctx, "WI-1001").every((p) => p.kind === "ALLOCATION")).toBe(true);
+    expect(ctx.db.select().from(vendorDisputes).where(eq(vendorDisputes.workItemId, id)).all()).toHaveLength(0);
+    expect(proposalsFor(ctx, id).every((p) => p.kind === "ALLOCATION")).toBe(true);
     expect(unbalancedEntries(ctx)).toHaveLength(0);
   });
 });
 
 describe("Scenario 1: suspected GPU overbilling", () => {
+  it("in one-at-a-time mode, opens on the overbilling case and starts the next case only when it leaves the team", async () => {
+    const { ctx, orchestrator } = setup(":memory:", { defaultRunMode: "one" });
+    await orchestrator.drain();
+    const opening = workItem(ctx, "WI-1001");
+    expect(opening.invoiceLineId).toBe("HEL-2026-10-133-L2");
+    expect(opening.state).toBe("NEEDS_APPROVAL");
+    const others = ctx.db.select().from(workItems).all().filter((i) => i.id !== "WI-1001");
+    expect(others.every((i) => i.state === "NEW")).toBe(true);
+
+    const [approval] = pendingApprovals(ctx, "WI-1001");
+    decideApproval(ctx, { approvalId: approval.id, actorId: ACTOR.controller, decision: "APPROVED" });
+    await orchestrator.drain();
+    expect(workItem(ctx, "WI-1001").state).toBe("DISPUTED");
+    expect(workItem(ctx, "WI-1002").state).not.toBe("NEW");
+    expect(workItem(ctx, "WI-1003").state).toBe("NEW");
+  });
+
   it("disputes $1,200, waits for approval, and keeps the liability until the vendor credits", async () => {
     const { ctx, orchestrator } = setup();
     await orchestrator.drain();

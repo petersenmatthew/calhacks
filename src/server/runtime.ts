@@ -29,6 +29,7 @@ export function getRuntime(): Runtime {
         llmAvailable,
         model: process.env.OPENAI_MODEL || getDefaultModel(),
         defaultMode: envMode() ?? (llmAvailable ? "llm" : "deterministic"),
+        defaultRunMode: process.env.RUN_MODE === "all" ? "all" : "one",
       },
     });
     if (!isSeeded(ctx)) seedEnvironment(ctx);

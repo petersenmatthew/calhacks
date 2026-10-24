@@ -11,6 +11,8 @@ export interface AppConfig {
   model: string;
   /** Default execution mode when nothing is stored in settings. */
   defaultMode: "llm" | "deterministic";
+  /** "one": the team works one case at a time. "all": cases run in parallel. */
+  defaultRunMode: "one" | "all";
 }
 
 export interface AppContext {
@@ -40,6 +42,7 @@ export function createAppContext(options: { file: string; config?: Partial<AppCo
       llmAvailable,
       model: options.config?.model ?? "gpt-5.6-luna",
       defaultMode: options.config?.defaultMode ?? (llmAvailable ? "llm" : "deterministic"),
+      defaultRunMode: options.config?.defaultRunMode ?? "all",
     },
   };
 }
