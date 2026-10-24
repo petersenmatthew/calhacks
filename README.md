@@ -71,11 +71,11 @@ Copy `.env.example` to `.env.local`. All are optional.
 
 ### Autonomy demo (no clicks needed for the work itself)
 
-1. Open **Autonomy**. On boot the Policy Analyst read six months of AP history and proposed **VARIANCE-MATERIALITY v1**: variances up to $50 were always paid as billed, every dispute was $96 or more. Approve it. (It also appears in **Needs you** on the board.)
+1. Open **Canvas**. On boot the Policy Analyst read six months of AP history and proposed **VARIANCE-MATERIALITY v1**: variances up to $50 were always paid as billed, every dispute was $96 or more. Approve it. It is the first item under **Needs you** in the sidebar: expand it and approve. (It also appears on the board.) The sidebar's **Running on its own** list shows each feed's sync position and every follow-up as it fires.
 2. Wait two minutes, or use the clock in the top bar (**+1 hour**). The Helios and Meridian feeds publish new lines; the scheduler syncs them on a cursor and the agents work them: an exact match auto-posts, and a Helios A100 line billed $0.40/h over contract ($12) is accepted under the learned policy instead of disputed.
-3. **+3 days**: a Helios line billed 6 h after termination arrives and becomes a $600 dispute waiting for you. Approve it.
+3. **+3 days**: a Helios line billed 6 h after termination arrives and becomes a $600 dispute waiting for you. Approve it, and the Vendor Liaison writes the dispute letter and sends it.
 4. **+15 days**: Helios has not answered. The scheduler assigns the Vendor Liaison, which checks the dispute and sends a follow-up citing contract §7.2. **+16 days**: still nothing, so it escalates to the controller with a recommended next step. Leave an approval waiting and it is reminded after a day and escalated to the CFO after three.
-5. At the bottom of **Autonomy**, **Run** the evaluation: 14 planted cases scored against the answer key.
+5. In **Audit trail → Evaluation & autonomy**, **Run** the evaluation: 14 planted cases scored against the answer key. The same tab has the full feed and follow-up history.
 
 ## How it works
 
@@ -150,7 +150,7 @@ npm run eval:planted            # deterministic replay, writes docs/eval-report.
 npm run eval:planted -- --llm   # LLM agents, writes docs/eval-report-llm.md (needs OPENAI_API_KEY)
 ```
 
-Deterministic replay scores 14/14 ([report](docs/eval-report.md)): 4/4 overcharges caught, no correct invoice disputed. That run checks the controls, arithmetic, and plumbing end to end; it is a scripted policy, so it is not evidence of model judgment. The LLM run is the meaningful score. The **Autonomy** page can also run both.
+Deterministic replay scores 14/14 ([report](docs/eval-report.md)): 4/4 overcharges caught, no correct invoice disputed. That run checks the controls, arithmetic, and plumbing end to end; it is a scripted policy, so it is not evidence of model judgment. The LLM run is the meaningful score. **Audit trail → Evaluation & autonomy** can also run both.
 
 ## Tests
 

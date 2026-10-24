@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useContext, useState } from "react";
 import useSWR from "swr";
-import { Bot, Network, ShieldCheck, SquareKanban } from "lucide-react";
+import { Network, ShieldCheck, SquareKanban } from "lucide-react";
 import { fetcher } from "@/lib/api";
 import { periodLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -30,7 +30,6 @@ export const viewHref = (v: View) => (v === "canvas" ? "/canvas" : "/");
 const TABS = [
   { key: "board", href: "/", label: "Board", icon: SquareKanban },
   { key: "canvas", href: "/canvas", label: "Canvas", icon: Network },
-  { key: "autonomy", href: "/autonomy", label: "Autonomy", icon: Bot },
   { key: "audit", href: "/audit", label: "Audit trail", icon: ShieldCheck },
 ] as const;
 
@@ -47,9 +46,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const onTask = pathname.startsWith("/investigations");
   const active = pathname.startsWith("/audit")
     ? "audit"
-    : pathname.startsWith("/autonomy")
-      ? "autonomy"
-      : pathname === "/canvas" || (onTask && lastView === "canvas")
+    : pathname === "/canvas" || (onTask && lastView === "canvas")
         ? "canvas"
         : "board";
 

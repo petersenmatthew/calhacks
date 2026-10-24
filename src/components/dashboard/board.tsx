@@ -73,7 +73,7 @@ function Card({ item, stage, data, agent }: { item: Item; stage: BoardStage; dat
 
 function PolicyCard({ p }: { p: DashboardData["policyApprovals"][number] }) {
   return (
-    <Link href="/autonomy" className="card-soft mx-auto block w-full max-w-[260px] p-3 transition-transform hover:-translate-y-px animate-enter">
+    <Link href="/canvas" className="card-soft mx-auto block w-full max-w-[260px] p-3 transition-transform hover:-translate-y-px animate-enter">
       <div className="flex items-start gap-2.5">
         <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-zinc-50 ring-1 ring-zinc-200">
           <ScrollText className="size-4 text-zinc-600" />

@@ -307,16 +307,16 @@ export function AutonomyView() {
   const { data, mutate } = useSWR<AutonomyData>("/api/autonomy", fetcher, { keepPreviousData: true, refreshInterval: 10_000 });
   useLiveRefresh(() => mutate(), undefined, 500);
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="mx-auto max-w-6xl pb-10">
-        <div className="px-6 pt-6 pb-5">
-          <h1 className="text-[16px] font-semibold tracking-tight">What runs without you</h1>
-          <p className="mt-1 max-w-2xl text-[12.5px] leading-snug text-muted-foreground">
-            Work starts from billing feeds and the calendar, not from clicks. Business time now:{" "}
+    <div className="pb-10">
+      <div className="max-w-6xl">
+        <div className="px-6 pt-5 pb-5">
+          <p className="max-w-2xl text-[12.5px] leading-snug text-muted-foreground">
+            The score against the planted-error answer key, and the record of what ran without anyone clicking. Business time now:{" "}
             <span className="text-zinc-800 tnum">{data ? dateTimeUtc(data.clock.now) : "…"}</span>
             {data && data.clock.offsetMs > 0 ? " (moved " + days(data.clock.offsetMs) + " ahead for the demo)" : ""}.
           </p>
         </div>
+        <Evaluation />
         {!data ? (
           <div className="px-6">
             <Skeleton className="h-64 rounded-lg" />
@@ -328,7 +328,6 @@ export function AutonomyView() {
             <FollowUps data={data} />
           </>
         )}
-        <Evaluation />
       </div>
     </div>
   );
