@@ -10,7 +10,8 @@ import { clockTime, compactMoney, dateOnly, money, periodLabel } from "@/lib/for
 import { buildFeed } from "@/lib/narration";
 import { cn } from "@/lib/utils";
 import type { DashboardData, WorkspaceData } from "@/server/queries";
-import { DecisionCard } from "../review/decision-card";
+import { DecisionThread, type TalkTurn } from "../review/decision-thread";
+import type { DecisionTurn } from "@/server/assistant";
 import { DisputeLetter } from "../comms/dispute-letter";
 import { VendorThread } from "../comms/vendor-thread";
 import { AgentAvatar } from "../status";
@@ -347,7 +348,26 @@ function HowWeGotHere({ w }: { w: WorkspaceData }) {
   );
 }
 
-function TaskView({ w, onDecided }: { w: WorkspaceData; onDecided: () => void }) {
+function TaskView({
+  w,
+  onDecided,
+  turns,
+  pending,
+  onSomethingElse,
+  chat,
+  chatPending,
+  onTask,
+}: {
+  w: WorkspaceData;
+  onDecided: () => void;
+  turns: TalkTurn[];
+  pending: boolean;
+  onSomethingElse: () => void;
+  /** Questions asked about this task, answered in place. */
+  chat: ChatMessage[];
+  chatPending: boolean;
+  onTask: (id: string) => void;
+}) {
   const decision = buildDecision(w);
   const record = (
     <Link href={"/investigations/" + w.item.id + "/record"} className="inline-flex items-center gap-0.5 hover:text-zinc-900">
@@ -357,7 +377,16 @@ function TaskView({ w, onDecided }: { w: WorkspaceData; onDecided: () => void })
   if (decision) {
     return (
       <div className="px-5 pt-5 pb-6">
-        <DecisionCard key={w.item.id + (decision.approvalId ?? "q")} w={w} decision={decision} keys onDone={onDecided} footer={record} />
+        <DecisionThread
+          key={w.item.id + (decision.approvalId ?? "q")}
+          w={w}
+          decision={decision}
+          turns={turns}
+          pending={pending}
+          onSomethingElse={onSomethingElse}
+          onDone={onDecided}
+          footer={record}
+        />
         <HowWeGotHere w={w} />
       </div>
     );
@@ -382,6 +411,7 @@ function TaskView({ w, onDecided }: { w: WorkspaceData; onDecided: () => void })
       {w.dispute?.letterBody ? <DisputeLetter dispute={w.dispute} /> : null}
       <VendorThread w={w} />
       <div className="text-[12.5px] text-zinc-500">{record}</div>
+      {chat.length || chatPending ? <Thread messages={chat} pending={chatPending} onTask={onTask} inset /> : null}
     </div>
   );
 }
@@ -410,19 +440,22 @@ function Thread({
   pending,
   onTask,
   speaker,
+  inset,
 }: {
   messages: ChatMessage[];
   pending: boolean;
   onTask: (id: string) => void;
   /** Who answers, when it is one employee rather than the assistant. */
   speaker?: { actorId: string; name: string };
+  /** Inside a padded view: no padding of its own. */
+  inset?: boolean;
 }) {
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
     end.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages.length, pending]);
   return (
-    <div className="space-y-4 px-5 pt-5 pb-4">
+    <div className={cn("space-y-4", inset ? "border-t border-zinc-100 pt-5" : "px-5 pt-5 pb-4")}>
       {messages.map((m, i) =>
         m.role === "user" ? (
           <div key={i} className="animate-enter flex justify-end">
@@ -452,9 +485,12 @@ function Thread({
   );
 }
 
-function Composer({ placeholder, onSend, disabled }: { placeholder: string; onSend: (text: string) => void; disabled: boolean }) {
+function Composer({ placeholder, onSend, disabled, focusKey = 0 }: { placeholder: string; onSend: (text: string) => void; disabled: boolean; focusKey?: number }) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (focusKey) ref.current?.focus();
+  }, [focusKey]);
   const submit = () => {
     const t = text.trim();
     if (!t || disabled) return;
@@ -633,6 +669,13 @@ export function Sidebar({
   const [pending, setPending] = useState(false);
   const [frameChats, setFrameChats] = useState<Record<string, ChatMessage[]>>({});
   const [framePending, setFramePending] = useState<string | null>(null);
+  // Conversations about pending decisions, one per decision.
+  const [talks, setTalks] = useState<Record<string, TalkTurn[]>>({});
+  const [talkPending, setTalkPending] = useState<string | null>(null);
+  const [focusKey, setFocusKey] = useState(0);
+  // Questions about a task without a pending decision stay in that task's view.
+  const [taskChats, setTaskChats] = useState<Record<string, ChatMessage[]>>({});
+  const [taskPending, setTaskPending] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
 
   const needs = items.filter((i) => groupOf(i) === "needs");
@@ -682,6 +725,44 @@ export function Sidebar({
 
   const ready = w && w.item.id === task ? w : undefined;
   const mode = frameChat ? "frame" : agentPanel ? "agent" : chatOpen ? "chat" : task ? "task" : "home";
+  const pendingDecision = ready ? buildDecision(ready) : null;
+  const talkKey = ready && pendingDecision ? ready.item.id + ":" + (pendingDecision.approvalId ?? "q") : null;
+  const talkTo = pendingDecision ? (ready?.actors[pendingDecision.askedBy]?.name ?? "the agent") : null;
+
+  /** In a decision, the chat box talks to the employee who asked. */
+  const reply = async (text: string) => {
+    if (!talkKey || !ready) return;
+    const k = talkKey;
+    const next = [...(talks[k] ?? []), { role: "user" as const, content: text }];
+    setTalks((m) => ({ ...m, [k]: next }));
+    setTalkPending(k);
+    let turn: TalkTurn;
+    try {
+      const r = await postJson<DecisionTurn>("/api/work-items/" + ready.item.id + "/discuss", { messages: next.map(({ role, content }) => ({ role, content })) });
+      turn = { role: "assistant", content: r.reply, choiceId: r.choiceId, note: r.note };
+    } catch (e) {
+      turn = { role: "assistant", content: "Something went wrong: " + (e as Error).message };
+    }
+    setTalks((m) => ({ ...m, [k]: [...(m[k] ?? []), turn] }));
+    setTalkPending((p) => (p === k ? null : p));
+  };
+  const talking = mode === "task" && talkKey !== null;
+
+  const askTask = async (text: string) => {
+    if (!task) return;
+    const k = task;
+    const next = [...(taskChats[k] ?? []), { role: "user" as const, content: text }];
+    setTaskChats((m) => ({ ...m, [k]: next }));
+    setTaskPending(k);
+    let content: string;
+    try {
+      content = (await postJson<{ reply: string }>("/api/assistant", { messages: next, taskId: k })).reply;
+    } catch (e) {
+      content = "Something went wrong: " + (e as Error).message;
+    }
+    setTaskChats((m) => ({ ...m, [k]: [...(m[k] ?? []), { role: "assistant", content }] }));
+    setTaskPending((p) => (p === k ? null : p));
+  };
 
   const askFrame = async (f: FrameChatTarget, text: string) => {
     const next = [...(frameChats[f.key] ?? []), { role: "user" as const, content: text }];
@@ -761,7 +842,16 @@ export function Sidebar({
             ) : mode === "chat" ? (
               <Thread messages={chat} pending={pending} onTask={(id) => { setChatOpen(false); onTask(id); }} />
             ) : ready ? (
-              <TaskView w={ready} onDecided={onDecided} />
+              <TaskView
+                w={ready}
+                onDecided={onDecided}
+                turns={talkKey ? (talks[talkKey] ?? []) : []}
+                pending={talkPending !== null && talkPending === talkKey}
+                onSomethingElse={() => setFocusKey((n) => n + 1)}
+                chat={taskChats[ready.item.id] ?? []}
+                chatPending={taskPending === ready.item.id}
+                onTask={onTask}
+              />
             ) : (
               <div className="space-y-3 px-5 pt-6">
                 <div className="h-3 w-32 animate-pulse rounded bg-zinc-100" />
@@ -791,7 +881,12 @@ export function Sidebar({
                 Continue chat ({chat.length})
               </button>
             ) : null}
-            <Composer placeholder={task ? "Ask about this task" : "Ask about your books"} onSend={ask} disabled={pending} />
+            <Composer
+              placeholder={talking ? "Reply to " + talkTo : task ? "Ask about this task" : "Ask about your books"}
+              onSend={talking ? reply : mode === "task" ? askTask : ask}
+              disabled={talking ? talkPending === talkKey : mode === "task" ? taskPending === task : pending}
+              focusKey={focusKey}
+            />
           </div>
         </>
       )}

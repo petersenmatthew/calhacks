@@ -1,4 +1,6 @@
 import { Agent, run } from "@openai/agents";
+import { z } from "zod";
+import { buildDecision, type Decision } from "@/lib/decision";
 import { buildFrames, frameText, NODE_OF } from "@/lib/frames";
 import type { AppContext } from "./context";
 import { getDashboard, getWorkspace } from "./queries";
@@ -136,3 +138,96 @@ export async function askAboutFrame(ctx: AppContext, messages: ChatMessage[], ta
   return String(result.finalOutput ?? "").trim() || "I could not answer that.";
 }
 
+
+/* ------------------------------------------------------------------ talking through a decision */
+
+export type DecisionTurn = { reply: string; choiceId: string | null; note: string | null };
+
+const Turn = z.object({
+  reply: z.string().describe("What you say to the controller."),
+  choice_id: z.string().nullable().describe("Id of the option the controller clearly chose in their last message, else null."),
+  note: z.string().nullable().describe("The controller's own instruction or answer when it is not one of the options, else null."),
+});
+
+/** Opening messages, kept until the decision changes. */
+const openers = new Map<string, string>();
+
+function decisionBriefing(w: NonNullable<ReturnType<typeof getWorkspace>>, d: Decision) {
+  const p = [...w.proposals].reverse()[0];
+  return [
+    "Task " + w.item.id + ": " + w.item.title + ". " + d.context + ".",
+    "The decision on screen: " + d.title + ". " + d.ask + ".",
+    "Options shown as buttons:",
+    ...d.choices.map((c) => "- id " + c.id + ": " + c.label + (c.hint ? " (" + c.hint + ")" : "") + (c.primary ? " [your recommendation]" : "")),
+    d.custom === "changes"
+      ? "The controller may also tell you to do something else; that sends the work back with their instruction."
+      : d.custom === "answer"
+        ? "The controller may also answer in their own words."
+        : "",
+    "Facts behind your recommendation: " + d.why.join(" "),
+    ...w.findings.map((f) => "Finding " + f.id + ": " + f.summary),
+    ...(p ? ["Proposal " + p.id + " (" + p.status + "): " + p.summary, "Rationale: " + p.rationale] : []),
+    ...(w.item.pendingQuestion ? ["Open question: " + w.item.pendingQuestion.question] : []),
+    ...w.policies.filter((x) => x.status === "APPROVED").map((x) => "Active policy " + x.policyKey + " v" + x.version + ": " + x.statement),
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Without a model: the first fact and the recommendation. */
+function plainOpener(d: Decision) {
+  const rec = d.choices.find((c) => c.primary) ?? d.choices[0];
+  return [d.why[0], rec ? "I'd go with " + rec.label.toLowerCase() + (rec.hint ? ", " + rec.hint : "") + "." : d.ask + "."].filter(Boolean).join(" ");
+}
+
+/**
+ * The controller talking a decision through with the employee who asked for it.
+ * With no messages it returns the employee's opening line. Otherwise it answers and,
+ * when the controller has clearly decided, says which option (or what instruction) they meant.
+ * Nothing is recorded here; the controller confirms in the task view.
+ */
+export async function discussDecision(ctx: AppContext, messages: ChatMessage[], taskId: string): Promise<DecisionTurn> {
+  const w = getWorkspace(ctx, taskId);
+  const d = w ? buildDecision(w) : null;
+  if (!w || !d) return { reply: "This one is already decided.", choiceId: null, note: null };
+  const me = w.actors[d.askedBy];
+  const name = me?.name ?? "Agent";
+  const key = taskId + ":" + (d.approvalId ?? "q") + ":" + d.choices.map((c) => c.id).join(",");
+
+  if (!messages.length && openers.has(key)) return { reply: openers.get(key)!, choiceId: null, note: null };
+  if (!ctx.config.llmAvailable) {
+    if (!messages.length) return { reply: plainOpener(d), choiceId: null, note: null };
+    const said = messages.at(-1)!.content.toLowerCase();
+    const pick = d.choices.find((c) => said.includes(c.label.toLowerCase().split(" ")[0]));
+    return pick
+      ? { reply: "Got it: " + pick.label.toLowerCase() + ". Confirm and I'll do it.", choiceId: pick.id, note: null }
+      : { reply: "Live answers need an OpenAI key. Pick an option above, or set OPENAI_API_KEY.", choiceId: null, note: null };
+  }
+
+  const instructions = [
+    "You are " + name + (me?.title ? ", " + me.title : "") + ", an AI employee on the Atlas Research finance team, talking to the controller about a decision you need from them.",
+    "Speak in first person, plainly, like a colleague. Plain text. No headings, no bold, no lists, no emojis.",
+    "Use only the briefing. If it does not say, say what you would need to check.",
+    messages.length
+      ? "Reply to the controller's last message in one to three short sentences. If they clearly chose one of the options, set choice_id to its id and say in one short sentence what you will do once they hit Confirm. If they clearly want something that is not an option, put their instruction in note in their own words, cleaned up, and say what you will do once they hit Confirm. If they are asking or unsure, leave both null. Never say it is done."
+      : "Write your opening message: under 25 words, like a quick note to a colleague. What happened in everyday words, then what you would do. No record ids, policy names or clause numbers. Do not list the options; they are shown as buttons. choice_id and note are null.",
+  ].join(" ");
+  // The opening line is part of the conversation the controller is replying to.
+  const history = messages.length && openers.has(key) ? [{ role: "assistant" as const, content: openers.get(key)! }, ...messages] : messages;
+  const transcript = history
+    .slice(-12)
+    .map((m) => (m.role === "user" ? "Controller: " : name + ": ") + m.content)
+    .join("\n");
+  const agent = new Agent({ name, instructions, model: ctx.config.model, outputType: Turn });
+  const input = "Briefing:\n" + decisionBriefing(w, d) + (transcript ? "\n\nConversation so far:\n" + transcript : "");
+  const result = await run(agent, input, { maxTurns: 1 });
+  const out = result.finalOutput;
+  const reply = out?.reply?.trim() || (messages.length ? "Sorry, say that again?" : plainOpener(d));
+  if (!messages.length) {
+    openers.set(key, reply);
+    return { reply, choiceId: null, note: null };
+  }
+  const choiceId = out?.choice_id && d.choices.some((c) => c.id === out.choice_id) ? out.choice_id : null;
+  const note = !choiceId && d.custom && out?.note && out.note.trim().length >= 3 ? out.note.trim().slice(0, 1000) : null;
+  return { reply, choiceId, note };
+}

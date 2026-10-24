@@ -98,10 +98,12 @@ export function getAgentStatuses(ctx: AppContext) {
             .all(running.id) as { tool: string }[]
         ).map((r) => r.tool)
       : [];
+    const agentSettings = getAgentSettings(ctx, agentId);
     return {
       agentId,
       status: running ? "working" : queued.length ? "queued" : "idle",
-      paused: getAgentSettings(ctx, agentId).paused,
+      paused: agentSettings.paused,
+      guidance: agentSettings.guidance,
       currentTask: running?.task ?? null,
       currentWorkItemId: running?.workItemId ?? queued[0]?.workItemId ?? null,
       currentMode: running?.mode ?? null,
@@ -229,6 +231,8 @@ export function getDashboard(ctx: AppContext, requestedPeriod?: string | null) {
       pendingApproval: pending.some((p) => p.workItemId === i.id) || (i.state === "DISPUTED" && Boolean(i.pendingQuestion)),
     })),
     activity: ctx.db.select().from(activityEvents).orderBy(desc(activityEvents.id)).limit(30).all(),
+    /** Open approval requests and which employee asked, so the canvas can show them waiting on you. */
+    openApprovals: pending.map((a) => ({ id: a.id, workItemId: a.workItemId, requestedBy: a.requestedBy, subjectType: a.subjectType, summary: a.summary })),
     agents: getAgentStatuses(ctx),
     settings: getSettingsView(ctx),
     /** Policy proposals that are not tied to a work item (learned at onboarding). */

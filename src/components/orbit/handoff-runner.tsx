@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Mail } from "lucide-react";
+import { Mail, ScrollText } from "lucide-react";
 import type { OrbitNodeId } from "@/lib/frames";
 import { compactMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,7 @@ import { PixelAgent } from "../pixel-agent";
 /*
  * Hand-offs as a scene: the sender's pixel character runs around the ring to the
  * receiver carrying a note that says what it is passing, hands it over, and walks back.
+ * A newly active policy is carried all the way around, and every seat nods as it passes.
  */
 
 export type Handoff = {
@@ -18,6 +19,7 @@ export type Handoff = {
   workItemId: string | null;
   from: OrbitNodeId;
   to: OrbitNodeId;
+  kind: "handoff" | "question" | "broadcast";
   /** What is being passed, in a few words. */
   label: string;
   /** The sender's note. */
@@ -27,7 +29,7 @@ export type Handoff = {
 
 type Seat = { angle: number; actorId: string; label: string };
 
-const NODE_OF: Record<string, OrbitNodeId> = {
+export const NODE_OF: Record<string, OrbitNodeId> = {
   "agent.compute": "compute",
   "agent.finance": "finance",
   "agent.vendor": "vendor",
@@ -51,9 +53,14 @@ export function handoffsFrom(events: ActivityRow[]): Handoff[] {
   const out: Handoff[] = [];
   rows.forEach((e, i) => {
     if (e.status !== "ok") return;
+    const base = { id: e.id, workItemId: e.workItemId, detail: (e.summary ?? "").trim(), createdAt: e.createdAt };
+    const active = e.title.match(/^Policy (.+) is now active/);
+    if (active) {
+      out.push({ ...base, from: "policy", to: "policy", kind: "broadcast", label: "New rule: " + active[1] });
+      return;
+    }
     const from = NODE_OF[e.actorId];
     if (!from) return;
-    const base = { id: e.id, workItemId: e.workItemId, from, detail: (e.summary ?? "").trim(), createdAt: e.createdAt };
     if (e.toolName === "handoff_to_finance") {
       let label = from === "policy" ? "Policy check" : "Findings";
       const finding = rows
@@ -66,10 +73,10 @@ export function handoffsFrom(events: ActivityRow[]): Handoff[] {
         label =
           gap > 0 ? "Findings: " + compactMoney(gap) + " unsupported" : assessment === "explained" ? "Findings: charge checks out" : "Findings: usage by project";
       }
-      out.push({ ...base, to: "finance", label });
+      out.push({ ...base, from, to: "finance", kind: "handoff", label });
     } else if (e.toolName === "request_more_info") {
       const to = String(get(e.result, "handed_off_to") ?? "").includes("Capacity") ? "capacity" : "compute";
-      out.push({ ...base, to, label: "Question" });
+      out.push({ ...base, from, to, kind: "question", label: "Question" });
     }
   });
   return out;
@@ -78,7 +85,6 @@ export function handoffsFrom(events: ActivityRow[]): Handoff[] {
 /* ------------------------------------------------------------------ timing */
 
 const HOP = 380;
-const GIVE = 1300;
 const FADE = 300;
 const SPEED = 0.22; // canvas px per ms
 const SIZE = 48;
@@ -87,6 +93,11 @@ const JUMP = 13; // degrees either side of a seat it passes, where it jumps over
 
 function plan(h: Handoff, seats: Record<OrbitNodeId, Seat>, R: number) {
   const a = seats[h.from].angle;
+  if (h.kind === "broadcast") {
+    const span = 360 - 2 * OFF;
+    const run = Math.min(6000, (span * Math.PI * R) / 180 / SPEED);
+    return { start: a + OFF, end: a + OFF + span, span, dir: 1, run, give: 500, back: 0, total: HOP + run + 500 + FADE };
+  }
   const b = seats[h.to].angle;
   const delta = ((b - a + 540) % 360) - 180;
   const dir = Math.sign(delta) || 1;
@@ -94,12 +105,34 @@ function plan(h: Handoff, seats: Record<OrbitNodeId, Seat>, R: number) {
   const end = b - dir * OFF;
   const span = end - start;
   const run = Math.min(3400, Math.max(1100, (Math.abs(span) * Math.PI * R) / 180 / SPEED));
+  const give = h.kind === "question" ? 1700 : 1300;
   const back = run * 0.7;
-  return { start, end, span, dir, run, back, total: HOP + run + GIVE + back + FADE };
+  return { start, end, span, dir, run, give, back, total: HOP + run + give + back + FADE };
 }
+type Plan = ReturnType<typeof plan>;
 
 const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
 const clamp = (t: number) => Math.max(0, Math.min(1, t));
+
+/** Where the runner is t ms into a run. */
+function pose(p: Plan, t: number) {
+  const tRun = t - HOP;
+  const tGive = tRun - p.run;
+  const tBack = tGive - p.give;
+  const tFade = tBack - p.back;
+  const phase = tRun < 0 ? "hop" : tGive < 0 ? "run" : tBack < 0 ? "give" : tFade < 0 ? "back" : "fade";
+  const deg =
+    phase === "run"
+      ? p.start + p.span * ease(tRun / p.run)
+      : phase === "give"
+        ? p.end
+        : phase === "back"
+          ? p.end - p.span * ease(tBack / p.back)
+          : phase === "fade" && p.back === 0
+            ? p.end
+            : p.start;
+  return { phase, deg, tRun, tGive, tBack, tFade };
+}
 
 /* ------------------------------------------------------------------ component */
 
@@ -109,13 +142,21 @@ export function HandoffRunner({
   center,
   radius,
   hidden,
+  onPass,
+  onArrive,
+  onRunner,
 }: {
   handoffs: Handoff[];
   seats: Record<OrbitNodeId, Seat>;
   center: { x: number; y: number };
   radius: number;
-  /** Leave a small envelope on each path that was used, click to replay. */
   hidden: boolean;
+  /** A broadcast runner went past this seat. */
+  onPass?: (node: OrbitNodeId) => void;
+  /** The runner reached the receiver. */
+  onArrive?: (h: Handoff) => void;
+  /** Which employee is out running right now, or null. */
+  onRunner?: (node: OrbitNodeId | null) => void;
 }) {
   const [since] = useState(() => Date.now() - 30_000);
   const [played, setPlayed] = useState<number[]>([]);
@@ -123,12 +164,16 @@ export function HandoffRunner({
   const [now, setNow] = useState(0);
   const queue = useRef<number[]>([]);
   const busy = useRef(false);
-  const total = useRef(0);
 
   const h = current ? handoffs.find((x) => x.id === current.id) : undefined;
   const p = h ? plan(h, seats, radius) : null;
+  const live = useRef<{ h?: Handoff; p: Plan | null; onPass?: typeof onPass; onArrive?: typeof onArrive; onRunner?: typeof onRunner; handoffs: Handoff[]; seats: typeof seats }>({
+    p: null,
+    handoffs,
+    seats,
+  });
   useEffect(() => {
-    total.current = p?.total ?? 0;
+    live.current = { h, p, onPass, onArrive, onRunner, handoffs, seats };
   });
 
   // Starts the next queued run. Only called from callbacks.
@@ -139,12 +184,14 @@ export function HandoffRunner({
       if (id === undefined) {
         busy.current = false;
         setCurrent(null);
+        live.current.onRunner?.(null);
         return;
       }
       busy.current = true;
       const at = performance.now();
       setNow(at);
       setCurrent({ id, at });
+      live.current.onRunner?.(live.current.handoffs.find((x) => x.id === id)?.from ?? null);
     };
   }, []);
   const enqueue = (ids: number[]) => {
@@ -175,11 +222,29 @@ export function HandoffRunner({
   useEffect(() => {
     if (!current) return;
     let raf = 0;
+    let lastDeg: number | null = null;
+    let arrived = false;
     const tick = (t: number) => {
-      // A run whose hand-off is gone (the task changed) has no length and ends here.
-      if (t - current.at >= total.current) {
+      const { h: run, p: pl, onPass: pass, onArrive: arrive, seats: s } = live.current;
+      // A run whose hand-off is gone (the task changed) ends here.
+      if (!run || !pl || t - current.at >= pl.total) {
         next.current();
         return;
+      }
+      const at = pose(pl, t - current.at);
+      if (run.kind === "broadcast" && at.phase === "run" && pass) {
+        const prev = lastDeg ?? pl.start;
+        for (const [id, seat] of Object.entries(s) as [OrbitNodeId, Seat][]) {
+          if (id === run.from) continue;
+          // Seat angles unwrapped to the run's range.
+          const target = seat.angle + 360 * Math.ceil((pl.start - seat.angle) / 360);
+          if (target > prev && target <= at.deg) pass(id);
+        }
+        lastDeg = at.deg;
+      }
+      if (!arrived && at.phase === "give") {
+        arrived = true;
+        arrive?.(run);
       }
       setNow(t);
       raf = requestAnimationFrame(tick);
@@ -193,17 +258,12 @@ export function HandoffRunner({
     return { x: center.x + r * Math.cos(a), y: center.y + r * Math.sin(a) };
   };
 
+
   let scene: React.ReactNode = null;
   if (h && p && current && !hidden) {
     const t = now - current.at;
-    const tRun = t - HOP;
-    const tGive = tRun - p.run;
-    const tBack = tGive - GIVE;
-    const tFade = tBack - p.back;
-
-    const phase = tRun < 0 ? "hop" : tGive < 0 ? "run" : tBack < 0 ? "give" : tFade < 0 ? "back" : "fade";
-    const deg =
-      phase === "run" ? p.start + p.span * ease(tRun / p.run) : phase === "give" ? p.end : phase === "back" ? p.end - p.span * ease(tBack / p.back) : p.start;
+    const { phase, deg, tRun, tGive, tBack, tFade } = pose(p, t);
+    const broadcast = h.kind === "broadcast";
 
     // Moving toward the receiver on "run", away on "back".
     const moving = phase === "run" || phase === "back";
@@ -226,14 +286,15 @@ export function HandoffRunner({
     const lift = phase === "hop" ? Math.sin(Math.PI * clamp(t / HOP)) * 22 : moving && near < JUMP ? Math.cos((near / JUMP) * (Math.PI / 2)) * 46 : 0;
 
     // The note rides above the runner, then flies into the receiver's seat.
-    const giveT = phase === "give" ? clamp(tGive / 520) : 0;
-    const noteVisible = phase === "hop" || phase === "run" || (phase === "give" && giveT < 1);
+    const giveT = phase === "give" && !broadcast ? clamp(tGive / 520) : 0;
+    const noteVisible = phase === "hop" || phase === "run" || (phase === "give" && !broadcast && giveT < 1);
     const headY = pos.y - SIZE - lift - 10;
     const note =
       phase === "give"
         ? { x: pos.x + (seatTo.x - pos.x) * ease(giveT), y: headY + (seatTo.y - 20 - headY) * ease(giveT) - Math.sin(Math.PI * giveT) * 40, s: 1 - 0.75 * giveT }
         : { x: pos.x, y: headY, s: phase === "hop" ? clamp(t / HOP) : 1 };
-    const gotIt = phase === "give" && tGive > 480 && tGive < GIVE;
+    const reply = !broadcast && phase === "give" && tGive > 480 ? (h.kind === "question" ? "Hmm, let me look" : "Got it") : null;
+    const Prop = broadcast ? ScrollText : Mail;
 
     // Dust puffs behind the feet while running.
     const puffs = moving
@@ -254,9 +315,12 @@ export function HandoffRunner({
           <div className={cn(moving && "px-run")} style={{ transform: facingLeft ? "scaleX(-1)" : undefined }}>
             <PixelAgent actorId={seats[h.from].actorId} size={SIZE} working={moving} />
           </div>
-          {phase === "back" || phase === "fade" ? null : (
-            <Mail className="absolute -right-2.5 top-[26px] size-5 rounded-[3px] bg-white text-brand-ink" strokeWidth={2.25} />
+          {phase === "back" || (phase === "fade" && !broadcast) ? null : (
+            <Prop className="absolute -right-2.5 top-[26px] size-5 rounded-[3px] bg-white text-brand-ink" strokeWidth={2.25} />
           )}
+          {h.kind === "question" && (phase === "run" || phase === "hop") ? (
+            <span className="absolute -top-1 -left-3 font-mono text-[18px] leading-none font-bold text-zinc-900">?</span>
+          ) : null}
         </div>
         {noteVisible ? (
           <div
@@ -264,19 +328,19 @@ export function HandoffRunner({
             style={{ left: note.x, top: note.y, transform: "translate(-50%, -100%) scale(" + note.s + ")", transformOrigin: "50% 100%" }}
           >
             <div className="flex items-center gap-1.5 text-[16px] font-medium text-zinc-900">
-              <Mail className="size-4 shrink-0 text-brand-ink" />
+              <Prop className="size-4 shrink-0 text-brand-ink" />
               <span className="truncate">{h.label}</span>
             </div>
             {h.detail ? <div className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-zinc-500">{h.detail}</div> : null}
-            <div className="mt-1 font-mono text-[11px] tracking-wide text-zinc-400 uppercase">To {seats[h.to].label}</div>
+            <div className="mt-1 font-mono text-[11px] tracking-wide text-zinc-400 uppercase">{broadcast ? "To everyone" : "To " + seats[h.to].label}</div>
           </div>
         ) : null}
-        {gotIt ? (
+        {reply ? (
           <div
             className="orbit-spawn absolute rounded-lg bg-zinc-900 px-2.5 py-1 text-[15px] font-medium whitespace-nowrap text-white"
             style={{ left: seatTo.x, top: seatTo.y - 48, transform: "translate(-50%, -100%)" }}
           >
-            Got it
+            {reply}
           </div>
         ) : null}
       </>
