@@ -1,16 +1,18 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { toast } from "sonner";
 import { fetcher } from "@/lib/api";
-import { buildDecision, shortTitle } from "@/lib/decision";
+import { buildDecision, outcomeOf, shortTitle } from "@/lib/decision";
 import { buildFrames, type Frame } from "@/lib/frames";
 import type { DashboardData, WorkspaceData } from "@/server/queries";
 import { groupOf, Sidebar, type FrameChatTarget } from "../canvas/sidebar";
 import { useLiveRefresh } from "../live-events";
 import { AgentPanel } from "../orbit/agent-panel";
 import { EMPLOYEES, Orbit, type Focus } from "../orbit/orbit";
+import { DoneMark } from "../canvas/done-card";
+import { isDone } from "@/lib/summary";
 import { Caption } from "./caption";
 
 /** How many recently active tasks feed the canvas when no task is focused. */
@@ -63,6 +65,24 @@ export function SystemCanvas({ data, initialTask = null, onChanged }: { data: Da
   useLiveRefresh(() => (task ? one.mutate() : recent.mutate()), task ? (e) => e.workItemId === task || e.workItemId === null : undefined, task ? 150 : 600);
 
   const w = one.data && one.data.item.id === task ? one.data : undefined;
+
+  // The task on screen just closed: a burst on the canvas and a toast with the outcome.
+  const lastState = useRef<{ id: string; state: string } | null>(null);
+  const [burst, setBurst] = useState<{ key: number; title: string } | null>(null);
+  useEffect(() => {
+    if (!w) return;
+    const prev = lastState.current;
+    lastState.current = { id: w.item.id, state: w.item.state };
+    if (!prev || prev.id !== w.item.id || isDone(prev.state) || !isDone(w.item.state)) return;
+    const title = outcomeOf(w).title;
+    setBurst({ key: Date.now(), title });
+    toast.success(w.item.id + " is done", { description: title });
+  }, [w]);
+  useEffect(() => {
+    if (!burst) return;
+    const t = window.setTimeout(() => setBurst(null), 2200);
+    return () => window.clearTimeout(t);
+  }, [burst]);
   const frames = useMemo(() => {
     if (task) return w ? tagged(w) : [];
     return (recent.data ?? []).flatMap(tagged).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -114,6 +134,15 @@ export function SystemCanvas({ data, initialTask = null, onChanged }: { data: Da
             if (first) setTask(first.id);
           }}
         />
+        {burst ? (
+          <div key={burst.key} className="pointer-events-none absolute inset-0 z-40 grid place-items-center">
+            <div className="done-rise flex flex-col items-center gap-3 rounded-2xl bg-white/90 px-6 py-5 shadow-lg ring-1 ring-primary/40 backdrop-blur-sm">
+              <DoneMark burst size={64} />
+              <div className="text-[15px] font-semibold text-zinc-900">Done</div>
+              <div className="max-w-[320px] text-center text-[13px] leading-snug text-zinc-600">{burst.title}</div>
+            </div>
+          </div>
+        ) : null}
         <Caption data={data} />
       </div>
       <Sidebar

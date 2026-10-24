@@ -297,3 +297,78 @@
 @media (prefers-reduced-motion: reduce) {
   [class*="px-mood-"], .act-sweep, .act-tap, .act-scribble, .act-send, .think-dot, .sticky-drop, .stamp-in { animation: none; }
 }
+
+/* A task closing: the check pops in, a ring pulses out, sparks burst, the summary rows rise in turn. */
+@keyframes done-pop {
+  0% {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.14);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes done-ring {
+  from {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  to {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+@keyframes done-spark {
+  from {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+  to {
+    transform: translate(var(--dx), var(--dy)) scale(0.3);
+    opacity: 0;
+  }
+}
+
+@keyframes done-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.done-pop {
+  animation: done-pop 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+.done-ring {
+  animation: done-ring 1.1s ease-out both;
+}
+.done-spark {
+  animation: done-spark 0.9s ease-out both;
+}
+.done-rise {
+  animation: done-rise 0.35s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .done-pop,
+  .done-ring,
+  .done-spark,
+  .done-rise {
+    animation: none;
+  }
+  .done-ring,
+  .done-spark {
+    display: none;
+  }
+}

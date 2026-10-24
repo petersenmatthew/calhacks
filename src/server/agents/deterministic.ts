@@ -424,7 +424,7 @@ async function vendorReplyPolicy(c: Caller, run: AgentRunContext) {
       decision: "credited",
       credit_reference: body.match(/\b(?:CM|CR|CN)[-\s#]?\d{2,}\b/i)?.[0] ?? null,
       credit_amount_cents: null,
-      confirmation_message: "Thank you for issuing the credit of " + d.disputed_amount + ". We have applied it against invoice line " + (ev?.invoice as Json | undefined)?.line + " and closed dispute " + d.id + ".",
+      confirmation_message: "Thank you for issuing the credit of " + d.disputed_amount + ". We have applied it" + ((ev?.invoice as Json | undefined)?.lineId ? " against invoice line " + (ev?.invoice as Json).lineId : "") + " and closed dispute " + d.id + ".",
       summary: vendor + " credited the full " + d.disputed_amount + ". The payable drops by that amount.",
     });
     return;

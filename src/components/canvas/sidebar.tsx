@@ -8,11 +8,13 @@ import { postJson } from "@/lib/api";
 import { askVerb, buildDecision, outcomeOf, shortTitle } from "@/lib/decision";
 import { clockTime, compactMoney, dateOnly, money, periodLabel } from "@/lib/format";
 import { buildFeed } from "@/lib/narration";
+import { isDone } from "@/lib/summary";
 import { cn } from "@/lib/utils";
 import type { DashboardData, WorkspaceData } from "@/server/queries";
 import { DecisionThread, type TalkTurn } from "../review/decision-thread";
 import type { DecisionTurn } from "@/server/assistant";
 import { DisputeLetter } from "../comms/dispute-letter";
+import { DoneCard } from "./done-card";
 import { VendorThread } from "../comms/vendor-thread";
 import { AgentAvatar } from "../status";
 import { LearnedPolicyRow, pendingLearnedPolicy, RunningOnItsOwn, useAutonomy } from "../autonomy/sidebar-parts";
@@ -348,6 +350,18 @@ function HowWeGotHere({ w }: { w: WorkspaceData }) {
   );
 }
 
+/** True once, for the render after this task moved to done while it was on screen. */
+function useJustFinished(w: WorkspaceData) {
+  const seen = useRef<{ id: string; state: string } | null>(null);
+  const [finishedId, setFinishedId] = useState<string | null>(null);
+  useEffect(() => {
+    const prev = seen.current;
+    seen.current = { id: w.item.id, state: w.item.state };
+    if (prev && prev.id === w.item.id && !isDone(prev.state) && isDone(w.item.state)) setFinishedId(w.item.id);
+  }, [w.item.id, w.item.state]);
+  return finishedId === w.item.id;
+}
+
 function TaskView({
   w,
   onDecided,
@@ -369,6 +383,7 @@ function TaskView({
   onTask: (id: string) => void;
 }) {
   const decision = buildDecision(w);
+  const justFinished = useJustFinished(w);
   const record = (
     <Link href={"/investigations/" + w.item.id + "/record"} className="inline-flex items-center gap-0.5 hover:text-zinc-900">
       Full record <ArrowUpRight className="size-3" />
@@ -393,6 +408,18 @@ function TaskView({
   }
   const o = outcomeOf(w);
   const busy = w.agents.some((a) => a.currentWorkItemId === w.item.id && a.status !== "idle");
+  if (isDone(w.item.state) && !busy) {
+    return (
+      <div className="animate-enter space-y-5 px-5 pt-5 pb-6">
+        <DoneCard w={w} justFinished={justFinished} />
+        {w.dispute?.letterBody ? <DisputeLetter dispute={w.dispute} /> : null}
+        <VendorThread w={w} />
+        <HowWeGotHere w={w} />
+        <div className="text-[12.5px] text-zinc-500">{record}</div>
+        {chat.length || chatPending ? <Thread messages={chat} pending={chatPending} onTask={onTask} inset /> : null}
+      </div>
+    );
+  }
   return (
     <div className="animate-enter space-y-5 px-5 pt-5 pb-6">
       <div>
