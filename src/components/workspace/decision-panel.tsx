@@ -48,11 +48,7 @@ export function DecisionPanel() {
   const count = pending.length + (asking ? 1 : 0);
   if (!count) return null;
   return (
-    <div className="max-h-[65vh] shrink-0 overflow-y-auto border-t-2 border-orange-400">
-      <div className="flex items-center gap-2 px-6 pt-3 text-[12px] font-medium text-orange-700">
-        <span className="size-2 rounded-full bg-orange-500" />
-        Needs you{count > 1 ? " · " + count + " decisions" : ""}
-      </div>
+    <div className="max-h-[65vh] shrink-0 overflow-y-auto border-t-2 border-primary/50">
       <div className="divide-y">
         {pending.map((a) => (
           <ApprovalCard key={a.id} approval={a} />

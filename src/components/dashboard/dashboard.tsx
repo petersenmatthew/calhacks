@@ -23,9 +23,9 @@ const VIEWS: { key: View; label: string; icon: typeof Network }[] = [
 ];
 
 const CLOSE: Record<string, { label: string; dot: string }> = {
-  IN_PROGRESS: { label: "Close in progress", dot: "bg-amber-500" },
-  AWAITING_VENDORS: { label: "Awaiting vendors", dot: "bg-blue-500" },
-  READY: { label: "Ready to close", dot: "bg-emerald-500" },
+  IN_PROGRESS: { label: "Close in progress", dot: "bg-primary" },
+  AWAITING_VENDORS: { label: "Awaiting vendors", dot: "bg-primary" },
+  READY: { label: "Ready to close", dot: "bg-primary" },
 };
 
 function Metrics({ data }: { data: DashboardData }) {
@@ -38,7 +38,7 @@ function Metrics({ data }: { data: DashboardData }) {
       </span>
       {m.potentialOverchargeCents > 0 ? (
         <span>
-          <span className="font-medium text-rose-600 tnum">{money(m.potentialOverchargeCents, { cents: false })}</span> overbilled
+          <span className="font-medium text-destructive tnum">{money(m.potentialOverchargeCents, { cents: false })}</span> overbilled
         </span>
       ) : null}
       <span className="flex items-center gap-1.5">
@@ -56,13 +56,12 @@ export function Dashboard() {
   useLiveRefresh(() => mutate(), undefined, 250);
 
   if (error && !data) {
-    return <div className="p-8 text-sm text-rose-600">Could not load work: {String(error.message)}</div>;
+    return <div className="p-8 text-sm text-destructive">Could not load work: {String(error.message)}</div>;
   }
 
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-12 shrink-0 items-center gap-3 border-b px-5">
-        <h1 className="text-[14px] font-semibold">Work</h1>
         <div className="flex rounded-md bg-zinc-100 p-0.5">
           {VIEWS.map((v) => (
             <button

@@ -2,7 +2,7 @@ import { Check, LoaderCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { StepState } from "@/lib/agent-steps";
 
-export function StepList({ steps, className, dim }: { steps: { label: string; state: StepState }[]; className?: string; dim?: boolean }) {
+export function StepList({ steps, className, dim, onSelect, accent }: { steps: { label: string; state: StepState }[]; className?: string; dim?: boolean; accent?: boolean; onSelect?: (label: string) => void }) {
   return (
     <ol className={cn("space-y-1 font-mono text-[12px]", className)}>
       {steps.map((s) => (
@@ -10,20 +10,22 @@ export function StepList({ steps, className, dim }: { steps: { label: string; st
           key={s.label}
           className={cn(
             "flex items-center gap-2",
-            s.state === "active" ? "text-blue-600" : s.state === "done" ? "text-zinc-500" : "text-zinc-400",
+            s.state === "active" ? accent ? "text-zinc-900" : "text-brand-ink" : s.state === "done" ? "text-zinc-500" : "text-zinc-400",
             dim && s.state !== "active" && "text-zinc-400",
           )}
         >
+          <span className="flex min-w-0 flex-1 items-center gap-2">
           {s.state === "done" ? (
-            <Check className="size-3.5 text-emerald-600" />
+            <Check className={cn("size-3.5", accent ? "text-zinc-600" : "text-brand-ink")} />
           ) : s.state === "active" ? (
-            <LoaderCircle className="size-3.5 animate-spin" />
+            <LoaderCircle className={cn("size-3.5 animate-spin", accent && "rounded-full bg-primary text-zinc-900")} />
           ) : (
             <span className="grid size-3.5 place-items-center">
               <span className="size-2.5 rounded-full border border-current" />
             </span>
           )}
-          {s.label}
+          {onSelect ? <button type="button" onClick={() => onSelect(s.label)} aria-label={`View subtask: ${s.label}`} className={cn("flex min-w-0 flex-1 items-center justify-between gap-2 rounded px-1 py-1 text-left focus-visible:outline-2", accent ? "hover:bg-accent hover:text-zinc-900 focus-visible:outline-primary" : "hover:bg-accent hover:text-brand-ink focus-visible:outline-primary")}><span>{s.label}</span><span aria-hidden="true" className="text-[10px]">↗</span></button> : s.label}
+          </span>
         </li>
       ))}
     </ol>
@@ -31,10 +33,10 @@ export function StepList({ steps, className, dim }: { steps: { label: string; st
 }
 
 const TONE = {
-  blue: "text-blue-600",
-  orange: "text-orange-600",
-  red: "text-rose-600",
-  green: "text-emerald-700",
+  blue: "text-brand-ink",
+  orange: "text-brand-ink",
+  red: "text-destructive",
+  green: "text-brand-ink",
   zinc: "text-zinc-500",
 };
 
