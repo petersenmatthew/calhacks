@@ -1,0 +1,72 @@
+export type Role =
+  | "compute_agent"
+  | "finance_agent"
+  | "controller"
+  | "orchestrator"
+  | "ingestion"
+  | "erp"
+  | "ledger_gateway"
+  | "vendor_portal"
+  | "simulator";
+
+export type Permission =
+  | "workitem:read"
+  | "compute:read"
+  | "contract:read"
+  | "findings:compute:write"
+  | "handoff:finance"
+  | "handoff:compute"
+  | "info:request"
+  | "budget:read"
+  | "policy:read"
+  | "precedent:read"
+  | "allocation:calculate"
+  | "proposal:create"
+  | "dispute:propose"
+  | "policy:propose"
+  | "approval:request"
+  | "posting:request"
+  | "approval:decide"
+  | "workitem:respond"
+  | "ledger:post"
+  | "dispute:submit"
+  | "invoice:ingest"
+  | "invoice:record"
+  | "vendor:respond"
+  | "workflow:orchestrate"
+  | "settings:update"
+  | "environment:reset"
+  | "environment:simulate";
+
+/**
+ * Role-based permissions. Agents can read evidence and propose; only a human
+ * controller can decide approvals, and only the ledger gateway can post.
+ */
+export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
+  compute_agent: ["workitem:read", "compute:read", "contract:read", "findings:compute:write", "handoff:finance", "info:request"],
+  finance_agent: [
+    "workitem:read",
+    "budget:read",
+    "policy:read",
+    "precedent:read",
+    "allocation:calculate",
+    "proposal:create",
+    "dispute:propose",
+    "policy:propose",
+    "approval:request",
+    "posting:request",
+    "handoff:compute",
+  ],
+  controller: ["workitem:read", "approval:decide", "workitem:respond", "settings:update", "environment:reset", "invoice:ingest"],
+  orchestrator: ["workflow:orchestrate"],
+  ingestion: ["invoice:ingest"],
+  erp: ["invoice:record"],
+  ledger_gateway: ["ledger:post", "dispute:submit"],
+  vendor_portal: ["vendor:respond"],
+  simulator: ["environment:simulate"],
+};
+
+export function roleHas(role: string, permission: Permission) {
+  const perms = ROLE_PERMISSIONS[role as Role];
+  return Boolean(perms && perms.includes(permission));
+}
