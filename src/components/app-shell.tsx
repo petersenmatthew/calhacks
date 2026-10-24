@@ -23,32 +23,32 @@ type Shell = {
   lastView: View;
 };
 
-const ShellContext = createContext<Shell>({ period: null, setPeriod: () => {}, lastView: "board" });
+const ShellContext = createContext<Shell>({ period: null, setPeriod: () => {}, lastView: "canvas" });
 export const useShell = () => useContext(ShellContext);
-export const viewHref = (v: View) => (v === "canvas" ? "/canvas" : "/");
+export const viewHref = (v: View) => (v === "board" ? "/board" : "/canvas");
 
 const TABS = [
-  { key: "board", href: "/", label: "Board", icon: SquareKanban },
   { key: "canvas", href: "/canvas", label: "Canvas", icon: Network },
+  { key: "board", href: "/board", label: "Board", icon: SquareKanban },
   { key: "audit", href: "/audit", label: "Audit trail", icon: ShieldCheck },
 ] as const;
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [period, setPeriod] = useState<string | null>(null);
-  const [lastView, setLastView] = useState<View>("board");
+  const [lastView, setLastView] = useState<View>("canvas");
   const { data, mutate } = useSWR<DashboardData>(dashboardKey(period), fetcher, { keepPreviousData: true });
 
   // Remember which work view was open last (adjusted during render, no effect needed).
-  const here: View | null = pathname === "/" ? "board" : pathname === "/canvas" ? "canvas" : null;
+  const here: View | null = pathname === "/board" ? "board" : pathname === "/canvas" ? "canvas" : null;
   if (here && here !== lastView) setLastView(here);
 
   const onTask = pathname.startsWith("/investigations");
   const active = pathname.startsWith("/audit")
     ? "audit"
-    : pathname === "/canvas" || (onTask && lastView === "canvas")
-        ? "canvas"
-        : "board";
+    : pathname === "/board" || (onTask && lastView === "board")
+        ? "board"
+        : "canvas";
 
   return (
     <ShellContext.Provider value={{ period, setPeriod, lastView }}>
