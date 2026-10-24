@@ -73,7 +73,7 @@ export const ACTOR_SEED: ActorRow[] = [
   },
   {
     id: ACTOR.controller,
-    name: "Priya Natarajan",
+    name: "Matthew Petersen",
     kind: "human",
     role: "controller",
     title: "Controller",
