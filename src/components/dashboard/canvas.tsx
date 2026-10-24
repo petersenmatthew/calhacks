@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import useSWR from "swr";
 import { toast } from "sonner";
-import { Radio } from "lucide-react";
 import { fetcher } from "@/lib/api";
 import { buildDecision, shortTitle } from "@/lib/decision";
 import { buildFrames, type Frame } from "@/lib/frames";
@@ -44,7 +43,6 @@ export function SystemCanvas({ data, initialTask = null, onChanged }: { data: Da
   }
   const task = picked;
   const oneAtATime = data.settings.runMode === "one";
-  const nextLive = live && live !== task ? items.find((i) => i.id === live) : undefined;
   const [focus, setFocus] = useState<Focus>(null);
 
   const setTask = (id: string | null) => {
@@ -97,17 +95,6 @@ export function SystemCanvas({ data, initialTask = null, onChanged }: { data: Da
           }}
         />
         <Caption data={data} />
-        {nextLive ? (
-          <button
-            type="button"
-            onClick={() => setTask(nextLive.id)}
-            className="card-soft absolute top-[72px] right-4 z-40 flex h-9 items-center gap-1.5 px-3 text-[12.5px] font-medium text-zinc-700 hover:text-zinc-950"
-          >
-            <Radio className="size-3.5 text-primary" />
-            {task ? "Next case: " : "Live case: "}
-            {shortTitle(nextLive, data.providers)}
-          </button>
-        ) : null}
         {task ? <ReviewSwitcher taskId={task} current="sidebar" className="absolute right-4 bottom-4 z-40" /> : null}
       </div>
       <Sidebar
@@ -118,7 +105,7 @@ export function SystemCanvas({ data, initialTask = null, onChanged }: { data: Da
         onTask={setTask}
         onDecided={async () => {
           onChanged();
-          // One at a time: stay on this case to watch it finish. The person moves on with "Next case".
+          // One at a time: stay on this case to watch it finish.
           if (oneAtATime) return;
           // Let the confirmation read for a beat. Stay when the same task still has
           // something waiting, such as a new rule plus the redone split.
