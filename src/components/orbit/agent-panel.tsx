@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import useSWR from "swr";
-import { ArrowUpRight, ChevronDown, LoaderCircle, X } from "lucide-react";
+import { ArrowUpRight, ChevronDown, LoaderCircle, Mail, MessageSquare, X } from "lucide-react";
 import { agentSteps } from "@/lib/agent-steps";
 import { fetcher, postJson } from "@/lib/api";
 import { relativeTime } from "@/lib/format";
@@ -11,7 +11,6 @@ import { cn } from "@/lib/utils";
 import type { AgentView } from "@/server/queries";
 import { useLiveRefresh } from "../live-events";
 import { AgentAvatar, StateBadge } from "../status";
-import { Switch } from "../ui/switch";
 
 function Section({ title, count, children }: { title: string; count?: number; children: React.ReactNode }) {
   return (
@@ -67,10 +66,10 @@ function Guidance({ view, onSaved }: { view: AgentView; onSaved: (v: AgentView) 
   const replay = view.execution.mode !== "llm";
   return (
     <div>
-      <label htmlFor={"guidance-" + view.id} className="text-[13px] text-zinc-800">
+      <label htmlFor={"guidance-" + view.id} className="sr-only">
         Guidance
       </label>
-      <p className="mt-0.5 text-[11.5px] leading-snug text-zinc-500">
+      <p className="text-[11.5px] leading-snug text-zinc-500">
         Added to its instructions on live LLM runs.{replay ? " Not used in deterministic replay." : ""}
       </p>
       <textarea
@@ -153,25 +152,39 @@ export function AgentPanel({
             <p className="mt-3 text-[13px] leading-relaxed text-zinc-600">{view.description}</p>
           </header>
 
-          <Section title="Settings">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <div className="text-[13px] text-zinc-800">Active</div>
-                <p className="mt-0.5 text-[11.5px] leading-snug text-zinc-500">When paused, queued work waits and nothing new starts.</p>
-              </div>
-              <Switch
-                checked={!view.settings.paused}
-                aria-label={view.settings.paused ? "Resume " + view.name : "Pause " + view.name}
-                onCheckedChange={async (on) => mutate(await postJson<AgentView>("/api/agents/" + view.id, { paused: !on }), { revalidate: false })}
-              />
-            </div>
-            <div className="mt-4">
-              <Guidance key={view.id + ":" + view.settings.guidance} view={view} onSaved={(v) => mutate(v, { revalidate: false })} />
-            </div>
-            <div className="mt-3 flex justify-between text-[11.5px] text-zinc-500">
-              <span>Runs as</span>
-              <span className="text-zinc-700">{view.execution.mode === "llm" ? "LLM · " + view.execution.model : "Deterministic replay"}</span>
-            </div>
+          <Section title="Connections" count={view.connections.length}>
+            {view.connections.length ? (
+              <ul className="space-y-2.5">
+                {view.connections.map((c) => (
+                  <li key={c.id} className="flex items-center gap-2.5" title={c.tools.join(", ")}>
+                    {c.logo ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={c.logo} alt="" className={cn("size-7 shrink-0 rounded-md ring-1 ring-zinc-200", !c.uses && "opacity-50 grayscale")} />
+                    ) : (
+                      <span className={cn("grid size-7 shrink-0 place-items-center rounded-md bg-zinc-100 text-zinc-600 ring-1 ring-zinc-200", !c.uses && "opacity-50")}>
+                        {c.id === "email" ? <Mail className="size-3.5" /> : <MessageSquare className="size-3.5" />}
+                      </span>
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className={cn("block truncate text-[12.5px]", c.uses ? "text-zinc-800" : "text-zinc-500")}>{c.name}</span>
+                      <span className="block truncate text-[11px] text-zinc-400">{c.kind}</span>
+                    </span>
+                    <span className="shrink-0 text-right">
+                      <span className="block text-[11px] text-zinc-600">{c.read && c.write ? "Reads, writes" : c.write ? "Writes" : "Reads"}</span>
+                      <span className="block font-mono text-[10.5px] text-zinc-400 tnum">
+                        {c.uses ? c.uses + (c.uses === 1 ? " call" : " calls") + (c.lastAt ? " · " + relativeTime(c.lastAt, now) : "") : "not used yet"}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-[12.5px] text-zinc-500">Works only inside the app.</p>
+            )}
+          </Section>
+
+          <Section title="Guidance">
+            <Guidance key={view.id + ":" + view.settings.guidance} view={view} onSaved={(v) => mutate(v, { revalidate: false })} />
           </Section>
 
           <Section title="Tasks" count={view.tasks.length}>

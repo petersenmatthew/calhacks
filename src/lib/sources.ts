@@ -18,7 +18,7 @@ export const SOURCES: Source[] = [
 
 export const SOURCE: Record<SourceId, Source> = Object.fromEntries(SOURCES.map((s) => [s.id, s])) as Record<SourceId, Source>;
 
-const PROVIDER_SOURCE: Record<string, SourceId> = {
+export const PROVIDER_SOURCE: Record<string, SourceId> = {
   "PRV-HELIOS": "lambda",
   "PRV-STRATUS": "coreweave",
   "PRV-MERIDIAN": "nebius",
