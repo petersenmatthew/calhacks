@@ -191,6 +191,22 @@
   animation: el-enter 0.3s ease-out both;
 }
 
+/* New frames pop out of their node. No fill mode, so inline opacity (dimming) still applies afterwards. */
+@keyframes orbit-spawn {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.orbit-spawn {
+  animation: orbit-spawn 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 
 @keyframes el-dash {
   to {
