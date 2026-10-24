@@ -42,7 +42,7 @@ function taskFor(agentId: string, trigger: Record<string, unknown>, workItemId: 
     if (t === "human_info") return "Answer the vendor on " + workItemId + " with the controller's decision";
     return "Send the approved dispute on " + workItemId;
   }
-  if (agentId === ACTOR.budget) return "Check team burn after the posting on " + workItemId;
+  if (agentId === ACTOR.budget) return t === "controller_note" ? "Apply the controller's budget change from " + workItemId : "Check team burn after the posting on " + workItemId;
   if (agentId === ACTOR.compute) {
     if (t === "finance_question") return "Answer the Cost Accountant's question on " + workItemId;
     if (t === "human_info") return "Continue the investigation of " + workItemId + " with controller input";

@@ -1598,6 +1598,49 @@ const recordBudgetNote = defineTool({
 /* Vendor Liaison: dispute follow-ups (started by the scheduler)       */
 /* ------------------------------------------------------------------ */
 
+const setProjectBudget = defineTool({
+  name: "set_project_budget",
+  agent: "budget",
+  permission: "budget:write",
+  category: "write",
+  terminal: true,
+  description:
+    "Set a research project's monthly compute budget. Only works on the controller's instruction from their approval, for exactly the project and amount they named. Ends your run.",
+  schema: z.object({
+    work_item_id: workItemId,
+    project_id: z.string(),
+    monthly_budget_cents: z.number().int().positive(),
+    summary: z.string().describe("One sentence for the project lead and the controller: what changed and where the project now stands."),
+  }),
+  handler: ({ ctx, run, item }, args) => {
+    const t = run.trigger;
+    if (t.trigger !== "controller_note" || t.projectId !== args.project_id || t.monthlyCents !== args.monthly_budget_cents) {
+      fail("Budgets change only on the controller's instruction, for the exact project and amount they approved.", "PERMISSION");
+    }
+    const before = projectBurn(ctx, args.project_id, item.period);
+    ctx.db.update(projects).set({ monthlyBudgetCents: args.monthly_budget_cents }).where(eq(projects.id, args.project_id)).run();
+    const after = projectBurn(ctx, args.project_id, item.period);
+    const summary = args.summary.trim().slice(0, 600);
+    const lead = leadFor(after.project.id);
+    postSlack(ctx, {
+      channel: "budget-alerts",
+      event: "budget.changed",
+      workItemId: item.id,
+      mentions: lead ? [lead.handle] : [],
+      text:
+        (lead ? mention(lead.handle) + " " : "") + after.project.name + " monthly budget changed from " + formatCents(before.budget) + " to " +
+        formatCents(after.budget) + " by the controller (" + String(t.approvalId) + "). " + summary,
+    });
+    return {
+      result: { project_id: after.project.id, previous_budget: formatCents(before.budget), monthly_budget: formatCents(after.budget), status: after.status },
+      title: "Budget Analyst set " + after.project.name + " budget to " + formatCents(after.budget),
+      summary: "Was " + formatCents(before.budget) + ". " + summary,
+      changes: [after.project.name + " budget " + formatCents(before.budget) + " -> " + formatCents(after.budget)],
+      terminal: { summary: after.project.name + " budget set to " + formatCents(after.budget) },
+    };
+  },
+});
+
 function openDispute(ctx: AppContext, item: WorkItemRow) {
   const dispute = ctx.db.select().from(vendorDisputes).where(eq(vendorDisputes.workItemId, item.id)).get();
   if (!dispute) fail("There is no vendor dispute on " + item.id + ".", "NOT_FOUND");
@@ -2191,6 +2234,7 @@ export const TOOLS: ToolDefinition[] = [
   getPostedCharges,
   forecastProjectBurn,
   recordBudgetNote,
+  setProjectBudget,
   getDisputeStatus,
   sendVendorFollowUp,
   escalateDispute,

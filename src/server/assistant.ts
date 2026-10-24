@@ -1,8 +1,10 @@
 import { Agent, run } from "@openai/agents";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { buildDecision, type Decision } from "@/lib/decision";
 import { buildFrames, frameText, NODE_OF } from "@/lib/frames";
 import type { AppContext } from "./context";
+import { projects } from "./db/schema";
 import { getDashboard, getWorkspace } from "./queries";
 
 export type ChatMessage = { role: "user" | "assistant"; content: string };
@@ -141,18 +143,27 @@ export async function askAboutFrame(ctx: AppContext, messages: ChatMessage[], ta
 
 /* ------------------------------------------------------------------ talking through a decision */
 
-export type DecisionTurn = { reply: string; choiceId: string | null; note: string | null };
+/** A budget change the controller asked for alongside their decision. */
+export type BudgetChange = { projectId: string; projectName: string; monthlyCents: number };
+
+export type DecisionTurn = { reply: string; choiceId: string | null; note: string | null; budget: BudgetChange | null };
 
 const Turn = z.object({
   reply: z.string().describe("What you say to the controller."),
   choice_id: z.string().nullable().describe("Id of the option the controller clearly chose in their last message, else null."),
-  note: z.string().nullable().describe("The controller's own instruction or answer when it is not one of the options, else null."),
+  note: z
+    .string()
+    .nullable()
+    .describe("Anything the controller said beyond the option: their extra instruction (the 'but' in 'yes, but'), or their own instruction or answer when they chose no option. Else null."),
+  budget_project_id: z.string().nullable().describe("If the controller asked to set a project's monthly budget, that project's id, else null."),
+  budget_monthly_usd: z.number().nullable().describe("The new monthly budget in US dollars, only when the controller gave or agreed to a figure, else null."),
+  waiting_on_detail: z.boolean().describe("True when your reply asks the controller for a detail you still need before they confirm, such as a budget amount."),
 });
 
 /** Opening messages, kept until the decision changes. */
 const openers = new Map<string, string>();
 
-function decisionBriefing(w: NonNullable<ReturnType<typeof getWorkspace>>, d: Decision) {
+function decisionBriefing(ctx: AppContext, w: NonNullable<ReturnType<typeof getWorkspace>>, d: Decision) {
   const p = [...w.proposals].reverse()[0];
   return [
     "Task " + w.item.id + ": " + w.item.title + ". " + d.context + ".",
@@ -169,6 +180,8 @@ function decisionBriefing(w: NonNullable<ReturnType<typeof getWorkspace>>, d: De
     ...(p ? ["Proposal " + p.id + " (" + p.status + "): " + p.summary, "Rationale: " + p.rationale] : []),
     ...(w.item.pendingQuestion ? ["Open question: " + w.item.pendingQuestion.question] : []),
     ...w.policies.filter((x) => x.status === "APPROVED").map((x) => "Active policy " + x.policyKey + " v" + x.version + ": " + x.statement),
+    "Research project monthly compute budgets (the Budget Analyst can change one when the controller says so):",
+    ...ctx.db.select().from(projects).all().map((x) => "- id " + x.id + ": " + x.name + ", " + usd(x.monthlyBudgetCents) + " a month"),
   ]
     .filter(Boolean)
     .join("\n");
@@ -189,19 +202,20 @@ function plainOpener(d: Decision) {
 export async function discussDecision(ctx: AppContext, messages: ChatMessage[], taskId: string): Promise<DecisionTurn> {
   const w = getWorkspace(ctx, taskId);
   const d = w ? buildDecision(w) : null;
-  if (!w || !d) return { reply: "This one is already decided.", choiceId: null, note: null };
+  if (!w || !d) return { reply: "This one is already decided.", choiceId: null, note: null, budget: null };
   const me = w.actors[d.askedBy];
   const name = me?.name ?? "Agent";
   const key = taskId + ":" + (d.approvalId ?? "q") + ":" + d.choices.map((c) => c.id).join(",");
 
-  if (!messages.length && openers.has(key)) return { reply: openers.get(key)!, choiceId: null, note: null };
+  const none = { choiceId: null, note: null, budget: null };
+  if (!messages.length && openers.has(key)) return { reply: openers.get(key)!, ...none };
   if (!ctx.config.llmAvailable) {
-    if (!messages.length) return { reply: plainOpener(d), choiceId: null, note: null };
+    if (!messages.length) return { reply: plainOpener(d), ...none };
     const said = messages.at(-1)!.content.toLowerCase();
     const pick = d.choices.find((c) => said.includes(c.label.toLowerCase().split(" ")[0]));
     return pick
-      ? { reply: "Got it: " + pick.label.toLowerCase() + ". Confirm and I'll do it.", choiceId: pick.id, note: null }
-      : { reply: "Live answers need an OpenAI key. Pick an option above, or set OPENAI_API_KEY.", choiceId: null, note: null };
+      ? { reply: "Got it: " + pick.label.toLowerCase() + ". Confirm and I'll do it.", ...none, choiceId: pick.id }
+      : { reply: "Live answers need an OpenAI key. Pick an option above, or set OPENAI_API_KEY.", ...none };
   }
 
   const instructions = [
@@ -209,8 +223,16 @@ export async function discussDecision(ctx: AppContext, messages: ChatMessage[], 
     "Speak in first person, plainly, like a colleague. Plain text. No headings, no bold, no lists, no emojis.",
     "Use only the briefing. If it does not say, say what you would need to check.",
     messages.length
-      ? "Reply to the controller's last message in one to three short sentences. If they clearly chose one of the options, set choice_id to its id and say in one short sentence what you will do once they hit Confirm. If they clearly want something that is not an option, put their instruction in note in their own words, cleaned up, and say what you will do once they hit Confirm. If they are asking or unsure, leave both null. Never say it is done."
-      : "Write your opening message: under 25 words, like a quick note to a colleague. What happened in everyday words, then what you would do. No record ids, policy names or clause numbers. Do not list the options; they are shown as buttons. choice_id and note are null.",
+      ? [
+          "Reply to the controller's last message in one to three short sentences. Never say it is done.",
+          "If they clearly chose one of the options, set choice_id to its id.",
+          "If they said yes to an option but also asked for something more (yes, but), set choice_id and also put the extra part in note, in their words, cleaned up. Do not drop it.",
+          "If they want something that is not an option at all, leave choice_id null and put their instruction in note.",
+          "If they asked to change a project's monthly budget, set budget_project_id and budget_monthly_usd. If they gave no figure (for example 'lower it'), ask what the new monthly budget should be and set waiting_on_detail.",
+          "Say in one short sentence everything that will happen once they hit Confirm, including the extra part. If no one on the team can do the extra part, say so plainly.",
+          "If they are asking or unsure, leave everything null.",
+        ].join(" ")
+      : "Write your opening message: under 25 words, like a quick note to a colleague. What happened in everyday words, then what you would do. No record ids, policy names or clause numbers. Do not list the options; they are shown as buttons. All other fields are null.",
   ].join(" ");
   // The opening line is part of the conversation the controller is replying to.
   const history = messages.length && openers.has(key) ? [{ role: "assistant" as const, content: openers.get(key)! }, ...messages] : messages;
@@ -219,15 +241,25 @@ export async function discussDecision(ctx: AppContext, messages: ChatMessage[], 
     .map((m) => (m.role === "user" ? "Controller: " : name + ": ") + m.content)
     .join("\n");
   const agent = new Agent({ name, instructions, model: ctx.config.model, outputType: Turn });
-  const input = "Briefing:\n" + decisionBriefing(w, d) + (transcript ? "\n\nConversation so far:\n" + transcript : "");
+  const input = "Briefing:\n" + decisionBriefing(ctx, w, d) + (transcript ? "\n\nConversation so far:\n" + transcript : "");
   const result = await run(agent, input, { maxTurns: 1 });
   const out = result.finalOutput;
   const reply = out?.reply?.trim() || (messages.length ? "Sorry, say that again?" : plainOpener(d));
   if (!messages.length) {
     openers.set(key, reply);
-    return { reply, choiceId: null, note: null };
+    return { reply, ...none };
   }
+  // Nothing to confirm while the employee is still asking for a detail.
+  if (out?.waiting_on_detail) return { reply, ...none };
   const choiceId = out?.choice_id && d.choices.some((c) => c.id === out.choice_id) ? out.choice_id : null;
-  const note = !choiceId && d.custom && out?.note && out.note.trim().length >= 3 ? out.note.trim().slice(0, 1000) : null;
-  return { reply, choiceId, note };
+  const said = out?.note?.trim() ?? "";
+  // With a choice, the note rides along with it. Without one, it only counts where free text is allowed.
+  const note = said.length >= 3 && (choiceId || d.custom) ? said.slice(0, 1000) : null;
+  const project = out?.budget_project_id ? ctx.db.select().from(projects).where(eq(projects.id, out.budget_project_id)).get() : undefined;
+  const usdAmount = out?.budget_monthly_usd ?? 0;
+  // A budget change only goes through alongside an approval.
+  const approving = choiceId ? d.choices.find((c) => c.id === choiceId)?.action.type === "approve" : false;
+  const budget =
+    project && approving && usdAmount > 0 && usdAmount < 1e9 ? { projectId: project.id, projectName: project.name, monthlyCents: Math.round(usdAmount * 100) } : null;
+  return { reply, choiceId, note, budget };
 }
