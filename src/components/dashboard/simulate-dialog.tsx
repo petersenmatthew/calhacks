@@ -98,7 +98,7 @@ export function SimulateDialog({ onDone }: { onDone: () => void }) {
       if (result.status === "work_item_created" && result.workItemId) {
         const id = result.workItemId;
         toast.success("Discrepancy detected. Opened " + id + " and assigned the Compute Investigator.", {
-          action: { label: "Open", onClick: () => router.push("/investigations/" + id) },
+          action: { label: "Open", onClick: () => router.push("/canvas?task=" + id) },
         });
       } else if (result.status === "auto_matched") {
         toast.success("Invoice matched the contract-supported charge. Posted " + result.entryId + " under the auto-match policy.");

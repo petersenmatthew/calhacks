@@ -236,14 +236,15 @@ export function ensureActors(ctx: AppContext) {
 }
 
 /**
- * Load the simulated environment. Every seeded case (see cases.ts) goes through
- * the real ingestion pipeline: clean lines auto-match, and the rest open work
- * items for the agents. WI-1001 is the early-job-end case, so the team is
- * visibly working when the app first opens.
+ * Load the simulated environment through the real ingestion pipeline. "demo"
+ * loads only the clean lines, which auto-match and open no tasks, so the app
+ * starts quiet and the presenter triggers the one case to watch live. "all"
+ * loads every case in cases.ts for the eval and tests.
  */
-export function seedEnvironment(ctx: AppContext) {
+export function seedEnvironment(ctx: AppContext, cases: "demo" | "all" = "all") {
   tx(ctx, () => seedReferenceData(ctx));
-  for (const c of SEED_CASES) ingestCase(ctx, c.data);
+  const seeded = cases === "all" ? SEED_CASES : SEED_CASES.filter((c) => c.category === "clean");
+  for (const c of seeded) ingestCase(ctx, c.data);
   recordActivity(ctx, {
     actorId: ACTOR.simulator,
     type: "SYSTEM",
