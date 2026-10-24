@@ -953,14 +953,39 @@ export function buildFrames(w: WorkspaceData): Frame[] {
         deniedPostings.push(row);
         continue;
       }
-      frames.push({
-        id: "act-" + row.id,
-        node: agent,
-        label: row.status === "denied" ? "Denied" : "Failed",
-        createdAt: row.createdAt,
-        tone: "denied",
-        spec: { eyebrow: (AGENT_NAME[row.actorId] ?? row.actorId) + " · " + row.status, title: row.title, checks: [{ label: "Gateway check", detail: row.summary ?? "", ok: false }] },
-      });
+      // A blocked call the same employee then made again successfully is a correction, not a failure.
+      const failedTool = row.toolName ?? row.title.match(/tool:([a-z_]+)/)?.[1] ?? null;
+      const retry = failedTool
+        ? w.activity.find((r) => r.id > row.id && r.actorId === row.actorId && r.toolName === failedTool && r.status !== "denied" && r.status !== "error")
+        : undefined;
+      const who = AGENT_NAME[row.actorId] ?? row.actorId;
+      frames.push(
+        retry
+          ? {
+              id: "act-" + row.id,
+              node: agent,
+              label: "Corrected",
+              createdAt: row.createdAt,
+              tone: "warn",
+              spec: {
+                eyebrow: who + " · corrected",
+                title: "Gateway blocked " + (LABELS[failedTool!] ?? failedTool).toLowerCase() + "; " + who + " fixed it and retried",
+                checks: [
+                  { label: "Blocked by the gateway", detail: row.summary ?? "", ok: false },
+                  { label: "Retried successfully", detail: retry.title, ok: true },
+                ],
+                summary: "The ledger gateway rejected the first attempt and said why. " + who + " corrected it and the retry went through; nothing was recorded from the rejected call.",
+              },
+            }
+          : {
+              id: "act-" + row.id,
+              node: agent,
+              label: row.status === "denied" ? "Denied" : "Failed",
+              createdAt: row.createdAt,
+              tone: "denied",
+              spec: { eyebrow: who + " · " + row.status, title: row.title, checks: [{ label: "Gateway check", detail: row.summary ?? "", ok: false }] },
+            },
+      );
       continue;
     }
     const tool = row.toolName;

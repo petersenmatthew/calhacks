@@ -87,7 +87,17 @@ export async function askAboutFrame(ctx: AppContext, messages: ChatMessage[], ta
   const calls = w.activity
     .filter((a) => ids.has(a.id))
     .map((a) => ["Call " + (a.toolName ?? a.type) + " at " + a.createdAt + " by " + (w.actors[a.actorId]?.name ?? a.actorId), "Args: " + clip(a.args, 800), "Result: " + clip(a.result, 1800)].join("\n"));
-  const mine = w.activity.filter((a) => a.actorId === actorId && a.toolName).map((a) => a.createdAt.slice(11, 19) + " " + a.toolName + ": " + a.title);
+  const mine = w.activity
+    .filter((a) => a.actorId === actorId && (a.toolName || a.status === "error" || a.status === "denied"))
+    .map((a) => a.createdAt.slice(11, 19) + " " + (a.status === "error" || a.status === "denied" ? "BLOCKED " : "") + (a.toolName ?? "") + ": " + a.title);
+  // What came after this frame, so a blocked step that was then redone is not described as still pending.
+  const frameIds = [...ids];
+  const lastId = frameIds.length ? Math.max(...frameIds) : 0;
+  const after = w.activity
+    .filter((a) => a.id > lastId)
+    .slice(0, 15)
+    .map((a) => a.createdAt.slice(11, 19) + " " + (w.actors[a.actorId]?.name ?? a.actorId) + ": " + a.title + (a.status === "error" || a.status === "denied" ? " (blocked)" : ""));
+  const waiting = w.approvals.filter((a) => a.status === "PENDING").map((a) => "Waiting on the controller: approval " + a.id + " for " + a.subjectId + ".");
 
   const briefingText = [
     "Task " + w.item.id + ": " + w.item.title + " (state " + w.item.state.toLowerCase() + ").",
@@ -99,6 +109,11 @@ export async function askAboutFrame(ctx: AppContext, messages: ChatMessage[], ta
     "",
     "Everything you did on this task, in order:",
     ...(mine.length ? mine : ["(nothing yet)"]),
+    "",
+    "What happened on the task after this frame, in order:",
+    ...(after.length ? after : ["(nothing; this is the latest step)"]),
+    "Task state now: " + w.item.state.toLowerCase().replace(/_/g, " ") + ".",
+    ...waiting,
     ...w.findings.map((f) => "Finding " + f.id + ": " + f.summary),
     ...w.policies.filter((x) => x.status === "APPROVED").map((x) => "Active policy " + x.policyKey + " v" + x.version + ": " + x.statement),
   ].join("\n");
@@ -108,6 +123,7 @@ export async function askAboutFrame(ctx: AppContext, messages: ChatMessage[], ta
     "You are " + name + (me?.title ? ", " + me.title : "") + ", an AI employee on the Atlas Research finance team.",
     "The controller opened one of your work frames and is asking you about it. Answer in first person as the one who did this work.",
     "Answer only from the briefing: the frame, the tool calls behind it, and your activity. If it does not say, say you do not know or what you would need to check.",
+    "If the frame is a blocked or failed step, check what happened after it: if you or a teammate redid it successfully, say so and give the result (for example the proposal id and where the task stands now). Never say something still needs to be done when the briefing shows it was done.",
     "Be brief: two to four short sentences. Plain text. No headings, no bold, no emojis. Cite exact numbers, record ids and clause numbers when they matter.",
     "If the controller disagrees, explain your reasoning once, plainly. You cannot change records from this chat; say the controller can decide or redirect the work in the task view.",
   ].join(" ");
