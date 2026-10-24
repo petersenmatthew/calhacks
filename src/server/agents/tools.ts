@@ -157,7 +157,17 @@ function projectName(ctx: AppContext, id: string | null | undefined) {
 }
 
 function requireEvidence(ctx: AppContext, item: WorkItemRow, ids: string[], min = 1) {
-  const unique = [...new Set(ids)];
+  // A finding on this work item stands for the evidence it cites, so citing
+  // "F-5001" is accepted and expanded to that finding's evidence ids.
+  const cited = [...new Set(ids)];
+  const findingRows = cited.length
+    ? ctx.db
+        .select({ id: findings.id, evidenceIds: findings.evidenceIds })
+        .from(findings)
+        .where(and(eq(findings.workItemId, item.id), inArray(findings.id, cited)))
+        .all()
+    : [];
+  const unique = [...new Set(cited.flatMap((id) => findingRows.find((f) => f.id === id)?.evidenceIds ?? [id]))];
   if (unique.length < min) fail("Cite at least " + min + " evidence id(s) returned by your tools.", "EVIDENCE_REQUIRED");
   if (!unique.length) return unique;
   const found = ctx.db
@@ -1367,7 +1377,7 @@ const getDisputePackage = defineTool({
         })() : null,
         evidence_note: "The application attaches the evidence pack and the cited clause text to your letter. Your letter should state the disputed amount, the instance id, and the grounds in a sentence or two.",
         vendor_dispute: record
-          ? { id: record.id, status: record.status, vendor_reference: record.vendorReference, submitted_at: record.submittedAt, replied_at: record.resolvedAt }
+          ? { id: record.id, status: record.status, case_reference: record.vendorReference, credit_memo: record.creditMemoRef, submitted_at: record.submittedAt, replied_at: record.resolvedAt }
           : null,
       },
       evidence: [{ sourceType: "dispute", sourceId: proposal.id, label: "Approved dispute " + proposal.id, snapshot: { dispute: d, approvalId: approval.id } }],

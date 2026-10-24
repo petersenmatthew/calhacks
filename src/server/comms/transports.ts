@@ -22,7 +22,7 @@ export interface EmailMessage {
 /** Set on every email we send, so the inbox poller never mistakes our own letters for vendor replies. */
 export const OUR_HEADER = "X-Atlas-Outbox";
 
-export type Delivery = { status: "sent"; id: string | null } | { status: "simulated" };
+export type Delivery = { status: "sent"; id: string | null; channel?: string | null } | { status: "simulated" };
 
 export function emailConfigured(ctx: AppContext) {
   return Boolean(ctx.config.comms.resendApiKey || ctx.config.comms.smtpUrl);
@@ -131,6 +131,8 @@ export class SlackError extends Error {
   constructor(
     public code: string,
     public needed?: string,
+    /** Seconds Slack asked us to wait (HTTP 429). */
+    public retryAfter?: number,
   ) {
     super(
       code === "missing_scope"
@@ -139,9 +141,18 @@ export class SlackError extends Error {
           ? "SLACK_BOT_TOKEN is not valid for any workspace. Copy the Bot User OAuth Token (xoxb-...) again."
           : code === "not_in_channel"
             ? "The bot is not in that channel. Add the chat:write.public scope, or /invite @Ledger in the channel."
-            : "Slack: " + code,
+            : code === "ratelimited"
+              ? "Slack is rate limiting the bot; retrying in " + (retryAfter ?? 30) + "s."
+              : "Slack: " + code,
     );
   }
+}
+
+let slackPausedUntil = 0;
+
+/** Slack asked us to slow down; the dispatcher leaves Slack messages queued until then. */
+export function slackPaused() {
+  return Date.now() < slackPausedUntil;
 }
 
 /** Call a Slack Web API method with the bot token. Returns the parsed body and the token's scopes. */
@@ -151,6 +162,13 @@ export async function slackApi(ctx: AppContext, method: string, body: Record<str
     headers: { Authorization: "Bearer " + ctx.config.comms.slackBotToken, "Content-Type": "application/json; charset=utf-8" },
     body: JSON.stringify(body),
   });
+  if (res.status === 429) {
+    const raw = res.headers.get("retry-after");
+    const header = raw === null ? NaN : Number(raw);
+    const wait = Number.isFinite(header) && header >= 0 ? header : 30;
+    slackPausedUntil = Date.now() + wait * 1000;
+    throw new SlackError("ratelimited", undefined, wait);
+  }
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown> & { ok?: boolean; error?: string; needed?: string };
   if (!json.ok) throw new SlackError(json.error ?? "http_" + res.status, json.needed);
   return { json, scopes: (res.headers.get("x-oauth-scopes") ?? "").split(",").map((s) => s.trim()).filter(Boolean) };
@@ -206,7 +224,23 @@ async function inviteTeam(ctx: AppContext, channel: string) {
   await slackApi(ctx, "conversations.invite", { channel, users: people.join(",") }).catch(() => undefined);
 }
 
-export async function sendSlack(ctx: AppContext, destination: string, text: string): Promise<Delivery> {
+/** Add an emoji reaction to a message the bot posted. Reacting twice is fine. */
+export async function reactToSlack(ctx: AppContext, channel: string, ts: string, emoji: string): Promise<Delivery> {
+  if (!ctx.config.comms.slackBotToken) return { status: "simulated" };
+  try {
+    await slackApi(ctx, "reactions.add", { channel, timestamp: ts, name: emoji.replace(/:/g, "") });
+  } catch (e) {
+    if (!(e instanceof SlackError && e.code === "already_reacted")) throw e;
+  }
+  return { status: "sent", id: ts, channel };
+}
+
+export async function sendSlack(
+  ctx: AppContext,
+  destination: string,
+  text: string,
+  thread?: { channel: string; ts: string; broadcast: boolean } | null,
+): Promise<Delivery> {
   const c = ctx.config.comms;
   if (c.slackBotToken) await resolveSlackUsers(ctx);
   const rendered = renderMentions(ctx, text);
@@ -223,8 +257,9 @@ export async function sendSlack(ctx: AppContext, destination: string, text: stri
     } else {
       channel = (await resolveSlackChannel(ctx, destination)).id;
     }
-    const { json } = await slackApi(ctx, "chat.postMessage", { channel, text: body, unfurl_links: false });
-    return { status: "sent", id: (json.ts as string) ?? null };
+    const threaded = thread && thread.channel === channel ? { thread_ts: thread.ts, ...(thread.broadcast ? { reply_broadcast: true } : {}) } : {};
+    const { json } = await slackApi(ctx, "chat.postMessage", { channel, text: body, unfurl_links: false, ...threaded });
+    return { status: "sent", id: (json.ts as string) ?? null, channel: (json.channel as string) ?? channel };
   }
   if (c.slackWebhookUrl) {
     const res = await fetch(c.slackWebhookUrl, {

@@ -1,7 +1,7 @@
 import path from "node:path";
 import { getDefaultModel } from "@openai/agents";
 import { createAppContext, type AppContext, type CommsConfig } from "./context";
-import { ALL_TABLES, dropGuards, installGuards } from "./db/client";
+import { ALL_TABLES, dropGuards, installGuards, migrateIfChanged } from "./db/client";
 import { PEOPLE } from "./comms/directory";
 import { resetInboxCursor } from "./comms/inbox";
 import { Orchestrator } from "./orchestrator";
@@ -125,6 +125,9 @@ export function getRuntime(): Runtime {
     const orchestrator = new Orchestrator(ctx);
     globalRef.__experimentLedger = { ctx, orchestrator };
     if (process.env.NEXT_PHASE !== "phase-production-build") orchestrator.start();
+  } else if (process.env.NODE_ENV !== "production" && migrateIfChanged(globalRef.__experimentLedger.ctx.db)) {
+    // Hot reload brought in a schema change: it is applied above; refresh data that depends on it.
+    upgradeEnvironment(globalRef.__experimentLedger.ctx);
   }
   return globalRef.__experimentLedger;
 }

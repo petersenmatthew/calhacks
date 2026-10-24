@@ -13,7 +13,7 @@ const STATUS: Record<string, { label: string; className: string }> = {
   new: { label: "Liaison reading", className: "bg-zinc-100 text-zinc-600" },
   waiting_on_controller: { label: "Needs you", className: "bg-primary text-primary-foreground" },
   handled: { label: "Handled", className: "bg-accent text-brand-ink" },
-  ignored: { label: "After close", className: "bg-zinc-100 text-zinc-500" },
+  ignored: { label: "Not acted on", className: "bg-zinc-100 text-zinc-500" },
 };
 
 function when(iso: string) {

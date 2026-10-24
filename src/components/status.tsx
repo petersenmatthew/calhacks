@@ -17,6 +17,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { PixelAgent, spriteTint } from "./pixel-agent";
 
 export const STATE_META: Record<string, { label: string; dot: string }> = {
   NEW: { label: "New", dot: "bg-zinc-400" },
@@ -83,6 +84,16 @@ const ACTOR_STYLE: Record<string, { icon?: LucideIcon; initials?: string; classN
 };
 
 export function AgentAvatar({ actorId, size = "md", className }: { actorId: string; size?: "sm" | "md" | "lg"; className?: string }) {
+  const tint = spriteTint(actorId);
+  if (tint) {
+    const box = size === "sm" ? "size-5 rounded-[5px]" : size === "lg" ? "size-9 rounded-lg" : "size-6 rounded-md";
+    const px = size === "sm" ? 16 : size === "lg" ? 32 : 20;
+    return (
+      <span className={cn("inline-grid shrink-0 place-items-center overflow-hidden", box, className)} style={{ background: tint }}>
+        <PixelAgent actorId={actorId} size={px} still={size === "sm"} />
+      </span>
+    );
+  }
   const style = ACTOR_STYLE[actorId] ?? { icon: actorId.startsWith("agent") ? Bot : User, className: "bg-zinc-200 text-zinc-700" };
   const Icon = style.icon;
   const dims = size === "sm" ? "size-5 text-[9px]" : size === "lg" ? "size-9 text-xs" : "size-6 text-[10px]";

@@ -6,7 +6,8 @@ import { ArrowLeft, ArrowUp, ArrowUpRight, Check, ChevronDown, ChevronUp, Loader
 import { agentSteps, boardStage } from "@/lib/agent-steps";
 import { postJson } from "@/lib/api";
 import { askVerb, buildDecision, outcomeOf, shortTitle } from "@/lib/decision";
-import { compactMoney, dateOnly, money, periodLabel } from "@/lib/format";
+import { clockTime, compactMoney, dateOnly, money, periodLabel } from "@/lib/format";
+import { buildFeed } from "@/lib/narration";
 import { cn } from "@/lib/utils";
 import type { DashboardData, WorkspaceData } from "@/server/queries";
 import { DecisionCard } from "../review/decision-card";
@@ -239,24 +240,109 @@ function Home({ data, items, onOpen, onStart }: { data: DashboardData; items: It
 
 /* ------------------------------------------------------------------ task */
 
-function Working({ w }: { w: WorkspaceData }) {
-  const here = w.agents.filter((a) => a.currentWorkItemId === w.item.id && a.status !== "idle");
-  if (!here.length) return null;
+/** Types a line out once, when it first arrives while the page is open. */
+function Typed({ text, on }: { text: string; on: boolean }) {
+  const [shown, setShown] = useState(on ? 0 : text.length);
+  useEffect(() => {
+    if (!on) return;
+    let raf = 0;
+    const start = performance.now();
+    const tick = (now: number) => {
+      const next = Math.min(text.length, Math.floor(((now - start) / 1000) * 90));
+      setShown(next);
+      if (next < text.length) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [on, text]);
   return (
-    <div className="space-y-2">
-      {here.map((a) => {
-        const step = a.status === "working" ? agentSteps(a.agentId, a.runTools, "running").current : null;
+    <>
+      {text.slice(0, shown)}
+      {shown < text.length ? <span className="ml-0.5 inline-block h-[1em] w-[0.45em] translate-y-[0.15em] animate-pulse bg-zinc-400" /> : null}
+    </>
+  );
+}
+
+/** The employees explaining their work to you as they go, plus your own decisions. */
+function Feed({ w }: { w: WorkspaceData }) {
+  const lines = buildFeed(w);
+  const here = w.agents.filter((a) => a.currentWorkItemId === w.item.id && a.status !== "idle");
+  const [openedAt] = useState(() => Date.now());
+  const end = useRef<HTMLDivElement>(null);
+  const count = lines.length + here.length;
+  useEffect(() => {
+    end.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [count]);
+  return (
+    <div className="space-y-3">
+      {lines.map((l, i) => {
+        if (l.kind === "event") {
+          return (
+            <div key={l.id} className="animate-enter flex items-start gap-2 text-[12px] leading-snug text-zinc-400">
+              <span className="mt-[5px] size-1 shrink-0 rounded-full bg-zinc-300" />
+              {l.text}
+            </div>
+          );
+        }
+        if (l.kind === "you") {
+          return (
+            <div key={l.id} className="animate-enter flex justify-end">
+              <div className="max-w-[85%] rounded-2xl rounded-br-md bg-zinc-100 px-3.5 py-2 text-[13px] leading-snug text-zinc-900">{l.text}</div>
+            </div>
+          );
+        }
+        const prev = lines[i - 1];
+        const grouped = prev?.kind === "agent" && prev.actorId === l.actorId;
         return (
-          <div key={a.agentId} className="flex items-center gap-2.5 text-[13px] text-zinc-700">
-            <AgentAvatar actorId={a.agentId} size="sm" />
-            <span className="flex-1 truncate">{w.actors[a.agentId]?.name}</span>
-            <span className="flex items-center gap-1.5 text-brand-ink">
-              {a.status === "working" ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-              {step?.verb ?? (a.status === "queued" ? "Up next" : "Working")}
-            </span>
+          <div key={l.id} className={cn("animate-enter", grouped && "-mt-1.5")}>
+            {!grouped ? (
+              <div className="mb-1 flex items-center gap-1.5 text-[12px] font-medium text-zinc-600">
+                <AgentAvatar actorId={l.actorId} size="sm" />
+                {w.actors[l.actorId]?.name ?? l.actorId}
+                <span className="font-normal text-zinc-400 tnum">{clockTime(l.at).slice(0, 5)}</span>
+              </div>
+            ) : null}
+            <div className={cn("pl-[26px] text-[13.5px] leading-relaxed", l.tone === "bad" ? "text-destructive" : "text-zinc-800")}>
+              <Typed text={l.text} on={Date.parse(l.at) > openedAt - 3000} />
+            </div>
           </div>
         );
       })}
+      {here.map((a) => {
+        const step = a.status === "working" ? agentSteps(a.agentId, a.runTools, "running").current : null;
+        return (
+          <div key={"now-" + a.agentId} className="flex items-center gap-1.5 text-[12.5px] text-zinc-500">
+            <AgentAvatar actorId={a.agentId} size="sm" />
+            <span className="font-medium text-zinc-600">{w.actors[a.agentId]?.name}</span>
+            <span>{a.status === "working" ? (step?.verb ?? "Working").toLowerCase() : "is up next"}</span>
+            {a.status === "working" ? (
+              <span className="ml-0.5 flex gap-0.5">
+                {[0, 150, 300].map((d) => (
+                  <span key={d} className="size-1 animate-pulse rounded-full bg-zinc-400" style={{ animationDelay: d + "ms" }} />
+                ))}
+              </span>
+            ) : null}
+          </div>
+        );
+      })}
+      <div ref={end} />
+    </div>
+  );
+}
+
+function HowWeGotHere({ w }: { w: WorkspaceData }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-5">
+      <button type="button" onClick={() => setOpen(!open)} className="flex items-center gap-1 text-[12.5px] font-medium text-zinc-500 hover:text-zinc-900">
+        <ChevronDown className={cn("size-3.5 transition-transform", !open && "-rotate-90")} />
+        How we got here
+      </button>
+      {open ? (
+        <div className="mt-3">
+          <Feed w={w} />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -272,6 +358,7 @@ function TaskView({ w, onDecided }: { w: WorkspaceData; onDecided: () => void })
     return (
       <div className="px-5 pt-5 pb-6">
         <DecisionCard key={w.item.id + (decision.approvalId ?? "q")} w={w} decision={decision} keys onDone={onDecided} footer={record} />
+        <HowWeGotHere w={w} />
       </div>
     );
   }
@@ -291,7 +378,7 @@ function TaskView({ w, onDecided }: { w: WorkspaceData; onDecided: () => void })
           {busy ? "Nothing needed from you yet" : (o.detail ?? "Nothing needed from you")}
         </p>
       </div>
-      <Working w={w} />
+      <Feed w={w} />
       {w.dispute?.letterBody ? <DisputeLetter dispute={w.dispute} /> : null}
       <VendorThread w={w} />
       <div className="text-[12.5px] text-zinc-500">{record}</div>

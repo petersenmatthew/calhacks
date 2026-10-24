@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { notifyChange, nowIso, type AppContext } from "../context";
 import { outbox, providers } from "../db/schema";
 import { CONTROLLER, type ChannelName } from "./directory";
@@ -63,11 +63,63 @@ export function queueEmail(
   });
 }
 
+/*
+ * Slack threads. Follow-up messages about one approval or one dispute go in
+ * the thread of the message that started it, so a channel reads as one line
+ * per case. Keyed by event; the parent shares the same ref (approval or
+ * dispute id) and channel. Events marked broadcast also show in the channel.
+ */
+const THREAD_UNDER: Record<string, { parent: string; broadcast?: boolean }> = {
+  "approval.escalated": { parent: "approval.requested" },
+  "approval.decided": { parent: "approval.requested" },
+  "dispute.vendor_message": { parent: "dispute.sent" },
+  "dispute.reply_sent": { parent: "dispute.sent" },
+  "dispute.controller_question": { parent: "dispute.sent" },
+  "dispute.follow_up": { parent: "dispute.sent" },
+  "dispute.escalated": { parent: "dispute.sent" },
+  "dispute.reply": { parent: "dispute.sent" },
+  "dispute.bounced": { parent: "dispute.sent", broadcast: true },
+  "dispute.closed": { parent: "dispute.sent", broadcast: true },
+};
+
+function parentRow(ctx: AppContext, event: string, ref: string | null | undefined, destination?: string) {
+  if (!ref) return null;
+  return (
+    ctx.db
+      .select({ id: outbox.id })
+      .from(outbox)
+      .where(and(eq(outbox.channel, "slack"), eq(outbox.event, event), eq(outbox.ref, ref), ...(destination ? [eq(outbox.destination, destination)] : [])))
+      .orderBy(desc(outbox.id))
+      .get() ?? null
+  );
+}
+
+/**
+ * React to the Slack message that started something, e.g. a check mark on the
+ * approval request once it is approved, so the channel shows status at a glance.
+ * Delivered after the message itself; a no-op when that message was never posted.
+ */
+export function reactSlack(ctx: AppContext, input: { on: { event: string; ref: string }; emoji: string; event: string; workItemId?: string | null }) {
+  const parent = parentRow(ctx, input.on.event, input.on.ref);
+  if (!parent) return null;
+  return queue(ctx, {
+    channel: "slack_reaction",
+    destination: "reaction",
+    body: input.emoji,
+    event: input.event,
+    workItemId: input.workItemId,
+    ref: input.on.ref,
+    mentions: [],
+    threadOf: parent.id,
+  });
+}
+
 function queue(
   ctx: AppContext,
   row: {
-    channel: "email" | "slack";
+    channel: "email" | "slack" | "slack_reaction";
     destination: string;
+    threadOf?: number | null;
     body: string;
     event: string;
     subject?: string | null;
@@ -79,9 +131,18 @@ function queue(
     mentions: string[];
   },
 ) {
+  let threadOf = row.threadOf ?? null;
+  let broadcast = false;
+  const rule = row.channel === "slack" && row.destination.startsWith("#") ? THREAD_UNDER[row.event] : undefined;
+  if (rule && threadOf === null) {
+    threadOf = parentRow(ctx, rule.parent, row.ref, row.destination)?.id ?? null;
+    broadcast = Boolean(rule.broadcast && threadOf);
+  }
   const inserted = ctx.db
     .insert(outbox)
     .values({
+      threadOf,
+      broadcast,
       channel: row.channel,
       destination: row.destination,
       subject: row.subject ?? null,

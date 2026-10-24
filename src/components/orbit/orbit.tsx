@@ -7,7 +7,9 @@ import { type Frame, type OrbitNodeId } from "@/lib/frames";
 import { cn } from "@/lib/utils";
 import type { DashboardData, WorkspaceData } from "@/server/queries";
 import { AgentAvatar } from "../status";
+import { PixelAgent, spriteTint } from "../pixel-agent";
 import { buildTime, DH, DW, FrameView } from "./frame-view";
+import { HandoffRunner, handoffsFrom } from "./handoff-runner";
 
 /* ------------------------------------------------------------------ geometry */
 
@@ -401,15 +403,6 @@ function FrameCard({
   );
 }
 
-function GhostFrame({ x, y, dim, lit }: { x: number; y: number; dim: boolean; lit: boolean }) {
-  return (
-    <div
-      className={cn("absolute rounded-[10px] bg-white/50 ring-1 ring-zinc-200/70 transition-opacity duration-500", lit && "ring-zinc-300")}
-      style={{ left: x, top: y, width: FW, height: FH, opacity: dim ? 0.12 : 1 }}
-    />
-  );
-}
-
 /* ------------------------------------------------------------------ canvas */
 
 export type Focus = { kind: "node"; id: OrbitNodeId } | { kind: "frame"; id: string } | null;
@@ -428,7 +421,6 @@ export function Orbit({
   task,
   onClearTask,
   onYou,
-  ghosts = true,
 }: {
   overview: DashboardData;
   frames: Frame[];
@@ -441,8 +433,6 @@ export function Orbit({
   onClearTask?: () => void;
   /** The centre seat: start reviewing what is waiting. */
   onYou?: () => void;
-  /** Draw empty placeholders at seats with no frames. Off when one task is focused. */
-  ghosts?: boolean;
 }) {
   const { ref, size } = useViewport();
   const [hover, setHover] = useState<OrbitNodeId | null>(null);
@@ -474,10 +464,10 @@ export function Orbit({
   const level: "all" | "node" | "frame" = focusedFrame ? "frame" : focusNode ? "node" : "all";
 
   // Camera: where the viewport centre sits in canvas space, and the zoom.
-  // Fit what is actually drawn: the ring, its seats, and the frames shown (or their placeholders).
+  // Fit what is actually drawn: the ring, its seats, and the frames shown.
   const boxes = [
     { x0: CX - R, x1: CX + R, y0: CY - R, y1: CY + R },
-    ...groups.flatMap((g) => (g.shown.length || ghosts ? g.pos.map((s) => ({ x0: s.x, x1: s.x + FW, y0: s.y, y1: s.y + FH })) : [])),
+    ...groups.flatMap((g) => g.pos.slice(0, g.shown.length).map((s) => ({ x0: s.x, x1: s.x + FW, y0: s.y, y1: s.y + FH }))),
   ];
   const bx0 = Math.min(...boxes.map((b) => b.x0)) - 56;
   const bx1 = Math.max(...boxes.map((b) => b.x1)) + 56;
@@ -492,8 +482,9 @@ export function Orbit({
   } else if (focusNode) {
     const g = groups.find((x) => x.node.id === focusNode)!;
     const p = at(g.node.angle);
-    const xs = [p.x - NODE_W / 2, p.x + NODE_W / 2, ...g.pos.flatMap((s) => [s.x, s.x + FW])];
-    const ys = [p.y - NODE_H / 2 - 36, p.y + NODE_H / 2, ...g.pos.flatMap((s) => [s.y, s.y + FH])];
+    const shownPos = g.pos.slice(0, g.shown.length);
+    const xs = [p.x - NODE_W / 2, p.x + NODE_W / 2, ...shownPos.flatMap((s) => [s.x, s.x + FW])];
+    const ys = [p.y - NODE_H / 2 - 36, p.y + NODE_H / 2, ...shownPos.flatMap((s) => [s.y, s.y + FH])];
     const [x0, x1, y0, y1] = [Math.min(...xs) - 48, Math.max(...xs) + 48, Math.min(...ys) - 48, Math.max(...ys) + 48];
     cam = { x: (x0 + x1) / 2, y: (y0 + y1) / 2, k: Math.min(Math.min(size.w / (x1 - x0), size.h / (y1 - y0)) * 0.9, fit * 3.2) };
   }
@@ -531,6 +522,7 @@ export function Orbit({
   const seatStyle = useSeatStyle();
   const live = Object.fromEntries(NODES.map((n) => [n.id, running(n.actorId)])) as Partial<Record<OrbitNodeId, boolean>>;
   const edges = flows(w);
+  const handoffs = handoffsFrom(w ? w.activity : overview.activity);
   const dimNode = (id: OrbitNodeId) => level !== "all" && focusNode !== id;
   const lit = (id: OrbitNodeId) => level !== "frame" && hover === id;
   const hoverOn = (id: OrbitNodeId) => (on: boolean) => setHover((h) => (on ? id : h === id ? null : h));
@@ -566,6 +558,8 @@ export function Orbit({
               <path key={n.id} d={spoke("you", n.id)} stroke="rgb(212 212 216)" strokeDasharray="4 6" fill="none" vectorEffect="non-scaling-stroke" />
             ))}
             {groups.map((g) => {
+              // No arrows out of a seat with nothing to show yet.
+              if (!g.shown.length) return null;
               const { entry, links } = chain(g.node.id, g.pos);
               const on = lit(g.node.id);
               const marker = "url(#orbit-arrow-" + (on ? 1 : 0) + ")";
@@ -624,9 +618,7 @@ export function Orbit({
                     onMeasure={measure}
                   />
                 ))
-              : ghosts
-                ? g.pos.map((s, i) => <GhostFrame key={g.node.id + i} x={s.x} y={s.y} dim={level !== "all"} lit={lit(g.node.id)} />)
-                : null,
+              : null,
           )}
 
           {groups.map((g) => {
@@ -738,18 +730,19 @@ export function Orbit({
                   >
                     <span
                       className={cn(
-                        "absolute top-1/2 left-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-zinc-400 bg-[#fafafa] transition-colors",
-                        live[g.node.id] && "animate-pulse border-brand-ink bg-primary",
-                        lit(g.node.id) && "border-zinc-700",
+                        "absolute top-1/2 left-1/2 grid size-14 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-2xl border border-zinc-200 transition-[transform,border-color] duration-200 group-hover:-translate-y-[calc(50%+2px)] group-hover:border-zinc-300",
+                        lit(g.node.id) && "border-zinc-400",
+                        live[g.node.id] && "border-primary ring-4 ring-primary/25",
                       )}
-                    />
+                      style={{ background: spriteTint(g.node.actorId) }}
+                    >
+                      <PixelAgent actorId={g.node.actorId} size={40} working={Boolean(live[g.node.id])} />
+                    </span>
                     <span
                       className={cn(
                         "absolute flex flex-col gap-0.5 whitespace-nowrap",
-                        g.node.layout === "right" && "top-1/2 left-1/2 ml-3 -translate-y-1/2 items-start",
-                        g.node.layout === "left" && "top-1/2 right-1/2 mr-3 -translate-y-1/2 items-end",
-                        g.node.layout === "up" && "bottom-1/2 left-1/2 mb-3 -translate-x-1/2 items-center",
-                        g.node.layout === "down" && "top-1/2 left-1/2 mt-3 -translate-x-1/2 items-center",
+                        (g.node.layout === "right" || g.node.layout === "up" || g.node.layout === "down") && "top-1/2 left-1/2 ml-10 -translate-y-1/2 items-start",
+                        g.node.layout === "left" && "top-1/2 right-1/2 mr-10 -translate-y-1/2 items-end",
                       )}
                     >
                       <span className={cn("text-[15px] text-zinc-500 transition-colors group-hover:text-zinc-900", (lit(g.node.id) || live[g.node.id]) && "text-zinc-900")}>
@@ -770,10 +763,12 @@ export function Orbit({
 
           <div
             className="absolute z-20 transition-opacity duration-500"
-            style={{ left: CX - 90, top: CY - 36, width: 180, height: 72, opacity: level === "all" ? 1 : 0.15 }}
+            style={{ left: CX - 90, top: CY - 60, width: 180, height: 140, opacity: level === "all" ? 1 : 0.15 }}
           >
-            <YouCard here={Boolean(here)} label={w ? "Your call" : waiting + " need you"} onClick={onYou} />
+            <YouCard here={Boolean(here)} label={w ? (here ? "your call" : "all clear") : waiting ? waiting + (waiting === 1 ? " needs you" : " need you") : "all clear"} onClick={onYou} />
           </div>
+
+          <HandoffRunner handoffs={handoffs} seats={NODE} center={{ x: CX, y: CY }} radius={R} showMarks={Boolean(w)} hidden={level === "frame"} />
         </div>
       ) : null}
       </div>
@@ -795,6 +790,7 @@ export function Orbit({
   );
 }
 
+/** The centre seat: you, drawn like the employees. A quest marker pops up when something waits on you. */
 function YouCard({ here, label, onClick }: { here: boolean; label: string; onClick?: () => void }) {
   return (
     <button
@@ -804,13 +800,24 @@ function YouCard({ here, label, onClick }: { here: boolean; label: string; onCli
         e.stopPropagation();
         onClick?.();
       }}
-      className={cn(
-        "relative flex size-full flex-col items-center justify-center rounded-xl bg-[#fbfbf9] shadow-sm ring-1 ring-zinc-300 transition-colors",
-        here && "ring-2 ring-primary enabled:hover:bg-white",
-      )}
+      className="group relative flex size-full flex-col items-center justify-start pt-3 enabled:cursor-pointer"
     >
-      <span className="font-serif text-[22px] leading-none tracking-tight text-zinc-800">You</span>
-      {here ? <span className="mt-1 text-[11px] text-zinc-500 tnum">{label}</span> : null}
+      <span
+        className={cn(
+          "relative grid size-20 place-items-center rounded-[22px] border border-zinc-200 transition-[transform,border-color] duration-200 group-enabled:group-hover:-translate-y-0.5",
+          here && "border-primary ring-4 ring-primary/25",
+        )}
+        style={{ background: spriteTint("you") }}
+      >
+        <PixelAgent actorId="you" size={58} working={here} />
+        {here ? (
+          <span className="px-bob-fast absolute -top-3 -right-2 grid h-7 min-w-7 place-items-center rounded-md border-2 border-zinc-900 bg-primary px-1 font-mono text-[15px] leading-none font-bold text-zinc-900 shadow-[2px_2px_0_rgb(24_24_27)]">
+            !
+          </span>
+        ) : null}
+      </span>
+      <span className="mt-2 text-[15px] leading-none text-zinc-900">You</span>
+      <span className={cn("mt-1 font-mono text-[10px] tnum", here ? "text-zinc-600" : "text-zinc-400")}>{label}</span>
     </button>
   );
 }

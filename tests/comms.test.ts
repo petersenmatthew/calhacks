@@ -131,3 +131,65 @@ describe("Slack users", () => {
     expect(String((invite as unknown as [string, RequestInit])[1].body)).toContain("UBELINDA1,UMATTHEW1");
   });
 });
+
+describe("Slack threads and reactions", () => {
+  it("marks the approval request with a check mark, threads the outcome under it, and threads the dispute's story under the letter", async () => {
+    const calls: { method: string; body: Record<string, unknown> }[] = [];
+    let ts = 100;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        const method = String(url).split("/api/")[1];
+        const body = JSON.parse(String(init.body ?? "{}"));
+        calls.push({ method, body });
+        if (method === "conversations.list") {
+          const channels = ["finance-approvals", "vendor-disputes", "budget-alerts", "finance-ops"].map((name, i) => ({ id: "C" + i + "CHAN", name, is_member: true }));
+          return new Response(JSON.stringify({ ok: true, channels }), { status: 200 });
+        }
+        if (method === "reactions.add" && calls.filter((c) => c.method === "reactions.add").length > 1) {
+          return new Response(JSON.stringify({ ok: false, error: "already_reacted" }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ ok: true, ts: String(ts++) + ".0", channel: body.channel }), { status: 200 });
+      }),
+    );
+    const { resetSlackCache } = await import("@/server/comms/transports");
+    resetSlackCache();
+    const { ctx, id } = await sendOverbillingDispute({ comms: { slackBotToken: "xoxb-test" } as never });
+    for (let i = 0; i < 10; i++) await dispatchOutbox(ctx);
+    const rows = ctx.db.select().from(outbox).where(eq(outbox.workItemId, id)).all();
+    const request = rows.find((r) => r.event === "approval.requested")!;
+    expect(request.providerChannel).toBe("C0CHAN");
+    const reaction = calls.find((c) => c.method === "reactions.add")!;
+    expect(reaction.body).toEqual({ channel: "C0CHAN", timestamp: request.providerMessageId, name: "white_check_mark" });
+    const decided = calls.find((c) => c.method === "chat.postMessage" && String(c.body.text).startsWith("Approved by"))!;
+    expect(decided.body.thread_ts).toBe(request.providerMessageId);
+    expect(String(decided.body.text)).toContain("Vendor Liaison is sending the dispute");
+    expect(rows.every((r) => r.status === "sent" || r.status === "simulated")).toBe(true);
+  });
+
+  it("waits out a Slack rate limit without using up retries", async () => {
+    let limited = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (limited) return new Response("", { status: 429, headers: { "retry-after": "0" } });
+        if (String(url).includes("conversations.list")) return new Response(JSON.stringify({ ok: true, channels: [{ id: "C9", name: "finance-ops", is_member: true }] }), { status: 200 });
+        return new Response(JSON.stringify({ ok: true, ts: "1.0", channel: "C9" }), { status: 200 });
+      }),
+    );
+    const { resetSlackCache } = await import("@/server/comms/transports");
+    resetSlackCache();
+    const { setup } = await import("./helpers");
+    const { postSlack } = await import("@/server/comms/outbox");
+    const { ctx } = setup(":memory:", { comms: { slackBotToken: "xoxb-test" } as never });
+    const rowId = postSlack(ctx, { channel: "finance-ops", event: "comms.test", text: "hi" });
+    await dispatchOutbox(ctx);
+    let row = ctx.db.select().from(outbox).where(eq(outbox.id, rowId)).get()!;
+    expect(row).toMatchObject({ status: "pending", attempts: 0 });
+    limited = false;
+    await new Promise((r) => setTimeout(r, 5));
+    await dispatchOutbox(ctx);
+    row = ctx.db.select().from(outbox).where(eq(outbox.id, rowId)).get()!;
+    expect(row.status).toBe("sent");
+  });
+});

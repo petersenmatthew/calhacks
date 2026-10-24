@@ -20,7 +20,7 @@ async function diagnose() {
       slack.workspace = json.team;
       slack.bot = json.user;
       slack.scopes = scopes;
-      const needed = ["chat:write", "chat:write.public", "channels:read", "channels:manage", "channels:join", "users:read"];
+      const needed = ["chat:write", "chat:write.public", "channels:read", "channels:manage", "channels:join", "users:read", "reactions:write"];
       try {
         await resolveSlackUsers(ctx, true);
       } catch (e) {

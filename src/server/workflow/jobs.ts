@@ -1,6 +1,6 @@
-import { and, asc, eq, isNull, notInArray, or } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, notInArray, or } from "drizzle-orm";
 import { notifyChange, nowIso, txImmediate, type AppContext } from "../context";
-import { jobs } from "../db/schema";
+import { jobs, workItems } from "../db/schema";
 import { getFocusWorkItem, getRunMode, pausedAgents } from "../settings";
 
 export type JobRow = typeof jobs.$inferSelect;
@@ -63,7 +63,13 @@ export function claimNextJob(ctx: AppContext): JobRow | null {
       .where(
         and(
           eq(jobs.status, "queued"),
-          only ? eq(jobs.workItemId, only) : undefined,
+          // A vendor reply on a disputed case is handled right away, not after whatever case is on screen.
+          only
+            ? or(
+                eq(jobs.workItemId, only),
+                inArray(jobs.workItemId, ctx.db.select({ id: workItems.id }).from(workItems).where(eq(workItems.state, "DISPUTED"))),
+              )
+            : undefined,
           notInArray(jobs.workItemId, busyWorkItems),
           paused.length ? or(isNull(jobs.agentId), notInArray(jobs.agentId, paused)) : undefined,
         ),

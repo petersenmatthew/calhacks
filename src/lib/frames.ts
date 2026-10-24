@@ -711,7 +711,7 @@ function threadSpec(w: WorkspaceData, send: ActivityRow, close?: ActivityRow, pk
   ];
   const messages: ThreadSpec["messages"] = [{ from: "Atlas Research Finance", to: provider + " billing", subject: s(send.args, "subject"), body: s(send.args, "message") }];
   if (replied && d) {
-    const ref = d.vendorReference ? " (" + d.vendorReference + ")" : "";
+    const ref = d.creditMemoRef ? " (" + d.creditMemoRef + ")" : d.vendorReference ? " (" + d.vendorReference + ")" : "";
     messages.push({
       from: provider + " billing",
       to: "Vendor Liaison",
@@ -800,7 +800,8 @@ function vendorReplyFrames(w: WorkspaceData): Frame[] {
         eyebrow: "Inbox · reply from " + provider,
         title: credited ? provider + " accepted and credited " + money(w.dispute.amountCents) : provider + " denied the dispute",
         checks: [
-          { label: "Vendor reference", detail: w.dispute.vendorReference ?? "", ok: credited },
+          { label: "Case reference", detail: w.dispute.vendorReference ?? "", ok: credited },
+          ...(w.dispute.creditMemoRef ? [{ label: "Credit memo", detail: w.dispute.creditMemoRef, ok: true }] : []),
           { label: credited ? "Credit memo issued" : "Charge upheld", detail: money(w.dispute.amountCents), ok: credited },
         ],
       },

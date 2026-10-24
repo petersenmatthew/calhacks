@@ -32,13 +32,19 @@ async function fetchMany([, ...ids]: string[]) {
 export function SystemCanvas({ data, initialTask = null, onChanged }: { data: DashboardData; initialTask?: string | null; onChanged: () => void }) {
   const items = useMemo(() => data.workItems.filter((i) => i.period === data.period), [data]);
   const [picked, setPicked] = useState<string | null>(initialTask);
-  // The canvas opens the case the team is on, including one that arrives while
-  // the page is open, and stays on it. The person chooses when to look elsewhere.
+  // The canvas follows the case the team is on, including one that starts while
+  // the page is open (a new task, or the next case in line). If the person
+  // opened some other task themselves, it stays there until they come back.
   const [autoOpen, setAutoOpen] = useState(initialTask === null);
+  const [lastLive, setLastLive] = useState<string | null>(null);
   const live = data.activeWorkItemId && items.some((i) => i.id === data.activeWorkItemId) ? data.activeWorkItemId : null;
-  if (autoOpen && live) {
-    setAutoOpen(false);
-    setPicked(live);
+  if (live && live !== lastLive) {
+    const following = autoOpen || picked === null || picked === lastLive;
+    setLastLive(live);
+    if (following) {
+      setAutoOpen(false);
+      setPicked(live);
+    }
   }
   const task = picked;
   const oneAtATime = data.settings.runMode === "one";
@@ -98,7 +104,6 @@ export function SystemCanvas({ data, initialTask = null, onChanged }: { data: Da
         <Orbit
           overview={data}
           frames={frames}
-          ghosts={!task}
           w={w}
           focus={focus}
           setFocus={setFocus}

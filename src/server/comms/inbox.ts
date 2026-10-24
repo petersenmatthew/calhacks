@@ -62,8 +62,9 @@ export async function pollVendorInbox(ctx: AppContext, options: { force?: boolea
     await client.connect();
     const lock = await client.getMailboxLock("INBOX");
     try {
-      // Case references look like HELIOS-CASE-6001; matchDispute does the exact match.
-      const uids = (await client.search({ since, subject: "CASE" }, { uid: true })) || [];
+      // Vendor replies carry the case reference (e.g. LAMBDA-CASE-6001; matchDispute does the exact match).
+      // Bounces come from the mail system with their own subject, so look for those too.
+      const uids = (await client.search({ since, or: [{ subject: "CASE" }, { from: "mailer-daemon" }, { from: "postmaster" }] }, { uid: true })) || [];
       const fresh = uids.filter((uid) => !seen.has(String(uid)));
       if (fresh.length) {
         for await (const msg of client.fetch(fresh, { source: true, internalDate: true }, { uid: true })) {
@@ -73,11 +74,20 @@ export async function pollVendorInbox(ctx: AppContext, options: { force?: boolea
           const parsed = await simpleParser(msg.source);
           if (parsed.headers.has(OUR_HEADER.toLowerCase())) continue;
           const refs = parsed.references;
+          const from = parsed.from?.value?.[0]?.address ?? parsed.from?.text ?? null;
+          const header = (name: string) => String(parsed.headers.get(name) ?? "").toLowerCase();
+          const attachments = (parsed.attachments ?? []).filter((a) => a.contentDisposition !== "inline" || a.filename);
+          const body = parsed.text?.trim() || htmlToText(typeof parsed.html === "string" ? parsed.html : "");
           inbound.push({
-            from: parsed.from?.value?.[0]?.address ?? parsed.from?.text ?? null,
+            from,
             to: Array.isArray(parsed.to) ? parsed.to[0]?.text : (parsed.to?.text ?? null),
             subject: parsed.subject ?? "",
-            text: parsed.text ?? "",
+            text:
+              body +
+              (attachments.length
+                ? "\n\n[Attached: " + attachments.map((a) => (a.filename ?? "file") + " (" + Math.max(1, Math.round(a.size / 1024)) + " KB)").join(", ") + "]"
+                : ""),
+            kind: isBounce(from, parsed.subject ?? "", header("content-type")) ? "bounce" : isAutomated(header, parsed.subject ?? "") ? "auto_reply" : "reply",
             messageId: parsed.messageId ?? null,
             inReplyTo: parsed.inReplyTo ?? null,
             references: Array.isArray(refs) ? refs : refs ? [refs] : [],
@@ -94,6 +104,43 @@ export async function pollVendorInbox(ctx: AppContext, options: { force?: boolea
   }
   const results = inbound.map((m) => receiveVendorEmail(ctx, m));
   return { checked, results };
+}
+
+/** The mail system telling us a letter could not be delivered. */
+export function isBounce(from: string | null, subject: string, contentType: string) {
+  return (
+    /^(mailer-daemon|postmaster)@/i.test(from ?? "") ||
+    contentType.includes("report-type=delivery-status") ||
+    /^(delivery status notification|undeliver(ed|able)|mail delivery (failed|subsystem)|returned mail)/i.test(subject)
+  );
+}
+
+/** Out-of-office and other machine-written replies (RFC 3834 and the common vendor headers). */
+export function isAutomated(header: (name: string) => string, subject: string) {
+  const auto = header("auto-submitted");
+  return (
+    (auto !== "" && auto !== "no") ||
+    header("x-autoreply") !== "" ||
+    header("x-autorespond") !== "" ||
+    /^(bulk|junk|list|auto_reply)$/.test(header("precedence")) ||
+    /^(auto(matic)?[ -]?reply|out of (the )?office|autoreply|away from)/i.test(subject.replace(/^(re|fwd?):\s*/i, ""))
+  );
+}
+
+function htmlToText(html: string) {
+  return html
+    .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, "")
+    .replace(/<br\s*\/?>|<\/(p|div|li|tr|h\d)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 /** Test the mailbox login without reading anything. */

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e7558acc-bf80-4230-9348-cb2f98307259",
+  "id": "8c20d296-628c-4d36-af67-617b25dc6f9f",
   "prevId": "3421db38-431f-4a9a-98f6-b3826a49918e",
   "tables": {
     "activity_events": {
@@ -814,87 +814,6 @@
         },
         "resolved_at": {
           "name": "resolved_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "erp_links": {
-      "name": "erp_links",
-      "columns": {
-        "entry_id": {
-          "name": "entry_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "odoo_model": {
-          "name": "odoo_model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "odoo_id": {
-          "name": "odoo_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "odoo_name": {
-          "name": "odoo_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "document": {
-          "name": "document",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "attempts": {
-          "name": "attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "last_error": {
-          "name": "last_error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "synced_at": {
-          "name": "synced_at",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -2051,6 +1970,28 @@
           "notNull": false,
           "autoincrement": false
         },
+        "provider_channel": {
+          "name": "provider_channel",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "thread_of": {
+          "name": "thread_of",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "broadcast": {
+          "name": "broadcast",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -2079,6 +2020,14 @@
           "columns": [
             "channel",
             "destination"
+          ],
+          "isUnique": false
+        },
+        "outbox_ref_idx": {
+          "name": "outbox_ref_idx",
+          "columns": [
+            "event",
+            "ref"
           ],
           "isUnique": false
         }
