@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Fragment, useState } from "react";
 import useSWR from "swr";
-import { ChevronRight, ShieldCheck, ShieldX } from "lucide-react";
+import { ChevronLeft, ChevronRight, ShieldCheck, ShieldX } from "lucide-react";
 import { fetcher } from "@/lib/api";
 import { clockTime, dateOnly, dateTimeUtc, money } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -293,6 +293,10 @@ export function AuditView() {
     <div className="h-full overflow-y-auto">
       <Tabs defaultValue="events" className="gap-0">
         <header className="flex h-12 items-center gap-4 border-b px-6">
+          <Link href="/" className="-ml-2 flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800">
+            <ChevronLeft className="size-3.5" />
+            Work
+          </Link>
           <TabsList className="h-7">
             <TabsTrigger value="events" className="text-[12px]">Events</TabsTrigger>
             <TabsTrigger value="policies" className="text-[12px]">Policies</TabsTrigger>

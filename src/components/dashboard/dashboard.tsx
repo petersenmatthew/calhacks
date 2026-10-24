@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import useSWR from "swr";
-import { Network, SquareKanban } from "lucide-react";
+import Link from "next/link";
+import { Network, ShieldCheck, SquareKanban } from "lucide-react";
 import { fetcher } from "@/lib/api";
 import { money, pct, periodLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -92,6 +93,10 @@ export function Dashboard() {
         ) : data ? (
           <span className="text-[12px] text-muted-foreground">{periodLabel(data.period, true)}</span>
         ) : null}
+        <Link href="/audit" className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800">
+          <ShieldCheck className="size-3.5" />
+          Audit trail
+        </Link>
         <div className="ml-auto flex items-center gap-4">
           {data ? <Metrics data={data} /> : null}
           <div className="flex items-center gap-1.5">
