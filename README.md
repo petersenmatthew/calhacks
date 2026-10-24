@@ -42,24 +42,6 @@ Copy `.env.example` to `.env.local`. All are optional.
 | `AUTONOMY` | on | Set to `off` to disable the scheduler (agents still run when work is queued). |
 | `BILLING_FEED_URL` | unset | Optional external billing feed polled on a cursor: `GET <url>?after=<cursor>` returns `{ events, next_cursor }`. |
 
-## Deploy (Railway)
-
-The app is one long-running Node process: the Next.js server, the agent worker, and the scheduler share a SQLite database. That needs an always-on container with a persistent disk, not serverless functions, so Vercel is not a fit. The repo includes a `Dockerfile` and `railway.json` (health check on `/api/health`, one replica).
-
-1. In Railway, **New Project → Deploy from GitHub repo** and pick this repo. Railway builds the `Dockerfile`.
-2. On the service, **Add Volume** and mount it at `/data`. The image stores the database at `/data/experiment-ledger.db`, so it survives redeploys.
-3. Add variables if you want them (`OPENAI_API_KEY`, `OPENAI_AGENTS_DISABLE_TRACING=1`, `DETERMINISTIC_STEP_DELAY_MS`).
-4. **Settings → Networking → Generate Domain**. The first request seeds the sandbox and starts the worker and scheduler.
-
-Keep the service at one replica: SQLite is a single-node database. Moving to Postgres is the step that would allow more replicas and a separate worker process.
-
-Run the same image anywhere with Docker:
-
-```bash
-docker build -t experiment-ledger .
-docker run -p 3000:3000 -v experiment-ledger-data:/data experiment-ledger
-```
-
 ### Execution modes
 
 - **LLM agents.** Each agent turn is an OpenAI Agents SDK run with typed Zod tools. The model chooses tools and writes findings; the run ends only when a terminal tool (handoff, approval request, posting request) succeeds.
@@ -192,6 +174,6 @@ tests/                 Vitest suite
 - **One demo user:** there is no login. Every human action is taken as the controller, Priya Natarajan.
 - **Simulated systems:** source systems, the ERP, AP history, the billing feeds, and the vendor portal are simulated, and vendor responses are triggered from the UI. Reminders and vendor messages are recorded, not actually emailed.
 - **Two agents:** contract review is part of the Compute Agent; there is no separate Contract Agent.
-- **Single-node storage:** SQLite runs on one node, so deploy one replica. The worker and scheduler run inside the Next.js server process; restart the dev server after changing server code.
+- **Runs while the server runs:** SQLite runs on one node, and the worker and scheduler run inside the Next.js server process, so nothing happens while it is stopped (queued jobs and due follow-ups resume on restart); restart the dev server after changing server code.
 - **No mode switch in the UI:** switch between LLM and deterministic replay with `AGENT_MODE` or `POST /api/settings`.
 - **Reset wipes everything:** Reset demo deletes the sandbox, including its audit log. It is a demo control, not a production feature.
