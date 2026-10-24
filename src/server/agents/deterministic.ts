@@ -70,8 +70,30 @@ async function computePolicy(c: Caller) {
     const clauses = unexplained
       ? pickClauses(terms.clauses, ["termination", "minimum", "metering"])
       : pickClauses(terms.clauses, ["idle", "minimum", "metering"]);
-    const owner = checks.ownerProjectIds.length === 1 ? checks.ownerProjectIds[0] : null;
-    const summary = unexplained
+    if (checks.priorLineIds?.length) {
+      anomalies.push({
+        code: "DUPLICATE_LINE",
+        description: "Line " + checks.priorLineIds.join(", ") + " already billed " + checks.priorBilledHours + " h for " + checks.instanceId + ".",
+      });
+    }
+    // Owner comes from the experiment tracker, or from the controller's answer when the tracker has none.
+    const named = (wi.findings as Json[])
+      .filter((f) => f.kind === "human")
+      .flatMap((f) => String(f.summary).match(/PRJ-[A-Z]+/g) ?? []);
+    const owner = checks.ownerProjectIds.length === 1 ? checks.ownerProjectIds[0] : (named.at(-1) ?? null);
+    if (!owner) {
+      const exps = (life.jobs as Json[]).map((j) => j.experiment_id).join(", ");
+      await c.call("request_human_info", {
+        question:
+          "No project owns " + exps + " on " + checks.instanceId + " (" + wi.amounts.invoiced + "). Which project should carry this charge? Reply with its project id, e.g. PRJ-FLM.",
+      });
+      return;
+    }
+    const summary = checks.priorLineIds?.length
+      ? "Instance " + checks.instanceId + " supports " + checks.billableHours + " billable h, and line " + checks.priorLineIds.join(", ") +
+        " already billed " + checks.priorBilledHours + " h. This line bills " + checks.billedHours + " h (" + wi.amounts.invoiced +
+        ") again; " + wi.amounts.discrepancy + " is a duplicate charge."
+      : unexplained
       ? "Instance " + checks.instanceId + " ran " + checks.lifecycleHours + " h from provisioning to termination, supporting " +
         checks.billableHours + " billable h (" + wi.amounts.contract_supported + "). The invoice bills " + checks.billedHours + " h (" +
         wi.amounts.invoiced + "); the extra " + (checks.billedHours - checks.billableHours) + " h fall after termination and no clause explains them."
@@ -139,6 +161,21 @@ async function financePolicy(c: Caller) {
 
   if (wi.work_item.type === "BILLING_VARIANCE") {
     const policy = await c.call("get_allocation_policy", {});
+    const latest = [...wi.proposals].reverse()[0] as Json | undefined;
+    const disputeRejected = latest?.kind === "VENDOR_DISPUTE" && (latest.status === "REJECTED" || latest.status === "CHANGES_REQUESTED");
+    if (disputeRejected) {
+      // The controller turned down the dispute: allocate the full invoice to the owner and ask again.
+      const feedback = [...wi.controller_feedback].reverse().find((f: Json) => f.proposal_id === latest.id);
+      const calc = await c.call("calculate_cost_allocation", { method: "single_owner" });
+      const proposal = await c.call("propose_adjustment", {
+        calculation_id: calc.calculation_id,
+        rationale: "Controller declined dispute " + latest.id + (feedback?.reason ? ": " + feedback.reason : ".") + " Allocating the full charge to the owning project.",
+        policy_id: null,
+        evidence_ids: c.ids,
+      });
+      await c.call("request_human_approval", { proposal_id: proposal.proposal_id, summary: "Allocate " + calc.total + " to the owning project. Revised after the dispute was declined." });
+      return;
+    }
     if (compute?.assessment === "not_explained") {
       await c.call("search_precedents", { query: wi.provider.name + " billing after termination dispute credit" });
       const dispute = await c.call("propose_vendor_dispute", {

@@ -1,10 +1,9 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { ArrowLeft, ArrowUpRight, ChevronLeft, ChevronRight, LoaderCircle, RotateCcw } from "lucide-react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { ArrowLeft, ChevronLeft, ChevronRight, LoaderCircle, RotateCcw, X } from "lucide-react";
 import { boardStage } from "@/lib/agent-steps";
-import { buildFrames, type Frame, type OrbitNodeId } from "@/lib/frames";
+import { type Frame, type OrbitNodeId } from "@/lib/frames";
 import { cn } from "@/lib/utils";
 import type { DashboardData, WorkspaceData } from "@/server/queries";
 import { AgentAvatar } from "../status";
@@ -32,7 +31,7 @@ type Layout = "up" | "down" | "left" | "right";
  * (intake rules, the ledger gateway, policy memory) shows up inside their work, and
  * the ring itself is the orchestrator passing work between them.
  */
-const EMPLOYEES: { id: OrbitNodeId; actorId: string; label: string; job: string; dept: string }[] = [
+export const EMPLOYEES: { id: OrbitNodeId; actorId: string; label: string; job: string; dept: string }[] = [
   { id: "compute", actorId: "agent.compute", label: "Compute Investigator", job: "What actually ran", dept: "FinOps" },
   { id: "finance", actorId: "agent.finance", label: "Cost Accountant", job: "Charges teams, books", dept: "Accounting" },
   { id: "vendor", actorId: "agent.vendor", label: "Vendor Liaison", job: "Disputes and credits", dept: "Payables" },
@@ -50,7 +49,7 @@ const SEAT_STYLES: SeatStyle[] = ["current", "tile", "dot", "ring"];
 
 function readSeatStyle(): SeatStyle {
   const v = new URLSearchParams(window.location.search).get("seats");
-  return SEAT_STYLES.includes(v as SeatStyle) ? (v as SeatStyle) : "current";
+  return SEAT_STYLES.includes(v as SeatStyle) ? (v as SeatStyle) : "ring";
 }
 
 function useSeatStyle() {
@@ -60,7 +59,7 @@ function useSeatStyle() {
       return () => window.removeEventListener("popstate", cb);
     },
     readSeatStyle,
-    () => "current" as SeatStyle,
+    () => "ring" as SeatStyle,
   );
 }
 
@@ -324,14 +323,41 @@ function GhostFrame({ x, y, dim, lit }: { x: number; y: number; dim: boolean; li
 
 /* ------------------------------------------------------------------ canvas */
 
-type Focus = { kind: "node"; id: OrbitNodeId } | { kind: "frame"; id: string } | null;
+export type Focus = { kind: "node"; id: OrbitNodeId } | { kind: "frame"; id: string } | null;
 
-export function Orbit({ overview, w }: { overview: DashboardData; w?: WorkspaceData }) {
+/**
+ * The ring of employees and the frames of work around each seat. The parent owns
+ * which frames are shown (every task, or one) and what is focused, so the sidebar
+ * can follow along.
+ */
+export function Orbit({
+  overview,
+  frames,
+  w,
+  focus,
+  setFocus,
+  task,
+  onClearTask,
+  onYou,
+  ghosts = true,
+}: {
+  overview: DashboardData;
+  frames: Frame[];
+  /** The focused task, used to light up the hand-offs it took. */
+  w?: WorkspaceData;
+  focus: Focus;
+  setFocus: (f: Focus) => void;
+  /** Short label of the focused task, shown in the breadcrumb. */
+  task?: { id: string; label: string } | null;
+  onClearTask?: () => void;
+  /** The centre seat: start reviewing what is waiting. */
+  onYou?: () => void;
+  /** Draw empty placeholders at seats with no frames. Off when one task is focused. */
+  ghosts?: boolean;
+}) {
   const { ref, size } = useViewport();
-  const [focus, setFocus] = useState<Focus>(null);
   const [hover, setHover] = useState<OrbitNodeId | null>(null);
   const [replay, setReplay] = useState(0);
-  const frames = useMemo(() => (w ? buildFrames(w) : []), [w]);
 
   // Lay out the newest frames for each node.
   const placed = new Map<string, { frame: Frame; x: number; y: number }>();
@@ -348,8 +374,17 @@ export function Orbit({ overview, w }: { overview: DashboardData; w?: WorkspaceD
   const level: "all" | "node" | "frame" = focusedFrame ? "frame" : focusNode ? "node" : "all";
 
   // Camera: where the viewport centre sits in canvas space, and the zoom.
-  const fit = size.w && size.h ? Math.min(size.w / W, size.h / H) : 1;
-  let cam = { x: CX, y: CY, k: fit };
+  // Fit what is actually drawn: the ring, its seats, and the frames shown (or their placeholders).
+  const boxes = [
+    { x0: CX - R, x1: CX + R, y0: CY - R, y1: CY + R },
+    ...groups.flatMap((g) => (g.shown.length || ghosts ? g.pos.map((s) => ({ x0: s.x, x1: s.x + FW, y0: s.y, y1: s.y + FH })) : [])),
+  ];
+  const bx0 = Math.min(...boxes.map((b) => b.x0)) - 56;
+  const bx1 = Math.max(...boxes.map((b) => b.x1)) + 56;
+  const by0 = Math.min(...boxes.map((b) => b.y0)) - 72;
+  const by1 = Math.max(...boxes.map((b) => b.y1)) + 56;
+  const fit = size.w && size.h ? Math.min(size.w / (bx1 - bx0), size.h / (by1 - by0)) : 1;
+  let cam = { x: (bx0 + bx1) / 2, y: (by0 + by1) / 2, k: fit };
   if (focusedFrame) {
     cam = {
       x: focusedFrame.x + FW / 2,
@@ -374,15 +409,16 @@ export function Orbit({ overview, w }: { overview: DashboardData; w?: WorkspaceD
     if (next) setFocus({ kind: "frame", id: next });
   };
   const up = () => setFocus(focusedFrame ? { kind: "node", id: focusedFrame.frame.node } : null);
+  const escape = () => (focus ? up() : onClearTask?.());
 
-  const keys = useRef({ up, step, replay: () => setReplay((r) => r + 1) });
+  const keys = useRef({ escape, step, replay: () => setReplay((r) => r + 1) });
   useEffect(() => {
-    keys.current = { up, step, replay: () => setReplay((r) => r + 1) };
+    keys.current = { escape, step, replay: () => setReplay((r) => r + 1) };
   });
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLElement && ["INPUT", "SELECT", "TEXTAREA"].includes(e.target.tagName)) return;
-      if (e.key === "Escape") keys.current.up();
+      if (e.key === "Escape") keys.current.escape();
       if (e.key === "ArrowRight") keys.current.step(1);
       if (e.key === "ArrowLeft") keys.current.step(-1);
       if (e.key.toLowerCase() === "r" && !e.metaKey && !e.ctrlKey) keys.current.replay();
@@ -391,8 +427,8 @@ export function Orbit({ overview, w }: { overview: DashboardData; w?: WorkspaceD
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const waiting = overview.workItems.filter((i) => boardStage(i) === "needs_you").length;
-  const here = w && (w.approvals.some((a) => a.status === "PENDING") || w.item.state === "NEEDS_INFO");
+  const waiting = overview.workItems.filter((i) => i.period === overview.period && boardStage(i) === "needs_you").length;
+  const here = w ? w.approvals.some((a) => a.status === "PENDING") || w.item.state === "NEEDS_INFO" : waiting > 0;
   const running = (aid: string) => overview.agents.some((a) => a.agentId === aid && a.status === "working");
   const seatStyle = useSeatStyle();
   const live = Object.fromEntries(NODES.map((n) => [n.id, running(n.actorId)])) as Partial<Record<OrbitNodeId, boolean>>;
@@ -402,7 +438,8 @@ export function Orbit({ overview, w }: { overview: DashboardData; w?: WorkspaceD
   const hoverOn = (id: OrbitNodeId) => (on: boolean) => setHover((h) => (on ? id : h === id ? null : h));
 
   return (
-    <div ref={ref} className="absolute inset-0 overflow-hidden" onClick={up}>
+    <div ref={ref} className="absolute inset-0" onClick={up}>
+      <div className="absolute inset-0 overflow-hidden">
       {size.w ? (
         <div
           className="absolute top-0 left-0"
@@ -487,7 +524,9 @@ export function Orbit({ overview, w }: { overview: DashboardData; w?: WorkspaceD
                     onHover={hoverOn(g.node.id)}
                   />
                 ))
-              : g.pos.map((s, i) => <GhostFrame key={g.node.id + i} x={s.x} y={s.y} dim={level !== "all"} lit={lit(g.node.id)} />),
+              : ghosts
+                ? g.pos.map((s, i) => <GhostFrame key={g.node.id + i} x={s.x} y={s.y} dim={level !== "all"} lit={lit(g.node.id)} />)
+                : null,
           )}
 
           {groups.map((g) => {
@@ -508,7 +547,7 @@ export function Orbit({ overview, w }: { overview: DashboardData; w?: WorkspaceD
                       aria-label={g.node.label}
                       onClick={(e) => {
                         e.stopPropagation();
-                        setFocus({ kind: "node", id: g.node.id });
+                    setFocus({ kind: "node", id: g.node.id });
                       }}
                       onMouseEnter={() => hoverOn(g.node.id)(true)}
                       onMouseLeave={() => hoverOn(g.node.id)(false)}
@@ -542,7 +581,7 @@ export function Orbit({ overview, w }: { overview: DashboardData; w?: WorkspaceD
                       aria-label={g.node.dept}
                       onClick={(e) => {
                         e.stopPropagation();
-                        setFocus({ kind: "node", id: g.node.id });
+                    setFocus({ kind: "node", id: g.node.id });
                       }}
                       onMouseEnter={() => hoverOn(g.node.id)(true)}
                       onMouseLeave={() => hoverOn(g.node.id)(false)}
@@ -633,21 +672,16 @@ export function Orbit({ overview, w }: { overview: DashboardData; w?: WorkspaceD
             className="absolute z-20 transition-opacity duration-500"
             style={{ left: CX - 90, top: CY - 36, width: 180, height: 72, opacity: level === "all" ? 1 : 0.15 }}
           >
-            {waiting ? (
-              <div className="absolute -top-9 left-1/2 -translate-x-1/2">
-                <span className="flex items-center gap-1.5 rounded-lg bg-white px-2 py-1 font-mono text-[11px] text-zinc-600 shadow-xs ring-1 ring-zinc-200">
-                  <span className="size-2 animate-pulse rounded-full bg-amber-400" />
-                  {waiting} waiting
-                </span>
-              </div>
-            ) : null}
-            <YouCard here={Boolean(here)} href={w ? "/investigations/" + w.item.id : undefined} />
+            <YouCard here={Boolean(here)} label={w ? "Your call" : waiting + " need you"} onClick={onYou} />
           </div>
         </div>
       ) : null}
+      </div>
 
       <Toolbar
         level={level}
+        task={task ?? null}
+        onClearTask={onClearTask}
         nodeLabel={focusNode ? NODE[focusNode].label : null}
         frameLabel={focusedFrame?.frame.label ?? null}
         zoom={Math.round((cam.k / fit) * 100)}
@@ -661,28 +695,24 @@ export function Orbit({ overview, w }: { overview: DashboardData; w?: WorkspaceD
   );
 }
 
-function YouCard({ here, href }: { here: boolean; href?: string }) {
-  const body = (
-    <span
+function YouCard({ here, label, onClick }: { here: boolean; label: string; onClick?: () => void }) {
+  return (
+    <button
+      type="button"
+      disabled={!here || !onClick}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick?.();
+      }}
       className={cn(
-        "relative flex size-full flex-col items-center justify-center rounded-xl bg-[#fbfbf9] shadow-sm ring-1 ring-zinc-300",
-        here && "ring-2 ring-primary",
-        href && here && "hover:bg-white",
+        "relative flex size-full flex-col items-center justify-center rounded-xl bg-[#fbfbf9] shadow-sm ring-1 ring-zinc-300 transition-colors",
+        here && "ring-2 ring-primary enabled:hover:bg-white",
       )}
     >
       <span className="font-serif text-[22px] leading-none tracking-tight text-zinc-800">You</span>
-      {here ? <span className="mt-1 text-[11px] text-zinc-500">Review needed</span> : null}
-      {here ? <ArrowUpRight className="absolute top-2 right-2 size-3.5 text-brand-ink" /> : null}
-    </span>
+      {here ? <span className="mt-1 text-[11px] text-zinc-500 tnum">{label}</span> : null}
+    </button>
   );
-  if (here && href) {
-    return (
-      <Link href={href} onClick={(e) => e.stopPropagation()} className="block size-full">
-        {body}
-      </Link>
-    );
-  }
-  return body;
 }
 
 function ToolButton({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
@@ -704,6 +734,8 @@ function ToolButton({ label, onClick, children }: { label: string; onClick: () =
 
 function Toolbar({
   level,
+  task,
+  onClearTask,
   nodeLabel,
   frameLabel,
   zoom,
@@ -714,6 +746,8 @@ function Toolbar({
   onReplay,
 }: {
   level: "all" | "node" | "frame";
+  task: { id: string; label: string } | null;
+  onClearTask?: () => void;
   nodeLabel: string | null;
   frameLabel: string | null;
   zoom: number;
@@ -735,9 +769,29 @@ function Toolbar({
           <span className="grid size-8 place-items-center rounded-full bg-zinc-100 text-[11px] font-semibold text-zinc-600">AR</span>
         )}
         <nav className="flex items-center gap-0.5 text-[13.5px] text-zinc-500">
-          <button type="button" onClick={onHome} className={cn(crumb, level === "all" && "font-medium text-zinc-800")}>
+          <button
+            type="button"
+            onClick={() => {
+              onHome();
+              onClearTask?.();
+            }}
+            className={cn(crumb, level === "all" && !task && "font-medium text-zinc-800")}
+          >
             Atlas Research
           </button>
+          {task ? (
+            <>
+              <ChevronRight className="size-3.5 text-zinc-300" />
+              <span className="flex items-center gap-1 rounded-md bg-accent py-0.5 pr-1 pl-1.5 text-zinc-800">
+                <button type="button" onClick={onHome} className={cn("max-w-[220px] truncate", level === "all" && "font-medium")}>
+                  {task.label}
+                </button>
+                <button type="button" onClick={onClearTask} aria-label="Show all work" title="Show all work (Esc)" className="grid size-4 place-items-center rounded text-zinc-500 hover:bg-white/70 hover:text-zinc-900">
+                  <X className="size-3" />
+                </button>
+              </span>
+            </>
+          ) : null}
           {nodeLabel ? (
             <>
               <ChevronRight className="size-3.5 text-zinc-300" />

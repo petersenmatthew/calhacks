@@ -551,7 +551,15 @@ const submitComputeFindings = defineTool({
     if (summary.length < 10) fail("Summary is too short.");
     const cited = requireEvidence(ctx, item, args.evidence_ids);
     const checks = item.checks;
-    const candidates = checks.kind === "instance" ? checks.ownerProjectIds : [checks.ownerProjectId];
+    // The controller can name the owner when the experiment tracker has none.
+    const humanNamed = ctx.db
+      .select()
+      .from(findings)
+      .where(eq(findings.workItemId, item.id))
+      .all()
+      .filter((f) => f.kind === "human")
+      .flatMap((f) => f.summary.match(/PRJ-[A-Z]+/g) ?? []);
+    const candidates = [...new Set([...(checks.kind === "instance" ? checks.ownerProjectIds : [checks.ownerProjectId]), ...humanNamed])];
     if (args.owner_project_id && !candidates.includes(args.owner_project_id)) {
       fail(
         "Owner " + args.owner_project_id + " is not supported by the retrieved evidence. Candidates: " + (candidates.join(", ") || "none"),

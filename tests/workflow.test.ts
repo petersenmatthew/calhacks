@@ -9,6 +9,7 @@ import { runScenario } from "@/server/sim/scenarios";
 import { decideApproval } from "@/server/workflow/approvals";
 import { recordVendorResponse } from "@/server/workflow/decisions";
 import { postJournalEntry } from "@/server/workflow/ledger";
+import { setAgentSettings } from "@/server/settings";
 import { verifyAuditChain } from "@/server/audit";
 import {
   accountBalance,
@@ -146,6 +147,24 @@ describe("Scenarios 2 and 3: shared allocation, human correction, and persistent
 });
 
 describe("controls", () => {
+  it("holds a paused employee's work in the queue without blocking anyone else", async () => {
+    const { ctx, orchestrator } = setup();
+    await orchestrator.drain();
+    const ingest = runScenario(ctx, "overbilling");
+    const id = ingest.status === "work_item_created" ? ingest.workItemId : "";
+    await orchestrator.drain();
+    setAgentSettings(ctx, ACTOR.controller, ACTOR.vendorLiaison, { paused: true });
+    const [approval] = pendingApprovals(ctx, id);
+    decideApproval(ctx, { approvalId: approval.id, actorId: ACTOR.controller, decision: "APPROVED" });
+    await orchestrator.drain();
+    // The approval itself still executes; only the paused Vendor Liaison waits.
+    expect(workItem(ctx, id).state).toBe("APPROVED");
+    setAgentSettings(ctx, ACTOR.controller, ACTOR.vendorLiaison, { paused: false });
+    await orchestrator.drain();
+    expect(workItem(ctx, id).state).toBe("DISPUTED");
+    expect(() => setAgentSettings(ctx, ACTOR.finance, ACTOR.vendorLiaison, { paused: true })).toThrow(ControlError);
+  });
+
   it("denies agents approving or posting and logs every denial", async () => {
     const { ctx, orchestrator } = setup();
     await orchestrator.drain();

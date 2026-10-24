@@ -1,6 +1,7 @@
-import { and, asc, eq, notInArray } from "drizzle-orm";
+import { and, asc, eq, isNull, notInArray, or } from "drizzle-orm";
 import { notifyChange, nowIso, txImmediate, type AppContext } from "../context";
 import { jobs } from "../db/schema";
+import { pausedAgents } from "../settings";
 
 export type JobRow = typeof jobs.$inferSelect;
 export type JobKind = "AGENT_RUN" | "EXECUTE_DECISION";
@@ -25,14 +26,21 @@ export function enqueueJob(
   return row;
 }
 
-/** Claim the oldest queued job whose work item has no running job. */
+/** Claim the oldest queued job whose work item has no running job and whose agent is not paused. */
 export function claimNextJob(ctx: AppContext): JobRow | null {
   return txImmediate(ctx, () => {
     const busyWorkItems = ctx.db.select({ id: jobs.workItemId }).from(jobs).where(eq(jobs.status, "running"));
+    const paused = pausedAgents(ctx);
     const candidate = ctx.db
       .select()
       .from(jobs)
-      .where(and(eq(jobs.status, "queued"), notInArray(jobs.workItemId, busyWorkItems)))
+      .where(
+        and(
+          eq(jobs.status, "queued"),
+          notInArray(jobs.workItemId, busyWorkItems),
+          paused.length ? or(isNull(jobs.agentId), notInArray(jobs.agentId, paused)) : undefined,
+        ),
+      )
       .orderBy(asc(jobs.id))
       .limit(1)
       .get();

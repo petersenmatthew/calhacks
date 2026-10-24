@@ -69,11 +69,13 @@ function titleFor(type: string, checks: ReconciliationChecks, providerShort: str
   if (checks.kind === "reservation") return "Shared reservation " + checks.reservationId + " needs allocation";
   const codes = new Set(checks.flags.map((f) => f.code));
   if (codes.has("DUPLICATE_CHARGE")) return providerShort + " billed " + checks.instanceId + " twice";
+  if (codes.has("MISSING_OWNER")) return "Unattributed GPU charge on " + checks.instanceId;
   if (codes.has("QUANTITY_EXCEEDS_LIFECYCLE")) return providerShort + " billed past instance lifetime on " + checks.instanceId;
-  if (codes.has("RATE_MISMATCH")) return providerShort + " rate above contract on " + checks.instanceId;
+  if (codes.has("RATE_MISMATCH")) {
+    return providerShort + " rate " + (checks.invoicedRateCents > checks.contractRateCents ? "above" : "below") + " contract on " + checks.instanceId;
+  }
   if (codes.has("AMOUNT_VARIANCE")) return "Invoice variance on " + checks.instanceId;
   if (codes.has("IDLE_TIME")) return "Invoice exceeds scheduler runtime on " + checks.instanceId;
-  if (codes.has("MISSING_OWNER")) return "Unattributed GPU charge on " + checks.instanceId;
   return type + " on " + checks.instanceId;
 }
 

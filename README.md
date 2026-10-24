@@ -23,7 +23,7 @@ npm run dev
 # open http://localhost:3000
 ```
 
-The first request creates `data/experiment-ledger.db`, loads the October 2026 sandbox, and starts the background worker. One seeded invoice is left for the agents, so the team is working when you open the dashboard.
+The first request creates `data/experiment-ledger.db`, loads the October 2026 sandbox, and starts the background worker. The sandbox seeds 35 invoice lines from `src/server/sim/cases.ts`: 13 clean lines auto-match, and 22 open work items for the agents (idle time, minimum-duration charges, billing past termination, rate mismatches, duplicate lines, missing experiment owners, and shared reservations). An existing database keeps its old seed until **Reset demo**.
 
 Production build:
 
@@ -127,6 +127,23 @@ npm test
 - **Denials:** agents approving or posting, and gateway posting without approval, are denied and audited.
 - **Ledger integrity:** unbalanced entries are rejected, duplicate ingestion is ignored, and the audit log is append-only with its hash chain intact.
 - **LLM wiring:** the real Agents SDK run loop is driven by the SDK's `ScriptedModel`, including recovery from a guardrail rejection.
+- **Evaluation:** every seeded case is scored against its answer key, and a wrong key is shown to fail.
+
+## Evaluation
+
+```bash
+npm run eval                 # deterministic agents
+AGENT_MODE=llm npm run eval  # LLM agents (needs OPENAI_API_KEY)
+```
+
+Each seeded case in `src/server/sim/cases.ts` has an answer key: the expected outcome, dispute amount, expense per project, and the policy that should authorize the posting. The harness (`src/server/eval/harness.ts`) seeds an in-memory database, lets the agents work every case, and plays the controller from the key: it approves matching proposals, rejects others with the key's correction, answers ownership questions, and sends the vendor reply. It reports:
+
+- **Accuracy:** cases whose final state matches the key.
+- **False-positive dispute rate:** disputes proposed on charges the records support.
+- **Correct policy use:** postings authorized by the expected policy, or by a controller approval when no policy should apply.
+- **Recovery:** cases that end correct after the controller rejected work.
+
+Deterministic replay currently scores 35/35, 0/25 false-positive disputes, 33/33 policy use, and 3/3 recovered. Case O-02 depends on something only the controller knows, so a first dispute is expected; it counts toward recovery and is left out of the false-positive rate.
 
 ## Project layout
 

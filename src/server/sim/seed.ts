@@ -13,7 +13,8 @@ import {
   type ContractClause,
 } from "../db/schema";
 import { ACTOR, ACTOR_SEED } from "../security/actors";
-import { buildInstanceCase, buildReservationCase, ingestCase } from "./scenarios";
+import { ingestCase } from "./scenarios";
+import { SEED_CASES } from "./cases";
 
 export const PROJECTS = [
   { id: "PRJ-FLM", name: "Frontier Language Models", lead: "Dr. Maya Chen", costCenter: "CC-410", monthlyBudgetCents: 52_000_000 },
@@ -224,90 +225,6 @@ function seedReferenceData(ctx: AppContext) {
   });
 }
 
-/** Background October invoices. They flow through the normal ingestion pipeline. */
-function backgroundCases() {
-  return [
-    buildReservationCase({
-      reservationId: "RSV-2100",
-      ownerProjectId: "PRJ-FLM",
-      requestedBy: "Dr. Maya Chen",
-      gpuCount: 192,
-      hours: 744,
-      rateCents: 250,
-      startAt: "2026-10-01T00:00:00.000Z",
-      period: "2026-10",
-      ownerAccountableForIdle: true,
-      internalTerms: "Dedicated pretraining cluster for Frontier Language Models. Not shared.",
-      invoice: { id: "INV-STR-2026-10-031", number: "STR-2026-10-031", lineId: "STR-2026-10-031-L1" },
-      jobs: [
-        { jobId: "job-87001", experimentId: "exp-flm-pretrain-34b", experimentName: "34B pretraining run 4", projectId: "PRJ-FLM", owner: "Dr. Maya Chen", gpus: 192, startOffsetH: 2, hours: 700 },
-      ],
-    }),
-    buildReservationCase({
-      reservationId: "RSV-2120",
-      ownerProjectId: "PRJ-MMP",
-      requestedBy: "Ravi Shah",
-      gpuCount: 96,
-      hours: 744,
-      rateCents: 250,
-      startAt: "2026-10-01T00:00:00.000Z",
-      period: "2026-10",
-      ownerAccountableForIdle: true,
-      internalTerms: "Dedicated capacity for Multimodal Perception. Not shared.",
-      invoice: { id: "INV-STR-2026-10-032", number: "STR-2026-10-032", lineId: "STR-2026-10-032-L1" },
-      jobs: [
-        { jobId: "job-87011", experimentId: "exp-mmp-video-encoder", experimentName: "Video encoder scaling sweep", projectId: "PRJ-MMP", owner: "Ravi Shah", gpus: 96, startOffsetH: 4, hours: 690 },
-      ],
-    }),
-    buildReservationCase({
-      reservationId: "RSV-2150",
-      ownerProjectId: "PRJ-RLA",
-      requestedBy: "Elena Petrova",
-      gpuCount: 64,
-      hours: 600,
-      rateCents: 275,
-      startAt: "2026-10-03T00:00:00.000Z",
-      period: "2026-10",
-      ownerAccountableForIdle: true,
-      internalTerms: "Dedicated capacity for RL and Agents. Not shared.",
-      invoice: { id: "INV-STR-2026-10-033", number: "STR-2026-10-033", lineId: "STR-2026-10-033-L1" },
-      jobs: [
-        { jobId: "job-87021", experimentId: "exp-rla-env-suite", experimentName: "Agent environment suite v6", projectId: "PRJ-RLA", owner: "Elena Petrova", gpus: 64, startOffsetH: 1, hours: 560 },
-      ],
-    }),
-    buildInstanceCase({
-      key: "bg-1", providerId: "PRV-HELIOS", instanceId: "i-hel-4402", instanceType: "a100.8x", projectId: "PRJ-MMP",
-      experimentId: "exp-mmp-clip-distill", experimentName: "CLIP distillation ablation", owner: "Ravi Shah",
-      provisionedAt: "2026-10-02T09:00:00.000Z", lifecycleHours: 72, jobHours: 71.6, billedHours: 72, rateCents: 6_400,
-      invoice: { id: "INV-HEL-2026-10-104", number: "HEL-2026-10-104", lineId: "HEL-2026-10-104-L1" }, jobId: "job-86410",
-    }),
-    buildInstanceCase({
-      key: "bg-2", providerId: "PRV-HELIOS", instanceId: "i-hel-4410", instanceType: "h100.8x", projectId: "PRJ-FLM",
-      experimentId: "exp-flm-tokenizer-v9", experimentName: "Tokenizer v9 evaluation", owner: "Jonah Brooks",
-      provisionedAt: "2026-10-05T13:00:00.000Z", lifecycleHours: 48, jobHours: 47.5, billedHours: 48, rateCents: 10_000,
-      invoice: { id: "INV-HEL-2026-10-104", number: "HEL-2026-10-104", lineId: "HEL-2026-10-104-L2" }, jobId: "job-86455",
-    }),
-    buildInstanceCase({
-      key: "bg-3", providerId: "PRV-MERIDIAN", instanceId: "i-mer-2207", instanceType: "h200.8x", projectId: "PRJ-RLA",
-      experimentId: "exp-rla-reward-model", experimentName: "Reward model refresh", owner: "Elena Petrova",
-      provisionedAt: "2026-10-07T06:00:00.000Z", lifecycleHours: 40, jobHours: 39.4, billedHours: 40, rateCents: 12_000,
-      invoice: { id: "INV-MER-2026-10-019", number: "MER-2026-10-019", lineId: "MER-2026-10-019-L1" }, jobId: "job-86502",
-    }),
-    buildInstanceCase({
-      key: "bg-4", providerId: "PRV-HELIOS", instanceId: "i-hel-4433", instanceType: "h100.8x", projectId: "PRJ-INF",
-      experimentId: "exp-inf-spec-decoding", experimentName: "Speculative decoding benchmark", owner: "Diego Alvarez",
-      provisionedAt: "2026-10-09T00:00:00.000Z", lifecycleHours: 96, jobHours: 95.2, billedHours: 96, rateCents: 10_000,
-      invoice: { id: "INV-HEL-2026-10-104", number: "HEL-2026-10-104", lineId: "HEL-2026-10-104-L4" }, jobId: "job-86577",
-    }),
-    buildInstanceCase({
-      key: "bg-5", providerId: "PRV-MERIDIAN", instanceId: "i-mer-2215", instanceType: "h200.8x", projectId: "PRJ-MMP",
-      experimentId: "exp-mmp-ocr-finetune", experimentName: "Document OCR finetune", owner: "Lena Ortiz",
-      provisionedAt: "2026-10-11T15:00:00.000Z", lifecycleHours: 20, jobHours: 19.7, billedHours: 20, rateCents: 12_000,
-      invoice: { id: "INV-MER-2026-10-019", number: "MER-2026-10-019", lineId: "MER-2026-10-019-L2" }, jobId: "job-86611",
-    }),
-  ];
-}
-
 export function isSeeded(ctx: AppContext) {
   const row = ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM actors").get() as { n: number };
   return row.n > 0;
@@ -319,22 +236,14 @@ export function ensureActors(ctx: AppContext) {
 }
 
 /**
- * Load the simulated environment. Background invoices are auto-matched by the
- * real pipeline; one early-job-end invoice is left for the agents so the team
- * is visibly working when the app first opens.
+ * Load the simulated environment. Every seeded case (see cases.ts) goes through
+ * the real ingestion pipeline: clean lines auto-match, and the rest open work
+ * items for the agents. WI-1001 is the early-job-end case, so the team is
+ * visibly working when the app first opens.
  */
 export function seedEnvironment(ctx: AppContext) {
   tx(ctx, () => seedReferenceData(ctx));
-  for (const data of backgroundCases()) ingestCase(ctx, data);
-  ingestCase(
-    ctx,
-    buildInstanceCase({
-      key: "live-1", providerId: "PRV-HELIOS", instanceId: "i-hel-4519", instanceType: "h100.8x", projectId: "PRJ-RLA",
-      experimentId: "exp-rla-planner-rl", experimentName: "Planner RL fine-tune", owner: "Elena Petrova",
-      provisionedAt: "2026-10-16T10:00:00.000Z", lifecycleHours: 24, jobHours: 18, billedHours: 24, rateCents: 10_000,
-      invoice: { id: "INV-HEL-2026-10-121", number: "HEL-2026-10-121", lineId: "HEL-2026-10-121-L1" }, jobId: "job-88340",
-    }),
-  );
+  for (const c of SEED_CASES) ingestCase(ctx, c.data);
   recordActivity(ctx, {
     actorId: ACTOR.simulator,
     type: "SYSTEM",

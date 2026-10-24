@@ -44,7 +44,7 @@ export function dashboardKey(period: string | null) {
   return "/api/dashboard" + (period ? "?period=" + period : "");
 }
 
-export function Dashboard({ view }: { view: "board" | "canvas" }) {
+export function Dashboard({ view, task = null }: { view: "board" | "canvas"; task?: string | null }) {
   const { period } = useShell();
   const { data, error, mutate } = useSWR<DashboardData>(dashboardKey(period), fetcher, { keepPreviousData: true });
   useLiveRefresh(() => mutate(), undefined, 250);
@@ -62,9 +62,9 @@ export function Dashboard({ view }: { view: "board" | "canvas" }) {
       ) : view === "board" ? (
         <Board data={data} />
       ) : (
-        <SystemCanvas data={data} />
+        <SystemCanvas data={data} initialTask={task} onChanged={() => void mutate()} />
       )}
-      {data ? <Caption data={data} /> : null}
+      {data && view === "board" ? <Caption data={data} /> : null}
     </div>
   );
 }

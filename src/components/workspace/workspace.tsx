@@ -55,8 +55,8 @@ function TaskNav({ id }: { id: string }) {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || typing(e.target) || document.querySelector('[role="dialog"]')) return;
       if (e.key === "Escape") router.push(back);
-      else if ((e.key === "k" || e.key === "K") && prev) router.push("/investigations/" + prev);
-      else if ((e.key === "j" || e.key === "J") && next) router.push("/investigations/" + next);
+      else if ((e.key === "k" || e.key === "K") && prev) router.push("/investigations/" + prev + "/record");
+      else if ((e.key === "j" || e.key === "J") && next) router.push("/investigations/" + next + "/record");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -73,10 +73,10 @@ function TaskNav({ id }: { id: string }) {
       <span className="font-mono text-[12px] text-zinc-700">{id}</span>
       {index >= 0 ? (
         <div className="ml-3 flex items-center gap-0.5">
-          <button type="button" className={btn} disabled={!prev} onClick={() => prev && router.push("/investigations/" + prev)} title="Previous task (K)" aria-label="Previous task">
+          <button type="button" className={btn} disabled={!prev} onClick={() => prev && router.push("/investigations/" + prev + "/record")} title="Previous task (K)" aria-label="Previous task">
             <ChevronUp className="size-4" />
           </button>
-          <button type="button" className={btn} disabled={!next} onClick={() => next && router.push("/investigations/" + next)} title="Next task (J)" aria-label="Next task">
+          <button type="button" className={btn} disabled={!next} onClick={() => next && router.push("/investigations/" + next + "/record")} title="Next task (J)" aria-label="Next task">
             <ChevronDown className="size-4" />
           </button>
           <span className="ml-1 text-[11.5px] text-muted-foreground tnum">
