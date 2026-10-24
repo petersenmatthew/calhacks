@@ -54,7 +54,7 @@ export function executeDecision(ctx: AppContext, approvalId: string) {
         summary:
           approval.status === "APPROVED"
             ? "Executing approved " + proposal.kind.toLowerCase().replace("_", " ") + " through the ledger gateway."
-            : "Returning " + proposal.id + " to the Finance Agent with the controller's rationale.",
+            : "Sending the controller's rationale on " + proposal.id + " to the Policy Analyst, then back to the Cost Accountant.",
       });
       if (approval.status === "APPROVED") {
         executeApprovedProposal(ctx, item, proposal, approval);
@@ -66,11 +66,11 @@ export function executeDecision(ctx: AppContext, approvalId: string) {
           ACTOR.orchestrator,
           "Controller " + approval.status.toLowerCase().replace("_", " ") + ": " + (approval.decisionReason ?? ""),
         );
-        assignAgent(ctx, item.id, ACTOR.finance);
+        assignAgent(ctx, item.id, ACTOR.policy);
         enqueueJob(ctx, {
           workItemId: item.id,
           kind: "AGENT_RUN",
-          agentId: ACTOR.finance,
+          agentId: ACTOR.policy,
           payload: { trigger: "controller_feedback", approvalId },
         });
       }
@@ -106,12 +106,48 @@ function executeApprovedProposal(ctx: AppContext, item: WorkItemRow, proposal: P
     return;
   }
 
+  // Disputes go out through the Vendor Liaison, who asks the ledger gateway to submit them.
+  markProposal(ctx, proposal.id, "APPROVED", authorization);
+  assignAgent(ctx, item.id, ACTOR.vendorLiaison);
+  enqueueJob(ctx, { workItemId: item.id, kind: "AGENT_RUN", agentId: ACTOR.vendorLiaison, payload: { trigger: "dispute_approved", approvalId: approval.id } });
+}
+
+/** The approved dispute proposal and its approval for a work item, if any. */
+export function approvedDispute(ctx: AppContext, item: WorkItemRow) {
+  const proposal = ctx.db
+    .select()
+    .from(proposals)
+    .where(eq(proposals.workItemId, item.id))
+    .all()
+    .filter((p) => p.kind === "VENDOR_DISPUTE" && (p.status === "APPROVED" || p.status === "EXECUTED"))
+    .sort((a, b) => b.version - a.version)[0];
+  if (!proposal) return null;
+  const approval = ctx.db
+    .select()
+    .from(approvalRequests)
+    .where(eq(approvalRequests.subjectId, proposal.id))
+    .all()
+    .find((a) => a.status === "APPROVED");
+  return approval ? { proposal, approval } : null;
+}
+
+/**
+ * Submit an approved dispute through the ledger gateway. Called by the Vendor Liaison's
+ * send tool; the gateway checks the controller approval itself.
+ */
+export function submitApprovedDispute(ctx: AppContext, item: WorkItemRow, letter: string) {
+  if (item.state !== "APPROVED") throw new ControlError("Work item is " + item.state + "; only approved disputes can be sent.", "STATE_MACHINE");
+  const found = approvedDispute(ctx, item);
+  if (!found || found.proposal.status !== "APPROVED") throw new ControlError("No controller-approved dispute to send.", "APPROVAL_REQUIRED");
+  const { proposal, approval } = found;
   const dispute = proposal.payload.dispute;
   if (!dispute) throw new ControlError("Dispute proposal has no dispute payload", "INVALID_PROPOSAL", "FAILED");
+  const decider = getActor(ctx, approval.decidedBy ?? "")?.name ?? approval.decidedBy;
+  const authorization = "Approval " + approval.id + " by " + decider;
   authorize(ctx, ACTOR.ledger, "dispute:submit");
   const provider = ctx.db.select().from(providers).where(eq(providers.id, dispute.providerId)).get();
   const disputeId = nextId(ctx, "DSP", 6001);
-  const ts = nowIso();
+  const vendorReference = (provider?.shortName ?? "VND").toUpperCase() + "-CASE-" + disputeId.split("-")[1];
   ctx.db
     .insert(vendorDisputes)
     .values({
@@ -124,8 +160,8 @@ function executeApprovedProposal(ctx: AppContext, item: WorkItemRow, proposal: P
       amountCents: dispute.disputedCents,
       status: "SUBMITTED",
       reason: dispute.reason,
-      vendorReference: (provider?.shortName ?? "VND").toUpperCase() + "-CASE-" + disputeId.split("-")[1],
-      submittedAt: ts,
+      vendorReference,
+      submittedAt: nowIso(),
     })
     .run();
   appendAudit(ctx, {
@@ -138,7 +174,7 @@ function executeApprovedProposal(ctx: AppContext, item: WorkItemRow, proposal: P
     approvalId: approval.id,
     rule: "APPROVAL",
     evidenceIds: proposal.evidenceIds,
-    details: { amountCents: dispute.disputedCents, provider: provider?.name ?? dispute.providerId },
+    details: { amountCents: dispute.disputedCents, provider: provider?.name ?? dispute.providerId, letterChars: letter.length },
   });
   recordActivity(ctx, {
     workItemId: item.id,
@@ -170,9 +206,10 @@ function executeApprovedProposal(ctx: AppContext, item: WorkItemRow, proposal: P
   transitionWorkItem(ctx, item.id, "DISPUTED", ACTOR.ledger, "Dispute " + disputeId + " submitted; awaiting vendor response");
   setReconciliationOutcome(ctx, item.invoiceLineId, "DISPUTE_SUBMITTED");
   setWorkItemOutcome(ctx, item.id, "DISPUTE_SUBMITTED");
+  return { disputeId, vendorReference, provider: provider?.name ?? dispute.providerId, disputedCents: dispute.disputedCents };
 }
 
-/** Simulated vendor response to a submitted dispute. */
+/** Simulated vendor reply to a submitted dispute. Records the reply and hands it to the Vendor Liaison. */
 export function recordVendorResponse(ctx: AppContext, input: { workItemId: string; outcome: "accept" | "deny" }) {
   return guard(ctx, { actorId: ACTOR.vendor, action: "vendor.respond", workItemId: input.workItemId }, () => {
     authorize(ctx, ACTOR.vendor, "vendor:respond");
@@ -181,62 +218,61 @@ export function recordVendorResponse(ctx: AppContext, input: { workItemId: strin
     const dispute = ctx.db.select().from(vendorDisputes).where(eq(vendorDisputes.workItemId, item.id)).get();
     if (!dispute || dispute.status !== "SUBMITTED") throw new ControlError("No open dispute", "STATE_MACHINE");
     const provider = ctx.db.select().from(providers).where(eq(providers.id, dispute.providerId)).get();
-    const ts = nowIso();
-    let lines: JournalLineDraft[];
-    let outcome: string;
-    if (input.outcome === "accept") {
-      const memoRef = "CM-" + dispute.id.split("-")[1];
-      ctx.db
-        .update(vendorDisputes)
-        .set({ status: "CREDIT_ACCEPTED", vendorReference: memoRef, resolvedAt: ts })
-        .where(eq(vendorDisputes.id, dispute.id))
-        .run();
-      recordActivity(ctx, {
-        workItemId: item.id,
-        actorId: ACTOR.vendor,
-        type: "DISPUTE",
-        title: (provider?.name ?? "Vendor") + " accepted " + dispute.id + " and issued credit memo " + memoRef,
-        summary: "Only now is the liability reduced by " + formatCents(dispute.amountCents) + ".",
-        changes: ["Dispute " + dispute.id + " CREDIT_ACCEPTED"],
-      });
-      lines = [
-        { accountCode: ACCOUNTS.AP, projectId: null, debitCents: dispute.amountCents, creditCents: 0, memo: "Vendor credit " + memoRef },
-        { accountCode: ACCOUNTS.CLEARING, projectId: null, debitCents: 0, creditCents: dispute.amountCents, memo: "Vendor credit " + memoRef },
-      ];
-      outcome = "VENDOR_CREDIT";
-    } else {
-      ctx.db.update(vendorDisputes).set({ status: "DENIED", resolvedAt: ts }).where(eq(vendorDisputes.id, dispute.id)).run();
-      recordActivity(ctx, {
-        workItemId: item.id,
-        actorId: ACTOR.vendor,
-        type: "DISPUTE",
-        status: "error",
-        title: (provider?.name ?? "Vendor") + " denied " + dispute.id,
-        summary: "The disputed amount is charged to the owning project under the approved fallback.",
-        changes: ["Dispute " + dispute.id + " DENIED"],
-      });
-      lines = allocationJournal(
+    const accepted = input.outcome === "accept";
+    const memoRef = "CM-" + dispute.id.split("-")[1];
+    ctx.db
+      .update(vendorDisputes)
+      .set(accepted ? { status: "CREDIT_ACCEPTED", vendorReference: memoRef, resolvedAt: nowIso() } : { status: "DENIED", resolvedAt: nowIso() })
+      .where(eq(vendorDisputes.id, dispute.id))
+      .run();
+    recordActivity(ctx, {
+      workItemId: item.id,
+      actorId: ACTOR.vendor,
+      type: "DISPUTE",
+      status: accepted ? "ok" : "error",
+      title: accepted
+        ? (provider?.name ?? "Vendor") + " accepted " + dispute.id + " and issued credit memo " + memoRef
+        : (provider?.name ?? "Vendor") + " denied " + dispute.id,
+      summary: "The Vendor Liaison will read the reply and close the case.",
+      changes: ["Dispute " + dispute.id + (accepted ? " CREDIT_ACCEPTED" : " DENIED")],
+    });
+    assignAgent(ctx, item.id, ACTOR.vendorLiaison);
+    enqueueJob(ctx, { workItemId: item.id, kind: "AGENT_RUN", agentId: ACTOR.vendorLiaison, payload: { trigger: "vendor_reply", outcome: input.outcome } });
+    return { outcome: accepted ? "CREDIT_ACCEPTED" : "DENIED" };
+  });
+}
+
+/** Book the vendor's answer and close the work item. Called by the Vendor Liaison's close tool. */
+export function closeDispute(ctx: AppContext, item: WorkItemRow) {
+  if (item.state !== "DISPUTED") throw new ControlError("Work item is " + item.state + ", not DISPUTED.", "STATE_MACHINE");
+  const dispute = ctx.db.select().from(vendorDisputes).where(eq(vendorDisputes.workItemId, item.id)).get();
+  if (!dispute || dispute.status === "SUBMITTED") throw new ControlError("The vendor has not replied yet.", "WORKFLOW");
+  const accepted = dispute.status === "CREDIT_ACCEPTED";
+  const lines: JournalLineDraft[] = accepted
+    ? [
+        { accountCode: ACCOUNTS.AP, projectId: null, debitCents: dispute.amountCents, creditCents: 0, memo: "Vendor credit " + dispute.vendorReference },
+        { accountCode: ACCOUNTS.CLEARING, projectId: null, debitCents: 0, creditCents: dispute.amountCents, memo: "Vendor credit " + dispute.vendorReference },
+      ]
+    : allocationJournal(
         [{ projectId: item.ownerProjectId ?? "", basis: "Dispute denied", weight: 1, amountCents: dispute.amountCents }],
         "Disputed amount upheld by vendor",
       );
-      outcome = "CHARGE_UPHELD";
-    }
-    postJournalEntry(ctx, {
-      actorId: ACTOR.ledger,
-      period: item.period,
-      memo: input.outcome === "accept" ? "Record vendor credit for " + dispute.id : "Charge upheld after " + dispute.id + " denied",
-      source: "experiment_ledger",
-      authorization: "Vendor response to " + dispute.id + " under approval " + dispute.approvalId,
-      idempotencyKey: "dispute:" + dispute.id + ":" + input.outcome,
-      lines,
-      workItemId: item.id,
-      invoiceLineId: item.invoiceLineId,
-      proposalId: dispute.proposalId,
-      approvalId: dispute.approvalId,
-    });
-    resolveReconciliation(ctx, item.invoiceLineId, outcome);
-    setWorkItemOutcome(ctx, item.id, outcome);
-    transitionWorkItem(ctx, item.id, "RESOLVED", ACTOR.orchestrator, "Vendor responded to " + dispute.id);
-    return { outcome };
+  const outcome = accepted ? "VENDOR_CREDIT" : "CHARGE_UPHELD";
+  const { entryId } = postJournalEntry(ctx, {
+    actorId: ACTOR.ledger,
+    period: item.period,
+    memo: accepted ? "Record vendor credit for " + dispute.id : "Charge upheld after " + dispute.id + " denied",
+    source: "experiment_ledger",
+    authorization: "Vendor response to " + dispute.id + " under approval " + dispute.approvalId,
+    idempotencyKey: "dispute:" + dispute.id + ":" + (accepted ? "accept" : "deny"),
+    lines,
+    workItemId: item.id,
+    invoiceLineId: item.invoiceLineId,
+    proposalId: dispute.proposalId,
+    approvalId: dispute.approvalId,
   });
+  resolveReconciliation(ctx, item.invoiceLineId, outcome);
+  setWorkItemOutcome(ctx, item.id, outcome);
+  transitionWorkItem(ctx, item.id, "RESOLVED", ACTOR.orchestrator, "Vendor responded to " + dispute.id);
+  return { outcome, entryId, dispute };
 }

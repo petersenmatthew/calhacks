@@ -13,12 +13,31 @@ import type { AgentRunContext } from "./tools";
 
 export const MAX_AGENT_RUNS_PER_ITEM = 10;
 
-const ACTIVE_STATES = new Set(["NEW", "INVESTIGATING", "PROPOSED"]);
+const WORKING_STATES = ["NEW", "INVESTIGATING", "PROPOSED"];
+
+/** Work item states in which each employee may run. */
+const ACTIVE_STATES: Record<string, Set<string>> = {
+  [ACTOR.compute]: new Set(WORKING_STATES),
+  [ACTOR.capacity]: new Set(WORKING_STATES),
+  [ACTOR.finance]: new Set(WORKING_STATES),
+  [ACTOR.policy]: new Set(WORKING_STATES),
+  [ACTOR.vendorLiaison]: new Set(["APPROVED", "DISPUTED"]),
+  [ACTOR.budget]: new Set(["APPROVED", "POSTED", "DISPUTED", "RESOLVED"]),
+};
 
 function taskFor(agentId: string, trigger: Record<string, unknown>, workItemId: string) {
   const t = String(trigger.trigger ?? "");
+  if (agentId === ACTOR.capacity) {
+    if (t === "finance_question") return "Answer the Cost Accountant's question on " + workItemId;
+    return "Reconstruct reservation usage for " + workItemId;
+  }
+  if (agentId === ACTOR.policy) return "Turn the controller's correction on " + workItemId + " into policy";
+  if (agentId === ACTOR.vendorLiaison) {
+    return t === "vendor_reply" ? "Read the vendor's reply and close " + workItemId : "Send the approved dispute on " + workItemId;
+  }
+  if (agentId === ACTOR.budget) return "Check team burn after the posting on " + workItemId;
   if (agentId === ACTOR.compute) {
-    if (t === "finance_question") return "Answer the Finance Agent's question on " + workItemId;
+    if (t === "finance_question") return "Answer the Cost Accountant's question on " + workItemId;
     if (t === "human_info") return "Continue the investigation of " + workItemId + " with controller input";
     return "Investigate compute evidence for " + workItemId;
   }
@@ -33,7 +52,7 @@ export async function runAgentJob(ctx: AppContext, job: JobRow) {
   if (!agentId) throw new Error("Agent job without agent");
   const item = getWorkItem(ctx, job.workItemId);
   const agentName = getActor(ctx, agentId)?.name ?? agentId;
-  if (!ACTIVE_STATES.has(item.state)) {
+  if (!(ACTIVE_STATES[agentId] ?? ACTIVE_STATES[ACTOR.finance]).has(item.state)) {
     recordActivity(ctx, {
       workItemId: item.id,
       actorId: ACTOR.orchestrator,
@@ -65,7 +84,8 @@ export async function runAgentJob(ctx: AppContext, job: JobRow) {
       .run();
     ctx.db
       .update(workItems)
-      .set({ agentRunCount: sql`${workItems.agentRunCount} + 1`, assignedAgentId: agentId })
+      // The Budget Analyst checks in after the fact; it does not take ownership of the work item.
+      .set({ agentRunCount: sql`${workItems.agentRunCount} + 1`, ...(agentId === ACTOR.budget ? {} : { assignedAgentId: agentId }) })
       .where(eq(workItems.id, item.id))
       .run();
     if (item.state === "NEW") transitionWorkItem(ctx, item.id, "INVESTIGATING", ACTOR.orchestrator, "Assigned to " + agentName);

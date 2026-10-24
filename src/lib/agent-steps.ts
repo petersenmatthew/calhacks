@@ -23,9 +23,38 @@ export const AGENT_STEPS: Record<string, StepDef[]> = {
     { label: "Calculate", verb: "Calculating", tools: ["calculate_cost_allocation", "propose_adjustment", "propose_vendor_dispute", "propose_policy"] },
     { label: "Resolve", verb: "Resolving", tools: ["request_human_approval", "submit_for_posting", "request_more_info"] },
   ],
+  "agent.capacity": [
+    { label: "Reconstruct usage", verb: "Reconstructing usage", tools: ["get_work_item", "find_related_experiments", "get_experiment"] },
+    { label: "Check terms", verb: "Checking terms", tools: ["get_billing_terms"] },
+    { label: "Hand off", verb: "Handing off", tools: ["submit_compute_findings", "handoff_to_finance", "request_human_info"] },
+  ],
+  "agent.vendor": [
+    { label: "Read dispute", verb: "Reading the dispute", tools: ["get_work_item", "get_dispute_package", "get_billing_terms"] },
+    { label: "Contact vendor", verb: "Writing to the vendor", tools: ["send_vendor_dispute", "close_dispute"] },
+  ],
+  "agent.budget": [
+    { label: "Read postings", verb: "Reading postings", tools: ["get_work_item", "get_posted_charges"] },
+    { label: "Forecast burn", verb: "Forecasting burn", tools: ["forecast_project_burn"] },
+    { label: "Note", verb: "Writing the note", tools: ["record_budget_note"] },
+  ],
+  "agent.policy": [
+    { label: "Read correction", verb: "Reading your correction", tools: ["get_work_item", "get_allocation_policy", "search_precedents"] },
+    { label: "Draft policy", verb: "Drafting policy", tools: ["propose_policy"] },
+    { label: "Hand back", verb: "Handing back", tools: ["handoff_to_finance"] },
+  ],
 };
 
-export const AGENT_SHORT: Record<string, string> = { "agent.compute": "Compute", "agent.finance": "Finance" };
+export const AGENT_SHORT: Record<string, string> = {
+  "agent.compute": "Investigator",
+  "agent.finance": "Accountant",
+  "agent.capacity": "Capacity",
+  "agent.vendor": "Vendor",
+  "agent.budget": "Budget",
+  "agent.policy": "Policy",
+};
+
+/** Every employee, in the order they sit on the canvas ring. */
+export const EMPLOYEE_IDS = ["agent.compute", "agent.finance", "agent.vendor", "agent.budget", "agent.policy", "agent.capacity"] as const;
 
 export function agentSteps(agentId: string, tools: string[], runStatus: "running" | "completed" | "failed" | "none") {
   const defs = AGENT_STEPS[agentId] ?? [];

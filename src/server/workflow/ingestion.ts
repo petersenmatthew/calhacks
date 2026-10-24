@@ -68,11 +68,14 @@ function priorityFor(type: string, checks: ReconciliationChecks) {
 function titleFor(type: string, checks: ReconciliationChecks, providerShort: string) {
   if (checks.kind === "reservation") return "Shared reservation " + checks.reservationId + " needs allocation";
   const codes = new Set(checks.flags.map((f) => f.code));
+  if (codes.has("DUPLICATE_CHARGE")) return providerShort + " billed " + checks.instanceId + " twice";
+  if (codes.has("MISSING_OWNER")) return "Unattributed GPU charge on " + checks.instanceId;
   if (codes.has("QUANTITY_EXCEEDS_LIFECYCLE")) return providerShort + " billed past instance lifetime on " + checks.instanceId;
-  if (codes.has("RATE_MISMATCH")) return providerShort + " rate above contract on " + checks.instanceId;
+  if (codes.has("RATE_MISMATCH")) {
+    return providerShort + " rate " + (checks.invoicedRateCents > checks.contractRateCents ? "above" : "below") + " contract on " + checks.instanceId;
+  }
   if (codes.has("AMOUNT_VARIANCE")) return "Invoice variance on " + checks.instanceId;
   if (codes.has("IDLE_TIME")) return "Invoice exceeds scheduler runtime on " + checks.instanceId;
-  if (codes.has("MISSING_OWNER")) return "Unattributed GPU charge on " + checks.instanceId;
   return type + " on " + checks.instanceId;
 }
 
@@ -263,7 +266,7 @@ function openWorkItem(
       checks,
       state: "NEW",
       priority: priorityFor(type, checks),
-      assignedAgentId: ACTOR.compute,
+      assignedAgentId: type === "SHARED_ALLOCATION" ? ACTOR.capacity : ACTOR.compute,
       latestAction: "Detected by deterministic checks",
       createdAt: ts,
       updatedAt: ts,
@@ -302,9 +305,14 @@ function openWorkItem(
     type: "WORK_ITEM",
     title: "Opened " + id + ": " + title,
     summary: checks.flags.map((f) => f.message).join(" "),
-    changes: ["Work item " + id + " created (NEW)", "Assigned to Compute Agent"],
+    changes: ["Work item " + id + " created (NEW)", "Assigned to " + (type === "SHARED_ALLOCATION" ? "Capacity Planner" : "Compute Investigator")],
     result: { flags: checks.flags },
   });
-  enqueueJob(ctx, { workItemId: id, kind: "AGENT_RUN", agentId: ACTOR.compute, payload: { trigger: "new_work_item" } });
+  enqueueJob(ctx, {
+    workItemId: id,
+    kind: "AGENT_RUN",
+    agentId: type === "SHARED_ALLOCATION" ? ACTOR.capacity : ACTOR.compute,
+    payload: { trigger: "new_work_item" },
+  });
   return { status: "work_item_created", invoiceLineId: line.id, workItemId: id };
 }

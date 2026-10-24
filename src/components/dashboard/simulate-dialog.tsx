@@ -97,7 +97,7 @@ export function SimulateDialog({ onDone }: { onDone: () => void }) {
       onDone();
       if (result.status === "work_item_created" && result.workItemId) {
         const id = result.workItemId;
-        toast.success("Discrepancy detected. Opened " + id + " and assigned the Compute Agent.", {
+        toast.success("Discrepancy detected. Opened " + id + " and assigned the Compute Investigator.", {
           action: { label: "Open", onClick: () => router.push("/investigations/" + id) },
         });
       } else if (result.status === "auto_matched") {

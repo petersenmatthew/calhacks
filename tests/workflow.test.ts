@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { createAppContext } from "@/server/context";
-import { auditEvents, journalEntries, policies, vendorDisputes, workItems } from "@/server/db/schema";
+import { activityEvents, auditEvents, journalEntries, policies, vendorDisputes, workItems } from "@/server/db/schema";
 import { Orchestrator } from "@/server/orchestrator";
 import { ACTOR } from "@/server/security/actors";
 import { ControlError } from "@/server/security/errors";
@@ -9,6 +9,7 @@ import { runScenario } from "@/server/sim/scenarios";
 import { decideApproval } from "@/server/workflow/approvals";
 import { recordVendorResponse } from "@/server/workflow/decisions";
 import { postJournalEntry } from "@/server/workflow/ledger";
+import { setAgentSettings } from "@/server/settings";
 import { verifyAuditChain } from "@/server/audit";
 import {
   accountBalance,
@@ -56,10 +57,16 @@ describe("Scenario 1: suspected GPU overbilling", () => {
     decideApproval(ctx, { approvalId: approval.id, actorId: ACTOR.controller, decision: "APPROVED" });
     await orchestrator.drain();
     expect(workItem(ctx, id).state).toBe("DISPUTED");
+    // The Vendor Liaison wrote and sent the dispute; the ledger gateway submitted it.
+    const sent = ctx.db.select().from(activityEvents).where(eq(activityEvents.toolName, "send_vendor_dispute")).get();
+    expect(sent?.actorId).toBe(ACTOR.vendorLiaison);
     // Proposing or submitting a dispute does not reduce the recorded liability.
     expect(accountBalance(ctx, "2000") - apBefore).toBe(360_000);
 
     recordVendorResponse(ctx, { workItemId: id, outcome: "accept" });
+    // The vendor's reply alone changes nothing on the books until the Vendor Liaison closes the case.
+    expect(accountBalance(ctx, "2000") - apBefore).toBe(360_000);
+    await orchestrator.drain();
     expect(workItem(ctx, id).state).toBe("RESOLVED");
     expect(accountBalance(ctx, "2000") - apBefore).toBe(240_000);
     expect(unbalancedEntries(ctx)).toHaveLength(0);
@@ -123,6 +130,7 @@ describe("Scenarios 2 and 3: shared allocation, human correction, and persistent
     const learned = ctx.db.select().from(policies).where(eq(policies.id, "POL-ALLOC-SHARED-v2")).get();
     expect(learned?.status).toBe("APPROVED");
     expect(learned?.learnedFromWorkItemId).toBe(id);
+    expect(learned?.proposedBy).toBe(ACTOR.policy);
 
     const next = runScenario(ctx, "next_month_shared");
     const nextId = next.status === "work_item_created" ? next.workItemId : "";
@@ -139,6 +147,24 @@ describe("Scenarios 2 and 3: shared allocation, human correction, and persistent
 });
 
 describe("controls", () => {
+  it("holds a paused employee's work in the queue without blocking anyone else", async () => {
+    const { ctx, orchestrator } = setup();
+    await orchestrator.drain();
+    const ingest = runScenario(ctx, "overbilling");
+    const id = ingest.status === "work_item_created" ? ingest.workItemId : "";
+    await orchestrator.drain();
+    setAgentSettings(ctx, ACTOR.controller, ACTOR.vendorLiaison, { paused: true });
+    const [approval] = pendingApprovals(ctx, id);
+    decideApproval(ctx, { approvalId: approval.id, actorId: ACTOR.controller, decision: "APPROVED" });
+    await orchestrator.drain();
+    // The approval itself still executes; only the paused Vendor Liaison waits.
+    expect(workItem(ctx, id).state).toBe("APPROVED");
+    setAgentSettings(ctx, ACTOR.controller, ACTOR.vendorLiaison, { paused: false });
+    await orchestrator.drain();
+    expect(workItem(ctx, id).state).toBe("DISPUTED");
+    expect(() => setAgentSettings(ctx, ACTOR.finance, ACTOR.vendorLiaison, { paused: true })).toThrow(ControlError);
+  });
+
   it("denies agents approving or posting and logs every denial", async () => {
     const { ctx, orchestrator } = setup();
     await orchestrator.drain();

@@ -30,7 +30,8 @@ import {
   workItemTransitions,
 } from "./db/schema";
 import { ACTOR } from "./security/actors";
-import { getExecutionMode } from "./settings";
+import { getAgentSettings, getExecutionMode } from "./settings";
+import { toolsForAgent } from "./agents/tools";
 import { contractForProvider, reservationUsage } from "./workflow/checks";
 import { policyFitForWorkItem, POLICY_KEYS } from "./workflow/policies";
 
@@ -55,7 +56,7 @@ export function getSettingsView(ctx: AppContext) {
 }
 
 export function getAgentStatuses(ctx: AppContext) {
-  return [ACTOR.compute, ACTOR.finance].map((agentId) => {
+  return [ACTOR.compute, ACTOR.finance, ACTOR.vendorLiaison, ACTOR.budget, ACTOR.policy, ACTOR.capacity].map((agentId) => {
     const running = ctx.db
       .select()
       .from(agentRuns)
@@ -92,6 +93,7 @@ export function getAgentStatuses(ctx: AppContext) {
     return {
       agentId,
       status: running ? "working" : queued.length ? "queued" : "idle",
+      paused: getAgentSettings(ctx, agentId).paused,
       currentTask: running?.task ?? null,
       currentWorkItemId: running?.workItemId ?? queued[0]?.workItemId ?? null,
       currentMode: running?.mode ?? null,
@@ -323,6 +325,56 @@ export function getAuditView(ctx: AppContext) {
 export type DashboardData = ReturnType<typeof getDashboard>;
 export type WorkspaceData = NonNullable<ReturnType<typeof getWorkspace>>;
 export type AuditData = ReturnType<typeof getAuditView>;
+
+/** Types of activity that count as something an employee produced. */
+const OUTPUT_TYPES = ["FINDING", "HANDOFF", "PROPOSAL", "POLICY", "DISPUTE", "COMPLETED", "POSTING"];
+
+/** Everything the canvas sidebar shows for one employee. */
+export function getAgentView(ctx: AppContext, agentId: string) {
+  const actor = ctx.db.select().from(actors).where(eq(actors.id, agentId)).get();
+  if (!actor || actor.kind !== "agent") return null;
+  const status = getAgentStatuses(ctx).find((a) => a.agentId === agentId) ?? null;
+  const runs = ctx.db.select().from(agentRuns).where(eq(agentRuns.agentId, agentId)).orderBy(desc(agentRuns.startedAt)).all();
+  const itemIds = [...new Set(runs.map((r) => r.workItemId))];
+  const items = itemIds.length ? ctx.db.select().from(workItems).where(inArray(workItems.id, itemIds)).all() : [];
+  const tasks = itemIds.slice(0, 8).map((id) => {
+    const item = items.find((i) => i.id === id)!;
+    const mine = runs.filter((r) => r.workItemId === id);
+    return {
+      id,
+      title: item?.title ?? id,
+      state: item?.state ?? "UNKNOWN",
+      runs: mine.length,
+      lastRunStatus: mine[0]?.status ?? null,
+      lastAction: mine[0]?.terminalAction ?? null,
+      at: mine[0]?.startedAt ?? null,
+    };
+  });
+  const outputs = ctx.db
+    .select()
+    .from(activityEvents)
+    .where(and(eq(activityEvents.actorId, agentId), inArray(activityEvents.type, OUTPUT_TYPES)))
+    .orderBy(desc(activityEvents.id))
+    .limit(8)
+    .all()
+    .map((e) => ({ id: e.id, workItemId: e.workItemId, title: e.title, type: e.type, at: e.createdAt }));
+  const toolCalls = ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM activity_events WHERE actor_id = ? AND tool_name IS NOT NULL").get(agentId) as { n: number };
+  return {
+    id: actor.id,
+    name: actor.name,
+    title: actor.title,
+    description: actor.description,
+    status,
+    settings: getAgentSettings(ctx, agentId),
+    execution: getSettingsView(ctx),
+    tools: toolsForAgent(agentId).map((t) => ({ name: t.name, description: t.description, terminal: Boolean(t.terminal) })),
+    totals: { runs: runs.length, completed: runs.filter((r) => r.status === "completed").length, toolCalls: toolCalls.n },
+    tasks,
+    outputs,
+  };
+}
+
+export type AgentView = NonNullable<ReturnType<typeof getAgentView>>;
 export type StatusData = ReturnType<typeof getStatus>;
 export type AgentStatus = ReturnType<typeof getAgentStatuses>[number];
 export type ActivityRow = typeof activityEvents.$inferSelect;

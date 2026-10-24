@@ -1,6 +1,7 @@
-import { and, asc, eq, notInArray } from "drizzle-orm";
+import { and, asc, eq, isNull, notInArray, or } from "drizzle-orm";
 import { notifyChange, nowIso, txImmediate, type AppContext } from "../context";
 import { jobs } from "../db/schema";
+import { pausedAgents } from "../settings";
 
 export type JobRow = typeof jobs.$inferSelect;
 export type JobKind = "AGENT_RUN" | "EXECUTE_DECISION";
@@ -25,14 +26,21 @@ export function enqueueJob(
   return row;
 }
 
-/** Claim the oldest queued job whose work item has no running job. */
+/** Claim the oldest queued job whose work item has no running job and whose agent is not paused. */
 export function claimNextJob(ctx: AppContext): JobRow | null {
   return txImmediate(ctx, () => {
     const busyWorkItems = ctx.db.select({ id: jobs.workItemId }).from(jobs).where(eq(jobs.status, "running"));
+    const paused = pausedAgents(ctx);
     const candidate = ctx.db
       .select()
       .from(jobs)
-      .where(and(eq(jobs.status, "queued"), notInArray(jobs.workItemId, busyWorkItems)))
+      .where(
+        and(
+          eq(jobs.status, "queued"),
+          notInArray(jobs.workItemId, busyWorkItems),
+          paused.length ? or(isNull(jobs.agentId), notInArray(jobs.agentId, paused)) : undefined,
+        ),
+      )
       .orderBy(asc(jobs.id))
       .limit(1)
       .get();
@@ -63,4 +71,15 @@ export function recoverInterruptedJobs(ctx: AppContext) {
 export function hasPendingJobs(ctx: AppContext) {
   const row = ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE status IN ('queued','running')").get() as { n: number };
   return row.n > 0;
+}
+
+/** Queue an agent run unless the same agent already has one queued for this work item. */
+export function enqueueAgentOnce(ctx: AppContext, workItemId: string, agentId: string, payload: Record<string, unknown>) {
+  const queued = ctx.db
+    .select({ id: jobs.id })
+    .from(jobs)
+    .where(and(eq(jobs.workItemId, workItemId), eq(jobs.agentId, agentId), eq(jobs.status, "queued")))
+    .get();
+  if (queued) return null;
+  return enqueueJob(ctx, { workItemId, kind: "AGENT_RUN", agentId, payload });
 }

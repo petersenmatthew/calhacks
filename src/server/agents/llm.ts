@@ -1,6 +1,7 @@
 import { Agent, run as runSdk, setTracingDisabled, tool, type Model } from "@openai/agents";
 import type { AppContext } from "../context";
 import { getActor } from "../security/actors";
+import { getAgentSettings } from "../settings";
 import { invokeTool } from "./gateway";
 import { buildRunInput, instructionsFor } from "./prompts";
 import { toolsForAgent, type AgentRunContext } from "./tools";
@@ -31,7 +32,7 @@ export async function runLlmAgent(ctx: AppContext, run: AgentRunContext) {
   );
   const agent = new Agent({
     name: getActor(ctx, run.agentId)?.name ?? run.agentId,
-    instructions: instructionsFor(run.agentId),
+    instructions: instructionsFor(run.agentId, getAgentSettings(ctx, run.agentId).guidance),
     model: modelOverride ?? ctx.config.model,
     tools: sdkTools,
     modelSettings: { toolChoice: "required", parallelToolCalls: false },

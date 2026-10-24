@@ -9,6 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "eval": "node --import tsx scripts/eval.ts",
     "db:generate": "drizzle-kit generate",
     "db:reset": "node -e \"require('fs').rmSync('data',{recursive:true,force:true})\""
   },

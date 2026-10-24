@@ -12,7 +12,7 @@ setTracingDisabled(true);
 afterAll(() => setModelOverride(null));
 
 describe("OpenAI Agents SDK wiring", () => {
-  it("runs the Compute Agent through the SDK loop, the gateway, and its guardrails", async () => {
+  it("runs the Compute Investigator through the SDK loop, the gateway, and its guardrails", async () => {
     const { ctx, orchestrator } = setup(":memory:", { llmAvailable: true, defaultMode: "llm" });
     ctx.db.update(jobs).set({ status: "cancelled" }).where(eq(jobs.status, "queued")).run();
     const ingest = runScenario(ctx, "overbilling");

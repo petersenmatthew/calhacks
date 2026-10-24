@@ -18,6 +18,7 @@ import { ACTOR, getActor } from "../security/actors";
 import { authorize, guard } from "../security/authorize";
 import { ControlError } from "../security/errors";
 import { roleHas } from "../security/permissions";
+import { enqueueAgentOnce } from "./jobs";
 
 export const ACCOUNTS = {
   AP: "2000",
@@ -177,6 +178,11 @@ export function postJournalEntry(ctx: AppContext, input: PostingInput) {
       input.lines.forEach((line, i) => {
         ctx.db.insert(journalLines).values({ entryId, lineNo: i + 1, ...line }).run();
       });
+      // Anything charged to a research team goes to the Budget Analyst for a burn check.
+      const charged = input.lines.some((l) => l.projectId && l.debitCents > 0);
+      if (input.source === "experiment_ledger" && input.workItemId && charged) {
+        enqueueAgentOnce(ctx, input.workItemId, ACTOR.budget, { trigger: "posting", entryId });
+      }
       appendAudit(ctx, {
         actorId: input.actorId,
         action: input.source === "erp_ap" ? "ledger.record_vendor_invoice" : "ledger.post",

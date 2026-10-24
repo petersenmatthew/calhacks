@@ -18,6 +18,7 @@ import {
   providerUsage,
   providers,
   approvalRequests,
+  vendorDisputes,
   workItems,
   type AllocationLine,
   type ProposalPayload,
@@ -36,6 +37,7 @@ import { ControlError } from "../security/errors";
 import type { Permission } from "../security/permissions";
 import { createApprovalRequest } from "../workflow/approvals";
 import { contractForProvider, instanceLifecycle, reservationUsage } from "../workflow/checks";
+import { approvedDispute, closeDispute, submitApprovedDispute } from "../workflow/decisions";
 import { enqueueJob } from "../workflow/jobs";
 import { allocationJournal, postJournalEntry } from "../workflow/ledger";
 import {
@@ -81,9 +83,21 @@ export interface ToolContext {
   item: WorkItemRow;
 }
 
+/** Which employee a tool belongs to. Shared tools are available to every agent. */
+export type AgentKey = "compute" | "finance" | "capacity" | "vendor" | "budget" | "policy";
+
+export const AGENT_KEY: Record<string, AgentKey> = {
+  [ACTOR.compute]: "compute",
+  [ACTOR.finance]: "finance",
+  [ACTOR.capacity]: "capacity",
+  [ACTOR.vendorLiaison]: "vendor",
+  [ACTOR.budget]: "budget",
+  [ACTOR.policy]: "policy",
+};
+
 export interface ToolDefinition {
   name: string;
-  agent: "compute" | "finance" | "shared";
+  agent: AgentKey | AgentKey[] | "shared";
   permission: Permission;
   category: AuditCategory;
   description: string;
@@ -277,7 +291,7 @@ const getWorkItemTool = defineTool({
 });
 
 /* ------------------------------------------------------------------ */
-/* Compute Agent                                                       */
+/* Compute Investigator                                                       */
 /* ------------------------------------------------------------------ */
 
 const getInstanceLifecycle = defineTool({
@@ -350,7 +364,7 @@ const getGpuJobLogs = defineTool({
 
 const getExperiment = defineTool({
   name: "get_experiment",
-  agent: "compute",
+  agent: ["compute", "capacity"],
   permission: "compute:read",
   category: "read",
   description: "Experiment tracker record: name, owner, owning research project.",
@@ -392,7 +406,7 @@ const getProviderUsage = defineTool({
 
 const getBillingTerms = defineTool({
   name: "get_billing_terms",
-  agent: "compute",
+  agent: ["compute", "capacity", "vendor"],
   permission: "contract:read",
   category: "read",
   description:
@@ -444,7 +458,7 @@ const getBillingTerms = defineTool({
 
 const findRelatedExperiments = defineTool({
   name: "find_related_experiments",
-  agent: "compute",
+  agent: "capacity",
   permission: "compute:read",
   category: "read",
   description:
@@ -516,7 +530,7 @@ const ASSESSMENT_LABEL: Record<string, string> = {
 
 const submitComputeFindings = defineTool({
   name: "submit_compute_findings",
-  agent: "compute",
+  agent: ["compute", "capacity"],
   permission: "findings:compute:write",
   category: "write",
   description:
@@ -537,7 +551,15 @@ const submitComputeFindings = defineTool({
     if (summary.length < 10) fail("Summary is too short.");
     const cited = requireEvidence(ctx, item, args.evidence_ids);
     const checks = item.checks;
-    const candidates = checks.kind === "instance" ? checks.ownerProjectIds : [checks.ownerProjectId];
+    // The controller can name the owner when the experiment tracker has none.
+    const humanNamed = ctx.db
+      .select()
+      .from(findings)
+      .where(eq(findings.workItemId, item.id))
+      .all()
+      .filter((f) => f.kind === "human")
+      .flatMap((f) => f.summary.match(/PRJ-[A-Z]+/g) ?? []);
+    const candidates = [...new Set([...(checks.kind === "instance" ? checks.ownerProjectIds : [checks.ownerProjectId]), ...humanNamed])];
     if (args.owner_project_id && !candidates.includes(args.owner_project_id)) {
       fail(
         "Owner " + args.owner_project_id + " is not supported by the retrieved evidence. Candidates: " + (candidates.join(", ") || "none"),
@@ -602,7 +624,7 @@ const submitComputeFindings = defineTool({
     }
     return {
       result: { finding_id: id, computed },
-      title: "Compute Agent recorded findings: " + ASSESSMENT_LABEL[args.charge_assessment],
+      title: (getActor(ctx, run.agentId)?.name ?? "Agent") + " recorded findings: " + ASSESSMENT_LABEL[args.charge_assessment],
       summary,
       activityType: "FINDING",
       changes,
@@ -612,30 +634,30 @@ const submitComputeFindings = defineTool({
 
 const handoffToFinance = defineTool({
   name: "handoff_to_finance",
-  agent: "compute",
+  agent: ["compute", "capacity", "policy"],
   permission: "handoff:finance",
   category: "write",
   terminal: true,
-  description: "Hand the work item to the Finance Agent after your findings are recorded. Ends your run.",
+  description: "Hand the work item to the Cost Accountant after your findings are recorded. Ends your run.",
   schema: z.object({ work_item_id: workItemId, note: z.string() }),
-  handler: ({ ctx, item }, args) => {
+  handler: ({ ctx, run, item }, args) => {
     if (!latestComputeFinding(ctx, item)) fail("Submit compute findings before handing off.", "WORKFLOW");
     assignAgent(ctx, item.id, ACTOR.finance);
     enqueueJob(ctx, { workItemId: item.id, kind: "AGENT_RUN", agentId: ACTOR.finance, payload: { trigger: "handoff", note: args.note } });
     return {
-      result: { handed_off_to: "Finance Agent" },
-      title: "Compute Agent handed off to Finance Agent",
+      result: { handed_off_to: "Cost Accountant" },
+      title: (getActor(ctx, run.agentId)?.name ?? "Agent") + " handed off to Cost Accountant",
       summary: args.note.slice(0, 500),
       activityType: "HANDOFF",
-      changes: ["Assigned to Finance Agent"],
-      terminal: { summary: "handed off to Finance Agent" },
+      changes: ["Assigned to Cost Accountant"],
+      terminal: { summary: "handed off to Cost Accountant" },
     };
   },
 });
 
 const requestHumanInfo = defineTool({
   name: "request_human_info",
-  agent: "compute",
+  agent: ["compute", "capacity"],
   permission: "info:request",
   category: "write",
   terminal: true,
@@ -662,12 +684,12 @@ const requestHumanInfo = defineTool({
 });
 
 /* ------------------------------------------------------------------ */
-/* Finance Agent                                                       */
+/* Cost Accountant                                                       */
 /* ------------------------------------------------------------------ */
 
 const getProjectBudget = defineTool({
   name: "get_project_budget",
-  agent: "finance",
+  agent: ["finance", "budget"],
   permission: "budget:read",
   category: "read",
   description: "Monthly compute budget and month-to-date posted compute expense for a research project.",
@@ -706,7 +728,7 @@ const getProjectBudget = defineTool({
 
 const getAllocationPolicy = defineTool({
   name: "get_allocation_policy",
-  agent: "finance",
+  agent: ["finance", "policy"],
   permission: "policy:read",
   category: "read",
   description:
@@ -771,7 +793,7 @@ const getAllocationPolicy = defineTool({
 
 const searchPrecedents = defineTool({
   name: "search_precedents",
-  agent: "finance",
+  agent: ["finance", "policy"],
   permission: "precedent:read",
   category: "read",
   description: "Search historical finance decisions, including controller corrections and past vendor disputes.",
@@ -951,7 +973,7 @@ const proposeAdjustment = defineTool({
         standing_authorization: standing,
         next_step: standing.authorized ? "submit_for_posting" : "request_human_approval",
       },
-      title: "Finance Agent proposed allocation " + id + " v" + version,
+      title: "Cost Accountant proposed allocation " + id + " v" + version,
       summary:
         describeLines(ctx, snap.lines) + ". " +
         (standing.authorized ? "Covered by standing policy " + standing.policyId + "." : "Needs controller approval: " + standing.reason),
@@ -1041,7 +1063,7 @@ const proposeVendorDispute = defineTool({
         liability_note: "Accounts payable stays at " + formatCents(checks.invoicedCents) + " until the vendor issues a credit.",
         next_step: "request_human_approval",
       },
-      title: "Finance Agent proposed a vendor dispute of " + formatCents(disputed),
+      title: "Cost Accountant proposed a vendor dispute of " + formatCents(disputed),
       summary:
         "Dispute " + formatCents(disputed) + " with " + (provider?.name ?? "vendor") + " and allocate the undisputed " + formatCents(undisputed) +
         " to " + projectName(ctx, owner) + ". The liability stays until a credit is issued.",
@@ -1053,7 +1075,7 @@ const proposeVendorDispute = defineTool({
 
 const proposePolicy = defineTool({
   name: "propose_policy",
-  agent: "finance",
+  agent: "policy",
   permission: "policy:propose",
   category: "write",
   description:
@@ -1134,7 +1156,7 @@ const proposePolicy = defineTool({
     });
     return {
       result: { policy_id: id, version, approval_id: approvalId },
-      title: "Finance Agent proposed reusable policy " + POLICY_KEYS.sharedReservation + " v" + version,
+      title: "Cost Accountant proposed reusable policy " + POLICY_KEYS.sharedReservation + " v" + version,
       summary: statement,
       activityType: "POLICY",
       changes: ["Policy " + id + " proposed", "Approval " + approvalId + " pending"],
@@ -1165,7 +1187,7 @@ const requestHumanApproval = defineTool({
     transitionWorkItem(ctx, item.id, "NEEDS_APPROVAL", run.agentId, "Awaiting controller decision on " + proposal.id + " v" + proposal.version);
     return {
       result: { approval_id: approvalId, status: "PENDING" },
-      title: "Finance Agent submitted " + proposal.id + " v" + proposal.version + " for controller approval",
+      title: "Cost Accountant submitted " + proposal.id + " v" + proposal.version + " for controller approval",
       summary,
       activityType: "TOOL_CALL",
       changes: ["Proposal " + proposal.id + " PENDING_APPROVAL"],
@@ -1219,7 +1241,7 @@ const submitForPosting = defineTool({
     transitionWorkItem(ctx, item.id, "RESOLVED", ACTOR.orchestrator, "Reconciliation complete under " + standing.policyId);
     return {
       result: { posted: true, journal_entry_id: entryId, authorization },
-      title: "Finance Agent submitted " + proposal.id + " for posting under " + standing.policyId,
+      title: "Cost Accountant submitted " + proposal.id + " for posting under " + standing.policyId,
       summary: "The ledger gateway verified " + standing.policyId + " and posted " + entryId + ".",
       activityType: "TOOL_CALL",
       changes: ["Journal entry " + entryId + " posted", "State: RESOLVED"],
@@ -1234,20 +1256,262 @@ const requestMoreInfo = defineTool({
   permission: "handoff:compute",
   category: "write",
   terminal: true,
-  description: "Send the work item back to the Compute Agent with a specific question. Ends your run.",
+  description: "Send the work item back to the investigator who gathered the evidence (Compute Investigator, or Capacity Planner for reservations) with a specific question. Ends your run.",
   schema: z.object({ work_item_id: workItemId, question: z.string() }),
   handler: ({ ctx, run, item }, args) => {
+    const target = item.type === "SHARED_ALLOCATION" ? ACTOR.capacity : ACTOR.compute;
+    const name = getActor(ctx, target)?.name ?? target;
     if (item.state === "PROPOSED") transitionWorkItem(ctx, item.id, "INVESTIGATING", run.agentId, "More compute evidence requested");
     supersedeDrafts(ctx, item);
-    assignAgent(ctx, item.id, ACTOR.compute);
-    enqueueJob(ctx, { workItemId: item.id, kind: "AGENT_RUN", agentId: ACTOR.compute, payload: { trigger: "finance_question", question: args.question } });
+    assignAgent(ctx, item.id, target);
+    enqueueJob(ctx, { workItemId: item.id, kind: "AGENT_RUN", agentId: target, payload: { trigger: "finance_question", question: args.question } });
     return {
-      result: { handed_off_to: "Compute Agent" },
-      title: "Finance Agent asked the Compute Agent for more evidence",
+      result: { handed_off_to: name },
+      title: "Cost Accountant asked the " + name + " for more evidence",
       summary: args.question.slice(0, 500),
       activityType: "HANDOFF",
-      changes: ["Assigned to Compute Agent"],
-      terminal: { summary: "asked Compute Agent for more evidence" },
+      changes: ["Assigned to " + name],
+      terminal: { summary: "asked " + name + " for more evidence" },
+    };
+  },
+});
+
+/* ------------------------------------------------------------------ */
+/* Vendor Liaison                                                      */
+/* ------------------------------------------------------------------ */
+
+const getDisputePackage = defineTool({
+  name: "get_dispute_package",
+  agent: "vendor",
+  permission: "dispute:read",
+  category: "read",
+  description:
+    "Read the controller-approved dispute for your work item: amounts, the Cost Accountant's reasoning, cited contract clauses, the provider, and any vendor reply so far.",
+  schema: z.object({ work_item_id: workItemId }),
+  handler: ({ ctx, item }) => {
+    const found = approvedDispute(ctx, item);
+    if (!found) fail("There is no controller-approved dispute on " + item.id + ".", "APPROVAL_REQUIRED");
+    const { proposal, approval } = found;
+    const d = proposal.payload.dispute!;
+    const provider = ctx.db.select().from(providers).where(eq(providers.id, d.providerId)).get();
+    const contract = contractForProvider(ctx, d.providerId);
+    const clauses = contract.clauses.filter((c) => d.clauseRefs.includes(c.ref));
+    const record = ctx.db.select().from(vendorDisputes).where(eq(vendorDisputes.workItemId, item.id)).get() ?? null;
+    const approver = getActor(ctx, approval.decidedBy ?? "")?.name ?? approval.decidedBy;
+    return {
+      result: {
+        proposal_id: proposal.id,
+        approval_id: approval.id,
+        approved_by: approver,
+        provider: { id: d.providerId, name: provider?.name },
+        invoice_line: d.invoiceLineId,
+        invoiced: formatCents(d.invoicedCents),
+        disputed_amount: formatCents(d.disputedCents),
+        undisputed_amount: formatCents(d.undisputedCents),
+        reason: d.reason,
+        clauses: clauses.map((c) => ({ ref: c.ref, title: c.title, text: c.text })),
+        vendor_dispute: record
+          ? { id: record.id, status: record.status, vendor_reference: record.vendorReference, submitted_at: record.submittedAt, replied_at: record.resolvedAt }
+          : null,
+      },
+      evidence: [{ sourceType: "dispute", sourceId: proposal.id, label: "Approved dispute " + proposal.id, snapshot: { dispute: d, approvalId: approval.id } }],
+      title: record ? "Read " + (provider?.name ?? "vendor") + "'s reply on " + record.id : "Read approved dispute " + proposal.id,
+      summary: record
+        ? "Dispute " + record.id + " is " + record.status.toLowerCase().replace("_", " ") + "."
+        : "Approved by " + approver + ": dispute " + formatCents(d.disputedCents) + " with " + (provider?.name ?? "the vendor") + ".",
+    };
+  },
+});
+
+const sendVendorDispute = defineTool({
+  name: "send_vendor_dispute",
+  agent: "vendor",
+  permission: "dispute:send",
+  category: "write",
+  terminal: true,
+  description:
+    "Send the approved dispute to the provider with the letter you wrote. The ledger gateway submits it and checks the controller approval. The letter must state the approved disputed amount. Ends your run.",
+  schema: z.object({ work_item_id: workItemId, subject: z.string(), message: z.string().describe("The letter to the provider's billing team.") }),
+  handler: ({ ctx, item }, args) => {
+    const found = approvedDispute(ctx, item);
+    if (!found) fail("There is no controller-approved dispute on " + item.id + ".", "APPROVAL_REQUIRED");
+    const amount = formatCents(found.proposal.payload.dispute!.disputedCents);
+    const message = args.message.trim().slice(0, 3000);
+    if (message.length < 80) fail("The letter is too short to send.");
+    if (!message.includes(amount)) fail("The letter must state the approved disputed amount, " + amount + ".", "ARITHMETIC_CHECK");
+    const sent = submitApprovedDispute(ctx, item, message);
+    return {
+      result: { dispute_id: sent.disputeId, vendor_reference: sent.vendorReference, provider: sent.provider, disputed_amount: amount },
+      title: "Vendor Liaison sent " + sent.provider + " a dispute for " + amount,
+      summary: args.subject.trim().slice(0, 200),
+      activityType: "DISPUTE",
+      changes: ["Dispute " + sent.disputeId + " SUBMITTED"],
+      terminal: { summary: "sent dispute " + sent.disputeId + " to " + sent.provider },
+    };
+  },
+});
+
+const closeVendorDispute = defineTool({
+  name: "close_dispute",
+  agent: "vendor",
+  permission: "dispute:close",
+  category: "posting",
+  terminal: true,
+  description:
+    "After the provider replies, book the outcome through the ledger gateway and close the work item: a credit reduces the payable; a denial charges the disputed amount to the owning project. Ends your run.",
+  schema: z.object({ work_item_id: workItemId, summary: z.string().describe("One or two sentences on what the vendor decided.") }),
+  handler: ({ ctx, item }, args) => {
+    const closed = closeDispute(ctx, item);
+    const credited = closed.outcome === "VENDOR_CREDIT";
+    return {
+      result: { outcome: closed.outcome, journal_entry_id: closed.entryId, dispute_id: closed.dispute.id, amount: formatCents(closed.dispute.amountCents) },
+      title: credited
+        ? "Vendor Liaison booked a " + formatCents(closed.dispute.amountCents) + " credit and closed " + item.id
+        : "Vendor Liaison booked the upheld charge and closed " + item.id,
+      summary: args.summary.trim().slice(0, 500),
+      activityType: "COMPLETED",
+      changes: ["Journal entry " + closed.entryId + " posted", "State: RESOLVED"],
+      terminal: { summary: credited ? "booked vendor credit" : "booked upheld charge" },
+    };
+  },
+});
+
+/* ------------------------------------------------------------------ */
+/* Budget Analyst                                                      */
+/* ------------------------------------------------------------------ */
+
+type BurnStatus = "on_track" | "watch" | "at_risk" | "over";
+
+/** Month-to-date compute expense for a project and a straight-line projection to month end. */
+function projectBurn(ctx: AppContext, projectId: string, period: string) {
+  const project = ctx.db.select().from(projects).where(eq(projects.id, projectId)).get();
+  if (!project) fail("Unknown project " + projectId, "NOT_FOUND");
+  const row = ctx.sqlite
+    .prepare(
+      "SELECT COALESCE(SUM(l.debit_cents - l.credit_cents), 0) AS total FROM journal_lines l JOIN journal_entries e ON e.id = l.entry_id WHERE l.account_code = '6100' AND l.project_id = ? AND e.period = ?",
+    )
+    .get(project.id, period) as { total: number };
+  const [y, m] = period.split("-").map(Number);
+  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const now = new Date();
+  const nowKey = now.getUTCFullYear() * 12 + now.getUTCMonth();
+  const periodKey = y * 12 + (m - 1);
+  const elapsed = nowKey > periodKey ? daysInMonth : nowKey < periodKey ? 1 : Math.max(1, now.getUTCDate());
+  const perDay = row.total / elapsed;
+  const projected = Math.round(perDay * daysInMonth);
+  const budget = project.monthlyBudgetCents;
+  const remaining = budget - row.total;
+  const status: BurnStatus = row.total > budget ? "over" : projected > budget ? "at_risk" : projected > budget * 0.9 ? "watch" : "on_track";
+  const daysLeft = perDay > 0 ? Math.max(0, Math.floor(remaining / perDay)) : null;
+  return { project, posted: row.total, budget, remaining, projected, daysInMonth, elapsed, status, daysLeft };
+}
+
+const getPostedCharges = defineTool({
+  name: "get_posted_charges",
+  agent: "budget",
+  permission: "budget:read",
+  category: "read",
+  description: "List the journal entries posted for your work item and how much each research project was charged.",
+  schema: z.object({ work_item_id: workItemId }),
+  handler: ({ ctx, item }) => {
+    const rows = ctx.sqlite
+      .prepare(
+        "SELECT e.id AS entry_id, e.memo AS memo, l.project_id AS project_id, SUM(l.debit_cents - l.credit_cents) AS cents FROM journal_entries e JOIN journal_lines l ON l.entry_id = e.id WHERE e.work_item_id = ? AND e.source = 'experiment_ledger' AND l.account_code = '6100' AND l.project_id IS NOT NULL GROUP BY e.id, l.project_id ORDER BY e.posted_at",
+      )
+      .all(item.id) as { entry_id: string; memo: string; project_id: string; cents: number }[];
+    return {
+      result: {
+        charges: rows.map((r) => ({ entry_id: r.entry_id, memo: r.memo, project_id: r.project_id, project_name: projectName(ctx, r.project_id), amount: formatCents(r.cents) })),
+        project_ids: [...new Set(rows.map((r) => r.project_id))],
+      },
+      title: "Read " + rows.length + " posted charge" + (rows.length === 1 ? "" : "s") + " on " + item.id,
+      summary: rows.map((r) => projectName(ctx, r.project_id) + " " + formatCents(r.cents)).join(", ") || "Nothing charged to a project yet.",
+    };
+  },
+});
+
+const forecastProjectBurn = defineTool({
+  name: "forecast_project_burn",
+  agent: "budget",
+  permission: "budget:read",
+  category: "read",
+  description:
+    "Month-to-date compute spend for a research project, a straight-line projection to month end, days of budget left at this rate, and the computed status (on_track, watch, at_risk, over).",
+  schema: z.object({ project_id: z.string() }),
+  handler: ({ ctx, item }, args) => {
+    const b = projectBurn(ctx, args.project_id, item.period);
+    return {
+      result: {
+        project: { id: b.project.id, name: b.project.name, lead: b.project.lead },
+        period: item.period,
+        monthly_budget: formatCents(b.budget),
+        posted_to_date: formatCents(b.posted),
+        days_elapsed: b.elapsed,
+        days_in_month: b.daysInMonth,
+        projected_month_end: formatCents(b.projected),
+        projected_pct_of_budget: Math.round((b.projected / b.budget) * 1000) / 10,
+        days_of_budget_left: b.daysLeft,
+        status: b.status,
+      },
+      evidence: [
+        {
+          sourceType: "budget",
+          sourceId: b.project.id + ":" + item.period + ":forecast",
+          label: b.project.name + " burn forecast " + item.period,
+          snapshot: { postedCents: b.posted, budgetCents: b.budget, projectedCents: b.projected, elapsed: b.elapsed, daysInMonth: b.daysInMonth },
+        },
+      ],
+      title: "Forecast " + b.project.name + " burn for " + item.period,
+      summary:
+        formatCents(b.posted) + " posted after " + b.elapsed + " of " + b.daysInMonth + " days; on pace for " + formatCents(b.projected) +
+        " against " + formatCents(b.budget) + " (" + b.status.replace("_", " ") + ").",
+    };
+  },
+});
+
+const recordBudgetNote = defineTool({
+  name: "record_budget_note",
+  agent: "budget",
+  permission: "budget:note",
+  category: "write",
+  terminal: true,
+  description: "Record your burn assessment for a project on the work item. The status must match the computed forecast. Ends your run.",
+  schema: z.object({
+    work_item_id: workItemId,
+    project_id: z.string(),
+    status: z.enum(["on_track", "watch", "at_risk", "over"]),
+    summary: z.string().describe("One or two sentences for the project lead and the controller."),
+    evidence_ids: z.array(z.string()),
+  }),
+  handler: ({ ctx, run, item }, args) => {
+    const b = projectBurn(ctx, args.project_id, item.period);
+    if (args.status !== b.status) fail("The forecast puts " + b.project.name + " at " + b.status + ", not " + args.status + ".", "ARITHMETIC_CHECK");
+    const summary = args.summary.trim().slice(0, 600);
+    if (summary.length < 10) fail("Summary is too short.");
+    const cited = requireEvidence(ctx, item, args.evidence_ids, 1);
+    const id = nextId(ctx, "F", 5001);
+    ctx.db
+      .insert(findings)
+      .values({
+        id,
+        workItemId: item.id,
+        agentId: run.agentId,
+        runId: run.runId,
+        kind: "budget",
+        summary,
+        assessment: args.status,
+        data: { project_id: b.project.id, posted_cents: b.posted, budget_cents: b.budget, projected_cents: b.projected, days_left: b.daysLeft },
+        evidenceIds: cited,
+        createdAt: nowIso(),
+      })
+      .run();
+    return {
+      result: { finding_id: id, status: b.status, projected_month_end: formatCents(b.projected) },
+      title: "Budget Analyst: " + b.project.name + " is " + b.status.replace("_", " "),
+      summary,
+      activityType: "FINDING",
+      changes: ["Finding " + id + " recorded"],
+      terminal: { summary: b.project.name + " " + b.status.replace("_", " ") },
     };
   },
 });
@@ -1273,11 +1537,18 @@ export const TOOLS: ToolDefinition[] = [
   requestHumanApproval,
   submitForPosting,
   requestMoreInfo,
+  getDisputePackage,
+  sendVendorDispute,
+  closeVendorDispute,
+  getPostedCharges,
+  forecastProjectBurn,
+  recordBudgetNote,
 ];
 
 export const TOOL_INDEX = new Map(TOOLS.map((t) => [t.name, t]));
 
 export function toolsForAgent(agentId: string) {
-  const role = agentId === ACTOR.compute ? "compute" : agentId === ACTOR.finance ? "finance" : null;
-  return TOOLS.filter((t) => t.agent === "shared" || t.agent === role);
+  const key = AGENT_KEY[agentId];
+  if (!key) return [];
+  return TOOLS.filter((t) => t.agent === "shared" || t.agent === key || (Array.isArray(t.agent) && t.agent.includes(key)));
 }
