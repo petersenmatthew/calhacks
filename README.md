@@ -1,4 +1,4 @@
-# ExperimentLedger
+# MOA (Mixture of Accountants)
 
 Autonomous finance operations for AI research labs. A team of six AI employees reconciles GPU invoices against what actually ran, disputes overcharges with cloud vendors, allocates shared cluster costs, watches research team budgets, and learns policy from the controller's corrections. They ask the controller when a decision needs a human. Every action is a typed tool call through an application gateway, written to an append-only audit log.
 
