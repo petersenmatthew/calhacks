@@ -139,14 +139,27 @@ export async function resolveSlackChannel(ctx: AppContext, name: string, create 
     cursor = (json.response_metadata as { next_cursor?: string } | undefined)?.next_cursor || undefined;
   } while (cursor && !channelIds.has(clean));
   const found = channelIds.get(clean);
-  if (found) return { id: found, created: false };
+  if (found) {
+    await inviteTeam(ctx, found);
+    return { id: found, created: false };
+  }
   if (!create) throw new SlackError("channel_not_found");
   const { json } = await slackApi(ctx, "conversations.create", { name: clean });
   const id = (json.channel as { id: string }).id;
   channelIds.set(clean, id);
-  const people = [...new Set(Object.values(ctx.config.comms.slackUserIds))];
-  if (people.length) await slackApi(ctx, "conversations.invite", { channel: id, users: people.join(",") }).catch(() => undefined);
+  await inviteTeam(ctx, id);
   return { id, created: true };
+}
+
+const invited = new Set<string>();
+
+/** Add the people in SLACK_USER_IDS to a channel the bot uses (once per channel per process), so it shows in their sidebar. */
+async function inviteTeam(ctx: AppContext, channel: string) {
+  const people = [...new Set(Object.values(ctx.config.comms.slackUserIds))];
+  if (!people.length || invited.has(channel)) return;
+  invited.add(channel);
+  // already_in_channel and similar are fine; the post itself does not depend on this.
+  await slackApi(ctx, "conversations.invite", { channel, users: people.join(",") }).catch(() => undefined);
 }
 
 export async function sendSlack(ctx: AppContext, destination: string, text: string): Promise<Delivery> {
