@@ -1,3 +1,7 @@
+## Hackathon context
+
+We are building for the Hyphenate track at Cal Hacks 13.0. Read docs/hyphenate-track.md for the brief, judging criteria, and gaps before making product decisions.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 ## This is NOT the Next.js you know
