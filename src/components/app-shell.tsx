@@ -49,9 +49,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <ShellContext.Provider value={{ period, setPeriod, lastView }}>
       <div className="flex h-dvh flex-col overflow-hidden">
         <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
-          <Link href="/" className="grid size-6 place-items-center rounded-md bg-zinc-900 text-[10px] font-semibold text-white" title="ExperimentLedger">
-            EL
-          </Link>
           <nav className="flex rounded-md bg-zinc-100 p-0.5">
             {TABS.map((t) => (
               <Link
