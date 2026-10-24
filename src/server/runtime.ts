@@ -1,6 +1,7 @@
+import fs from "node:fs";
 import path from "node:path";
 import { getDefaultModel } from "@openai/agents";
-import { createAppContext, type AppContext, type CommsConfig } from "./context";
+import { createAppContext, DEFAULT_COMMS, type AppContext, type CommsConfig } from "./context";
 import { ALL_TABLES, dropGuards, installGuards, migrateIfChanged } from "./db/client";
 import { PEOPLE } from "./comms/directory";
 import { resetInboxCursor } from "./comms/inbox";
@@ -72,12 +73,21 @@ function commsFromEnv(): CommsConfig {
   };
 }
 
+const publicDemo = () => process.env.PUBLIC_DEMO === "1" || process.env.PUBLIC_DEMO === "true";
+
+/** DATABASE_PATH, else data/moa.db; a database from before the rename (data/experiment-ledger.db) is kept in use. */
+function databasePath() {
+  if (process.env.DATABASE_PATH) return process.env.DATABASE_PATH;
+  const legacy = path.join(process.cwd(), "data", "experiment-ledger.db");
+  return fs.existsSync(legacy) ? legacy : path.join(process.cwd(), "data", "moa.db");
+}
+
 interface Runtime {
   ctx: AppContext;
   orchestrator: Orchestrator;
 }
 
-const globalRef = globalThis as unknown as { __experimentLedger?: Runtime };
+const globalRef = globalThis as unknown as { __moa?: Runtime };
 
 function envMode(): "llm" | "deterministic" | undefined {
   const v = process.env.AGENT_MODE;
@@ -89,10 +99,10 @@ const appSeed = () => (process.env.SEED === "all" ? "all" : "demo");
 
 /** Process-wide singleton: database, event bus, and durable worker. */
 export function getRuntime(): Runtime {
-  if (!globalRef.__experimentLedger) {
+  if (!globalRef.__moa) {
     const llmAvailable = Boolean(process.env.OPENAI_API_KEY);
     const ctx = createAppContext({
-      file: process.env.DATABASE_PATH || path.join(process.cwd(), "data", "experiment-ledger.db"),
+      file: databasePath(),
       config: {
         stepDelayMs: Number(process.env.DETERMINISTIC_STEP_DELAY_MS ?? 700),
         llmAvailable,
@@ -100,20 +110,23 @@ export function getRuntime(): Runtime {
         defaultMode: envMode() ?? (llmAvailable ? "llm" : "deterministic"),
         schedulerIntervalMs: process.env.AUTONOMY === "off" ? 0 : Number(process.env.SCHEDULER_INTERVAL_MS ?? 5000),
         feedUrl: process.env.BILLING_FEED_URL || null,
-        comms: commsFromEnv(),
+        // A public deployment never sends Slack or email, whatever the environment holds.
+        comms: publicDemo() ? { ...DEFAULT_COMMS, appUrl: commsFromEnv().appUrl } : commsFromEnv(),
+        publicDemo: publicDemo(),
+        maxLlmRunsPerHour: Number(process.env.MAX_LLM_RUNS_PER_HOUR ?? 120),
         defaultRunMode: process.env.RUN_MODE === "all" ? "all" : "one",
       },
     });
     if (!isSeeded(ctx)) seedEnvironment(ctx, appSeed());
     else upgradeEnvironment(ctx);
     const orchestrator = new Orchestrator(ctx);
-    globalRef.__experimentLedger = { ctx, orchestrator };
+    globalRef.__moa = { ctx, orchestrator };
     if (process.env.NEXT_PHASE !== "phase-production-build") orchestrator.start();
-  } else if (process.env.NODE_ENV !== "production" && migrateIfChanged(globalRef.__experimentLedger.ctx.db)) {
+  } else if (process.env.NODE_ENV !== "production" && migrateIfChanged(globalRef.__moa.ctx.db)) {
     // Hot reload brought in a schema change: it is applied above; refresh data that depends on it.
-    upgradeEnvironment(globalRef.__experimentLedger.ctx);
+    upgradeEnvironment(globalRef.__moa.ctx);
   }
-  return globalRef.__experimentLedger;
+  return globalRef.__moa;
 }
 
 export function getContext() {

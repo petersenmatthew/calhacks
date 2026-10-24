@@ -17,6 +17,10 @@ export interface AppConfig {
   feedUrl: string | null;
   /** Email and Slack delivery. Empty values mean messages stay in the outbox as "simulated". */
   comms: CommsConfig;
+  /** A public deployment for judges (PUBLIC_DEMO=1): Slack and email are recorded only, requests are rate limited, and live model runs are capped per hour. */
+  publicDemo: boolean;
+  /** In a public demo, live model runs allowed per hour before agents fall back to replay. */
+  maxLlmRunsPerHour: number;
   /** "one": the team works one case at a time. "all": cases run in parallel. */
   defaultRunMode: "one" | "all";
 }
@@ -83,6 +87,8 @@ export function createAppContext(options: { file: string; config?: Partial<AppCo
       schedulerIntervalMs: options.config?.schedulerIntervalMs ?? 0,
       feedUrl: options.config?.feedUrl ?? null,
       comms: { ...DEFAULT_COMMS, ...(options.config?.comms ?? {}) },
+      publicDemo: options.config?.publicDemo ?? false,
+      maxLlmRunsPerHour: options.config?.maxLlmRunsPerHour ?? 120,
       defaultRunMode: options.config?.defaultRunMode ?? "all",
     },
   };

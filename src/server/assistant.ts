@@ -47,7 +47,7 @@ function briefing(ctx: AppContext, taskId: string | null) {
 }
 
 const INSTRUCTIONS = [
-  "You are the finance team's assistant inside ExperimentLedger. The person you talk to is the controller.",
+  "You are the finance team's assistant inside MOA. The person you talk to is the controller.",
   "Answer from the briefing only. If the briefing does not say, say you do not know.",
   "Be brief: one to three short sentences. Plain text. No headings, no bold, no emojis. Use a short list only when asked to list things.",
   "Refer to tasks by id, for example WI-1009, so the controller can click them.",

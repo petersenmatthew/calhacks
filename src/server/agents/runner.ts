@@ -74,7 +74,13 @@ export async function runAgentJob(ctx: AppContext, job: JobRow) {
   if (item && item.agentRunCount >= MAX_AGENT_RUNS_PER_ITEM) {
     throw new Error("Agent run limit reached for " + item.id);
   }
-  const mode = getExecutionMode(ctx);
+  let mode = getExecutionMode(ctx);
+  // A public demo caps live model runs per hour; past the cap, agents run the scripted replay instead of failing.
+  if (mode === "llm" && ctx.config.publicDemo) {
+    const since = new Date(Date.now() - 3_600_000).toISOString();
+    const recent = ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM agent_runs WHERE mode = 'llm' AND started_at > ?").get(since) as { n: number };
+    if (recent.n >= ctx.config.maxLlmRunsPerHour) mode = "deterministic";
+  }
   const runId = nextId(ctx, "RUN", 8001);
   const task = taskFor(agentId, job.payload, workItemId);
   tx(ctx, () => {

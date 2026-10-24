@@ -1,3 +1,4 @@
+import { rateLimited } from "@/server/rate-limit";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { vendorDisputes } from "@/server/db/schema";
@@ -11,6 +12,8 @@ const body = z.object({ text: z.string().min(3).max(4000), from: z.string().max(
 /** Record a vendor reply by hand (pasted from email, or typed for a demo). The Vendor Liaison picks it up like an emailed one. */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const limited = rateLimited(getContext(), request, "vendor");
+    if (limited) return limited;
     const { id } = await params;
     const { text, from } = body.parse(await request.json());
     const ctx = getContext();

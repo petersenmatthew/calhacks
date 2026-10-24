@@ -140,7 +140,7 @@ export class SlackError extends Error {
         : code === "invalid_auth" || code === "not_authed"
           ? "SLACK_BOT_TOKEN is not valid for any workspace. Copy the Bot User OAuth Token (xoxb-...) again."
           : code === "not_in_channel"
-            ? "The bot is not in that channel. Add the chat:write.public scope, or /invite @Ledger in the channel."
+            ? "The bot is not in that channel. Add the chat:write.public scope, or /invite the bot in the channel."
             : code === "ratelimited"
               ? "Slack is rate limiting the bot; retrying in " + (retryAfter ?? 30) + "s."
               : "Slack: " + code,

@@ -1,3 +1,4 @@
+import { rateLimited } from "@/server/rate-limit";
 import { z } from "zod";
 import { askAboutFrame, askAssistant } from "@/server/assistant";
 import { errorResponse } from "@/server/http";
@@ -15,6 +16,8 @@ const body = z.object({
 /** Read-only questions about the books. The assistant has no write tools. */
 export async function POST(request: Request) {
   try {
+    const limited = rateLimited(getContext(), request, "chat");
+    if (limited) return limited;
     const input = body.parse(await request.json());
     const reply =
       input.frameId && input.taskId

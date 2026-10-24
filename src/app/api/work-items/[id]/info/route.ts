@@ -1,3 +1,4 @@
+import { rateLimited } from "@/server/rate-limit";
 import { z } from "zod";
 import { errorResponse } from "@/server/http";
 import { getContext } from "@/server/runtime";
@@ -8,6 +9,8 @@ const body = z.object({ answer: z.string().min(3).max(2000) });
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const limited = rateLimited(getContext(), request, "decide");
+    if (limited) return limited;
     const { id } = await params;
     const { answer } = body.parse(await request.json());
     return Response.json(provideInformation(getContext(), { workItemId: id, actorId: ACTOR.controller, answer }));

@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import useSWR from "swr";
-import { Network, ShieldCheck, SquareKanban } from "lucide-react";
+import { CircleHelp, Network, ShieldCheck, SquareKanban } from "lucide-react";
 import { fetcher } from "@/lib/api";
 import { periodLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,7 @@ import { dashboardKey, Metrics } from "./dashboard/dashboard";
 import { ClockControl } from "./dashboard/clock-control";
 import { ResetButton } from "./dashboard/reset-button";
 import { SimulateDialog } from "./dashboard/simulate-dialog";
+import { hasSeenOnboarding, Onboarding } from "./onboarding";
 
 type View = "board" | "canvas";
 
@@ -38,6 +39,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [period, setPeriod] = useState<string | null>(null);
   const [lastView, setLastView] = useState<View>("canvas");
   const { data, mutate } = useSWR<DashboardData>(dashboardKey(period), fetcher, { keepPreviousData: true });
+  // First visit: a one-screen intro with a button that starts the sample case.
+  const [intro, setIntro] = useState(false);
+  useEffect(() => {
+    // Read after mount (storage is browser-only), then open on the next frame.
+    if (hasSeenOnboarding()) return;
+    const raf = requestAnimationFrame(() => setIntro(true));
+    return () => cancelAnimationFrame(raf);
+  }, []);
 
   // Remember which work view was open last (adjusted during render, no effect needed).
   const here: View | null = pathname === "/board" ? "board" : pathname === "/canvas" ? "canvas" : null;
@@ -88,12 +97,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             {data ? <Metrics data={data} /> : null}
             <div className="flex items-center gap-1.5">
               {data ? <ClockControl now={data.clock.now} offsetMs={data.clock.offsetMs} onDone={() => mutate()} /> : null}
+              <button
+                type="button"
+                onClick={() => setIntro(true)}
+                aria-label="How MOA works"
+                title="How MOA works"
+                className="grid size-7 place-items-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
+              >
+                <CircleHelp className="size-4" />
+              </button>
               <ResetButton onDone={() => mutate()} />
               <SimulateDialog onDone={() => mutate()} />
             </div>
           </div>
         </header>
         <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
+        <Onboarding open={intro} publicDemo={Boolean(data?.settings.publicDemo)} onClose={() => setIntro(false)} onStarted={() => mutate()} />
       </div>
     </ShellContext.Provider>
   );

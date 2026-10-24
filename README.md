@@ -27,13 +27,40 @@ npm run dev
 # open http://localhost:3000
 ```
 
-The first request creates `data/experiment-ledger.db`, loads the October 2026 sandbox, and starts the background worker. The sandbox seeds 35 invoice lines from `src/server/sim/cases.ts`: 13 clean lines auto-match, and 22 open work items for the agents (idle time, minimum-duration charges, billing past termination, rate mismatches, duplicate lines, missing experiment owners, and shared reservations). An existing database keeps its old seed until **Reset demo**.
+The first request creates `data/moa.db`, loads the October 2026 sandbox, and starts the background worker. The sandbox seeds 35 invoice lines from `src/server/sim/cases.ts`: 13 clean lines auto-match, and 22 open work items for the agents (idle time, minimum-duration charges, billing past termination, rate mismatches, duplicate lines, missing experiment owners, and shared reservations). An existing database keeps its old seed until **Reset demo**.
 
 Production build:
 
 ```bash
 npm run build && npm start
 ```
+
+## Deploy on Railway (public demo for judges)
+
+The repo ships a `Dockerfile` and `railway.json`. One instance, SQLite on a volume.
+
+```
+npm i -g @railway/cli
+railway login
+railway init                                   # new project "moa"
+railway up --detach                            # first build from this folder
+railway volume add --mount-path /data          # keeps the database across deploys
+railway variables --set PUBLIC_DEMO=1 --set OPENAI_API_KEY=sk-... --set DATABASE_PATH=/data/moa.db
+railway domain                                 # public URL
+railway variables --set APP_URL=https://<that domain>
+railway up --detach                            # redeploy with the variables
+```
+
+Or connect the GitHub repo in the Railway dashboard: it picks up `railway.json`; add the volume at `/data` and the same variables.
+
+`PUBLIC_DEMO=1` makes the app safe to share:
+
+- First-time visitors see a one-screen intro with **Start the sample case** (reopen it with the ? in the top bar).
+- Slack and email are recorded on each task and never sent, whatever else is set.
+- Each visitor is limited per hour: 12 new billing events, 4 resets, 40 questions, 60 decisions, 20 pasted vendor replies.
+- Live model runs are capped at `MAX_LLM_RUNS_PER_HOUR` (default 120); past the cap, agents use the scripted replay instead of failing.
+
+Everyone shares one database, so one visitor's **Reset demo** resets it for all.
 
 ## Environment variables
 
@@ -45,7 +72,7 @@ Copy `.env.example` to `.env.local`. All are optional.
 | `OPENAI_MODEL` | Agents SDK default | Model for LLM agents. |
 | `AGENT_MODE` | `llm` if a key is set, else `deterministic` | Starting execution mode. Switch at runtime with `POST /api/settings {"mode": "llm"}`. |
 | `DETERMINISTIC_STEP_DELAY_MS` | `700` | Pause between deterministic agent steps so the live timeline is watchable. |
-| `DATABASE_PATH` | `./data/experiment-ledger.db` | SQLite file. |
+| `DATABASE_PATH` | `./data/moa.db` | SQLite file (an existing `./data/experiment-ledger.db` keeps being used). |
 | `OPENAI_AGENTS_DISABLE_TRACING` | unset | Set to `1` to stop the SDK exporting traces to OpenAI. |
 | `SCHEDULER_INTERVAL_MS` | `5000` | How often the scheduler syncs billing feeds and runs follow-up rules. |
 | `AUTONOMY` | on | Set to `off` to disable the scheduler (agents still run when work is queued). |
@@ -59,6 +86,8 @@ Copy `.env.example` to `.env.local`. All are optional.
 | `SLACK_BOT_TOKEN` | unset | Post to a real Slack workspace. Scopes: `chat:write`, `chat:write.public`, `channels:read`, `channels:manage`, `channels:join`, `users:read`, `reactions:write`; the bot creates and joins the channels below. |
 | `SLACK_WEBHOOK_URL` | unset | Or post everything to one channel through an incoming webhook. |
 | `SLACK_USERS` | unset | Who is who, by Slack username or member id: `controller=belinda, cfo=matthewpetersen, leads=matthewpetersen` (role keys `controller`, `cfo`, `leads`, `*`, or any handle). `SLACK_USER_IDS` (JSON or one id) still works. |
+| `PUBLIC_DEMO` | unset | `1` for a shared public deployment: intro screen, Slack and email recorded only, per-visitor rate limits, capped model runs. |
+| `MAX_LLM_RUNS_PER_HOUR` | `120` | In a public demo, live agent runs per hour before agents fall back to replay. |
 | `APP_URL` | `http://localhost:3000` | Base for the links in Slack messages. |
 
 ### Execution modes
