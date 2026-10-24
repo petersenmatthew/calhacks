@@ -313,15 +313,23 @@ export function closeDispute(ctx: AppContext, item: WorkItemRow) {
   const dispute = ctx.db.select().from(vendorDisputes).where(eq(vendorDisputes.workItemId, item.id)).get();
   if (!dispute || dispute.status === "SUBMITTED") throw new ControlError("The vendor has not replied yet.", "WORKFLOW");
   const accepted = dispute.status === "CREDIT_ACCEPTED";
-  const lines: JournalLineDraft[] = accepted
-    ? [
-        { accountCode: ACCOUNTS.AP, projectId: null, debitCents: dispute.amountCents, creditCents: 0, memo: "Vendor credit " + dispute.vendorReference },
-        { accountCode: ACCOUNTS.CLEARING, projectId: null, debitCents: 0, creditCents: dispute.amountCents, memo: "Vendor credit " + dispute.vendorReference },
-      ]
-    : allocationJournal(
-        [{ projectId: item.ownerProjectId ?? "", basis: "Dispute denied", weight: 1, amountCents: dispute.amountCents }],
-        "Disputed amount upheld by vendor",
-      );
+  // A partial credit (agreed by the controller) books the credit and charges the rest to the owning project.
+  const credited = accepted ? Math.min(dispute.creditedCents ?? dispute.amountCents, dispute.amountCents) : 0;
+  const upheld = dispute.amountCents - credited;
+  const lines: JournalLineDraft[] = [
+    ...(credited > 0
+      ? [
+          { accountCode: ACCOUNTS.AP, projectId: null, debitCents: credited, creditCents: 0, memo: "Vendor credit " + dispute.vendorReference },
+          { accountCode: ACCOUNTS.CLEARING, projectId: null, debitCents: 0, creditCents: credited, memo: "Vendor credit " + dispute.vendorReference },
+        ]
+      : []),
+    ...(upheld > 0
+      ? allocationJournal(
+          [{ projectId: item.ownerProjectId ?? "", basis: "Dispute denied", weight: 1, amountCents: upheld }],
+          credited > 0 ? "Disputed amount not credited by vendor" : "Disputed amount upheld by vendor",
+        )
+      : []),
+  ];
   const outcome = accepted ? "VENDOR_CREDIT" : "CHARGE_UPHELD";
   const { entryId } = postJournalEntry(ctx, {
     actorId: ACTOR.ledger,
@@ -345,8 +353,11 @@ export function closeDispute(ctx: AppContext, item: WorkItemRow) {
     event: "dispute.closed",
     workItemId: item.id,
     ref: dispute.id,
-    mentions: accepted ? [] : [CONTROLLER, ...(lead ? [lead.handle] : [])],
-    text: accepted
+    mentions: accepted && upheld === 0 ? [] : [CONTROLLER, ...(lead ? [lead.handle] : [])],
+    text: accepted && upheld > 0
+      ? "Closed " + dispute.id + ": " + formatCents(credited) + " partial credit booked and the remaining " + formatCents(upheld) + " charged to " +
+        (lead ? mention(lead.handle) + "'s team" : "the owning team") + " (" + entryId + "). " + taskLink(ctx, item.id)
+      : accepted
       ? "Closed " + dispute.id + ": " + formatCents(dispute.amountCents) + " credit booked (" + entryId + "). What Atlas owes the vendor dropped by that amount. " + taskLink(ctx, item.id)
       : "Closed " + dispute.id + ": the vendor upheld the charge, so " + formatCents(dispute.amountCents) + " was charged to " + (lead ? mention(lead.handle) + "'s team" : "the owning team") +
         " (" + entryId + "). " + mention(CONTROLLER) + " can reopen it with the vendor. " + taskLink(ctx, item.id),

@@ -28,7 +28,7 @@ export async function dispatchOutbox(ctx: AppContext) {
     try {
       result =
         row.channel === "email"
-          ? await sendEmail(ctx, { to: row.destination, subject: row.subject ?? "", text: row.body, html: row.html, attachments: row.attachments })
+          ? await sendEmail(ctx, { to: row.destination, subject: row.subject ?? "", text: row.body, html: row.html, attachments: row.attachments, headers: row.headers })
           : await sendSlack(ctx, row.destination, row.body);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);

@@ -37,7 +37,10 @@ function taskFor(agentId: string, trigger: Record<string, unknown>, workItemId: 
   }
   if (agentId === ACTOR.policy) return "Turn the controller's correction on " + workItemId + " into policy";
   if (agentId === ACTOR.vendorLiaison) {
-    return t === "vendor_reply" ? "Read the vendor's reply and close " + workItemId : "Send the approved dispute on " + workItemId;
+    if (t === "vendor_reply") return "Read the vendor's reply and close " + workItemId;
+    if (t === "vendor_message") return "Handle the vendor's email on " + workItemId;
+    if (t === "human_info") return "Answer the vendor on " + workItemId + " with the controller's decision";
+    return "Send the approved dispute on " + workItemId;
   }
   if (agentId === ACTOR.budget) return "Check team burn after the posting on " + workItemId;
   if (agentId === ACTOR.compute) {

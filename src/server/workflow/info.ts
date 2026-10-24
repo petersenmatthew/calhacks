@@ -15,7 +15,9 @@ export function provideInformation(ctx: AppContext, input: { workItemId: string;
     authorize(ctx, input.actorId, "workitem:respond");
     const item = getWorkItem(ctx, input.workItemId);
     const answer = input.answer.trim();
-    if (item.state !== "NEEDS_INFO" || !item.pendingQuestion) {
+    // The Vendor Liaison asks while the case stays open with the vendor (DISPUTED); everyone else pauses the item.
+    const duringDispute = item.state === "DISPUTED";
+    if ((item.state !== "NEEDS_INFO" && !duringDispute) || !item.pendingQuestion) {
       throw new ControlError("Work item is not waiting for information", "STATE_MACHINE");
     }
     if (answer.length < 3) throw new ControlError("Answer is empty", "REASON_REQUIRED", "FAILED");
@@ -69,7 +71,7 @@ export function provideInformation(ctx: AppContext, input: { workItemId: string;
       summary: answer,
       evidenceIds: [evidenceId],
     });
-    transitionWorkItem(ctx, item.id, "INVESTIGATING", input.actorId, "Information provided; resuming " + question.agentId);
+    if (!duringDispute) transitionWorkItem(ctx, item.id, "INVESTIGATING", input.actorId, "Information provided; resuming " + question.agentId);
     assignAgent(ctx, item.id, question.agentId);
     enqueueJob(ctx, { workItemId: item.id, kind: "AGENT_RUN", agentId: question.agentId, payload: { trigger: "human_info", findingId } });
     return { findingId };

@@ -4,10 +4,12 @@ import { ACTOR } from "./security/actors";
 import { syncHttpFeed, syncSimulatedFeeds, type SyncSummary } from "./sync/feeds";
 import { runFollowUps } from "./workflow/follow-ups";
 import { dispatchOutbox } from "./comms/dispatch";
+import { pollVendorInbox } from "./comms/inbox";
 
 /*
  * The part of the system that starts work on its own. On every tick it pulls
- * new lines from the billing feeds and runs the time-based follow-up rules.
+ * new lines from the billing feeds, reads vendor replies from the AP mailbox,
+ * and runs the time-based follow-up rules.
  * Agent work it creates goes onto the same durable job queue as everything
  * else, so a crash or redeploy never loses it.
  */
@@ -33,6 +35,11 @@ export async function runScheduledWork(ctx: AppContext, options: { feedUrl?: str
     followUps = runFollowUps(ctx);
   } catch (error) {
     report(ctx, "Follow-up rules failed", error);
+  }
+  try {
+    await pollVendorInbox(ctx);
+  } catch (error) {
+    report(ctx, "Could not read vendor replies from the mailbox", error);
   }
   try {
     await dispatchOutbox(ctx);

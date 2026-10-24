@@ -71,6 +71,10 @@ describe("delivery", () => {
   it("sends the dispute through Resend and records the provider's message id", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes("resend.com")) return new Response(JSON.stringify({ id: "re_123" }), { status: 200 });
+      if (url.includes("conversations.list")) {
+        const channels = ["finance-approvals", "vendor-disputes", "budget-alerts", "finance-ops"].map((name, i) => ({ id: "C0" + i + "TEST", name, is_member: true }));
+        return new Response(JSON.stringify({ ok: true, channels }), { status: 200 });
+      }
       return new Response(JSON.stringify({ ok: true, ts: "1.2" }), { status: 200 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -83,8 +87,10 @@ describe("delivery", () => {
     const sentBody = JSON.parse(String((call as unknown as [string, RequestInit])[1].body));
     expect(sentBody.to).toEqual([VENDOR]);
     expect(sentBody.attachments).toHaveLength(1);
-    const slackCall = fetchMock.mock.calls.find(([u]) => String(u).includes("slack.com"))!;
+    const slackCall = fetchMock.mock.calls.find(([u]) => String(u).includes("chat.postMessage"))!;
     expect(String((slackCall as unknown as [string, RequestInit])[1].body)).toContain("<@U01PRIYA>");
     expect(ctx.db.select().from(vendorDisputes).all()[0].emailStatus).toBe("sent");
+    // Every email we send is marked, so the inbox poller never reads our own letter back as a vendor reply.
+    expect(sentBody.headers["X-Atlas-Outbox"]).toBe("1");
   });
 });

@@ -14,7 +14,7 @@ function InfoRequest() {
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
   const q = data.item.pendingQuestion;
-  if (data.item.state !== "NEEDS_INFO" || !q) return null;
+  if ((data.item.state !== "NEEDS_INFO" && data.item.state !== "DISPUTED") || !q) return null;
   const send = async () => {
     setBusy(true);
     try {
@@ -44,7 +44,7 @@ function InfoRequest() {
 export function DecisionPanel() {
   const { data } = useWorkspace();
   const pending = data.approvals.filter((a) => a.status === "PENDING");
-  const asking = data.item.state === "NEEDS_INFO" && Boolean(data.item.pendingQuestion);
+  const asking = (data.item.state === "NEEDS_INFO" || data.item.state === "DISPUTED") && Boolean(data.item.pendingQuestion);
   const count = pending.length + (asking ? 1 : 0);
   if (!count) return null;
   return (

@@ -26,6 +26,10 @@ export interface CommsConfig {
   replyTo: string | null;
   resendApiKey: string | null;
   smtpUrl: string | null;
+  /** Mailbox the vendor's replies arrive in (imaps://user:pass@host:993). Derived from a Gmail SMTP_URL when unset. */
+  imapUrl: string | null;
+  /** How often to check that mailbox for vendor replies. 0 turns it off. */
+  inboxPollMs: number;
   slackBotToken: string | null;
   slackWebhookUrl: string | null;
   slackUserIds: Record<string, string>;
@@ -39,6 +43,8 @@ export const DEFAULT_COMMS: CommsConfig = {
   replyTo: null,
   resendApiKey: null,
   smtpUrl: null,
+  imapUrl: null,
+  inboxPollMs: 30_000,
   slackBotToken: null,
   slackWebhookUrl: null,
   slackUserIds: {},

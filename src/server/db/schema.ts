@@ -560,6 +560,8 @@ export const vendorDisputes = sqliteTable("vendor_disputes", {
   approvalId: text("approval_id").notNull(),
   amountCents: integer("amount_cents").notNull(),
   status: text("status").notNull(), // SUBMITTED | CREDIT_ACCEPTED | DENIED
+  /** What the vendor actually credited, when the controller accepted less than the disputed amount. */
+  creditedCents: integer("credited_cents"),
   reason: text("reason").notNull(),
   vendorReference: text("vendor_reference"),
   submittedAt: text("submitted_at").notNull(),
@@ -675,6 +677,8 @@ export const outbox = sqliteTable(
     html: text("html"),
     mentions: text("mentions", { mode: "json" }).$type<string[]>().notNull(),
     attachments: text("attachments", { mode: "json" }).$type<{ filename: string; content: string; contentType: string }[]>().notNull(),
+    /** Extra email headers, e.g. In-Reply-To so a reply lands in the vendor's thread. */
+    headers: text("headers", { mode: "json" }).$type<Record<string, string> | null>(),
     event: text("event").notNull(),
     workItemId: text("work_item_id"),
     ref: text("ref"),
@@ -686,4 +690,34 @@ export const outbox = sqliteTable(
     sentAt: text("sent_at"),
   },
   (t) => [index("outbox_status_idx").on(t.status), index("outbox_channel_idx").on(t.channel, t.destination)],
+);
+
+/**
+ * The email conversation with a vendor about a dispute, beyond the original
+ * letter: replies the vendor sent (read from the AP inbox) and what the
+ * Vendor Liaison answered.
+ */
+export const vendorMessages = sqliteTable(
+  "vendor_messages",
+  {
+    id: text("id").primaryKey(),
+    disputeId: text("dispute_id").notNull(),
+    workItemId: text("work_item_id").notNull(),
+    direction: text("direction").notNull(), // inbound | outbound
+    fromAddr: text("from_addr"),
+    toAddr: text("to_addr"),
+    subject: text("subject"),
+    body: text("body").notNull(),
+    /** RFC 5322 Message-ID of an inbound email, used to skip duplicates and to thread our answer. */
+    messageId: text("message_id"),
+    inReplyTo: text("in_reply_to"),
+    /** inbound: new | handled | waiting_on_controller | ignored. outbound: sent */
+    status: text("status").notNull(),
+    /** What the Vendor Liaison made of it: credit | denial | question | counter_offer | update. */
+    kind: text("kind"),
+    handledBy: text("handled_by"),
+    handledAt: text("handled_at"),
+    receivedAt: text("received_at").notNull(),
+  },
+  (t) => [uniqueIndex("vendor_messages_message_id_idx").on(t.messageId), index("vendor_messages_dispute_idx").on(t.disputeId)],
 );

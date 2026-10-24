@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import type { DashboardData, WorkspaceData } from "@/server/queries";
 import { DecisionCard } from "../review/decision-card";
 import { DisputeLetter } from "../comms/dispute-letter";
+import { VendorThread } from "../comms/vendor-thread";
 import { AgentAvatar } from "../status";
 import { LearnedPolicyRow, pendingLearnedPolicy, RunningOnItsOwn, useAutonomy } from "../autonomy/sidebar-parts";
 
@@ -211,6 +212,7 @@ function TaskView({ w, onDecided }: { w: WorkspaceData; onDecided: () => void })
       </div>
       <Working w={w} />
       {w.dispute?.letterBody ? <DisputeLetter dispute={w.dispute} /> : null}
+      <VendorThread w={w} />
       <div className="text-[12.5px] text-zinc-500">{record}</div>
     </div>
   );

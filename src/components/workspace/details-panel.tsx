@@ -14,6 +14,7 @@ import { Button } from "../ui/button";
 import { AllocationTable, JournalPreview } from "./approval-card";
 import { SIMULATED_SOURCES, useWorkspace } from "./workspace-context";
 import { DisputeLetter } from "../comms/dispute-letter";
+import { VendorThread } from "../comms/vendor-thread";
 
 const OUTCOME_LABEL: Record<string, string> = {
   CHARGE_EXPLAINED: "Charge explained and allocated under standing policy",
@@ -164,12 +165,13 @@ function Outcome({ data }: { data: WorkspaceData }) {
         <div className="space-y-2">
           <KV
             rows={[
-              ["Dispute", <span key="d" className="tnum">{dispute.id} · {money(dispute.amountCents)} · <span className="text-destructive">{dispute.status.toLowerCase()}</span></span>],
+              ["Dispute", <span key="d" className="tnum">{dispute.id} · {dispute.creditedCents != null ? money(dispute.creditedCents) + " of " : ""}{money(dispute.amountCents)} · <span className="text-destructive">{dispute.status.toLowerCase()}</span></span>],
               ["Vendor ref", dispute.vendorReference],
               ["Owed (AP)", <span key="ap" className="tnum">{money(data.apOutstandingCents)}{dispute.status === "SUBMITTED" ? " until credited" : ""}</span>],
             ]}
           />
           <DisputeLetter dispute={dispute} />
+          <VendorThread w={data} />
           {dispute.status === "SUBMITTED" ? (
             <div className="flex items-center gap-1.5 pt-1">
               <span className="mr-1 text-[11.5px] text-muted-foreground">Simulate vendor:</span>

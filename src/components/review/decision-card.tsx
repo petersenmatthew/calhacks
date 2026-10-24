@@ -66,7 +66,8 @@ export function DecisionCard({
   const [busy, setBusy] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [why, setWhy] = useState(false);
-  const [custom, setCustom] = useState(false);
+  // With nothing to pick from, the answer box is the whole decision.
+  const [custom, setCustom] = useState(decision.choices.length === 0 && decision.custom !== null);
   const [note, setNote] = useState("");
   const input = useRef<HTMLInputElement>(null);
   const lg = size === "lg";

@@ -2,6 +2,7 @@ import path from "node:path";
 import { getDefaultModel } from "@openai/agents";
 import { createAppContext, type AppContext, type CommsConfig } from "./context";
 import { ALL_TABLES, dropGuards, installGuards } from "./db/client";
+import { resetInboxCursor } from "./comms/inbox";
 import { Orchestrator } from "./orchestrator";
 import { authorize, guard } from "./security/authorize";
 import { isSeeded, seedEnvironment, upgradeEnvironment } from "./sim/seed";
@@ -18,6 +19,18 @@ function parseUserIds(raw: string | undefined): Record<string, string> {
   }
 }
 
+/** Gmail uses the same app password for IMAP, so a Gmail SMTP_URL is enough to read replies too. */
+function imapFromSmtp(smtpUrl: string | undefined) {
+  if (!smtpUrl) return null;
+  try {
+    const u = new URL(smtpUrl);
+    if (u.hostname !== "smtp.gmail.com" || !u.username) return null;
+    return "imaps://" + u.username + ":" + u.password + "@imap.gmail.com:993";
+  } catch {
+    return null;
+  }
+}
+
 function commsFromEnv(): CommsConfig {
   const env = process.env;
   return {
@@ -27,6 +40,8 @@ function commsFromEnv(): CommsConfig {
     replyTo: env.EMAIL_REPLY_TO || null,
     resendApiKey: env.RESEND_API_KEY || null,
     smtpUrl: env.SMTP_URL || null,
+    imapUrl: env.IMAP_URL || imapFromSmtp(env.SMTP_URL),
+    inboxPollMs: Number(env.INBOX_POLL_MS ?? 30_000),
     slackBotToken: env.SLACK_BOT_TOKEN || null,
     slackWebhookUrl: env.SLACK_WEBHOOK_URL || null,
     slackUserIds: parseUserIds(env.SLACK_USER_IDS),
@@ -89,6 +104,7 @@ export async function resetEnvironment(actorId: string) {
     ctx.sqlite.prepare("DELETE FROM sqlite_sequence").run();
   })();
   installGuards(ctx.sqlite);
+  resetInboxCursor();
   seedEnvironment(ctx);
   orchestrator.resume();
   ctx.bus.emit("change", "reset");

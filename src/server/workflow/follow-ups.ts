@@ -166,6 +166,9 @@ function chaseDisputes(ctx: AppContext) {
       .prepare("SELECT COUNT(*) AS n FROM jobs WHERE work_item_id = ? AND status IN ('queued','running')")
       .get(item.id) as { n: number };
     if (busy.n > 0) continue;
+    // The vendor answered, or the controller is deciding: nothing to chase.
+    const replied = ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM vendor_messages WHERE dispute_id = ? AND direction = 'inbound'").get(d.id) as { n: number };
+    if (replied.n > 0 || item.pendingQuestion) continue;
     if (age >= FOLLOW_UP_RULES.disputeChaseMs && !has(ctx, "dispute-chase:" + d.id)) {
       tx(ctx, () => {
         record(ctx, {

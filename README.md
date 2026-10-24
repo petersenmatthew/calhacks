@@ -54,9 +54,11 @@ Copy `.env.example` to `.env.local`. All are optional.
 | `RESEND_API_KEY` | unset | Send email through [Resend](https://resend.com). |
 | `SMTP_URL` | unset | Or send through any SMTP server, e.g. `smtps://you%40gmail.com:APP_PASSWORD@smtp.gmail.com:465`. |
 | `EMAIL_FROM`, `EMAIL_REPLY_TO` | Resend test sender / SMTP user | Sender and reply-to for vendor email. |
-| `SLACK_BOT_TOKEN` | unset | Post to a real Slack workspace (bot needs `chat:write`; invite it to the channels below). |
+| `IMAP_URL` | the Gmail account in `SMTP_URL` | Mailbox vendor replies are read from (`imaps://user:pass@host:993`). |
+| `INBOX_POLL_MS` | `30000` | How often to check it. `0` turns reading off. |
+| `SLACK_BOT_TOKEN` | unset | Post to a real Slack workspace. Scopes: `chat:write`, `chat:write.public`, `channels:read`, `channels:manage`, `channels:join`; the bot creates and joins the channels below. |
 | `SLACK_WEBHOOK_URL` | unset | Or post everything to one channel through an incoming webhook. |
-| `SLACK_USER_IDS` | `{}` | JSON map from handle to Slack user id, e.g. `{"priya":"U0123"}`, so mentions and DMs reach a real person. |
+| `SLACK_USER_IDS` | `{}` | One member id (`U0123`, everyone pings you) or a JSON map from handle to id, e.g. `{"priya":"U0123"}`. |
 | `APP_URL` | `http://localhost:3000` | Base for the links in Slack messages. |
 
 ### Execution modes
@@ -127,6 +129,18 @@ Everything the system tells a person or a vendor goes through an outbox table, w
 
 **Vendor disputes.** When the controller approves a dispute, the Vendor Liaison writes the cover letter and the application attaches the evidence: the invoice line, the instance's PROVISIONED, STOP_REQUESTED and TERMINATED times with the provider's own API acknowledgment, the provider meter, the contract calculation, and the text of each cited clause with the reason it applies. Clauses are chosen by what is wrong with the line (billed after termination: termination and metering; wrong rate: rates; always the dispute-window clause), so a letter never cites one that does not apply. The letter, evidence, recipient, and delivery status are stored on the dispute record and shown on the task. The email carries a CSV of the same facts, and the subject carries the vendor case reference. Vendor follow-ups at 14 days go to the same address as replies.
 
+**When the vendor writes back.** The scheduler reads the AP mailbox over IMAP every 30 seconds (Gmail: the same app password as SMTP). A reply is matched to its dispute by email thread or by the case reference in the subject, stored once by Message-ID with the quoted original stripped, posted to #vendor-disputes, and handed to the Vendor Liaison, who reads the whole thread and does one of five things:
+
+| The vendor... | The Vendor Liaison | Guardrail |
+| --- | --- | --- |
+| Issued the full credit | Books it with their memo number and closes the case | A message naming a different amount cannot be booked as a full credit |
+| Refused | Books the charge to the owning team, pings Priya and the lead | |
+| Asked for records or pushed back | Answers in the same thread with the evidence and clause, CSV attached | May only quote amounts already in the approved dispute |
+| Offered a partial credit, or asked for something only staff know (PO, signature) | Asks Priya, with its recommendation, in Slack and on the task (Accept / Hold out / write an answer); the case stays open | A partial credit can only be booked after Priya answers, and is split: credit for what the vendor gave, the rest to the team |
+| Only acknowledged | Notes it and keeps waiting | |
+
+Our own outgoing mail carries an `X-Atlas-Outbox` header so it is never read back as a reply, a reply cannot predate its letter, and once the vendor has answered the 14-day chase stops. A reply that arrived some other way can be pasted on the task.
+
 **Who gets pinged** (Atlas Research Slack workspace):
 
 | Event | Where | Who |
@@ -134,12 +148,13 @@ Everything the system tells a person or a vendor goes through an outbox table, w
 | Approval needed (proposal or learned policy) | #finance-approvals | Priya (controller) |
 | Approval waiting 1 day / 3 days | DM / DM + #finance-approvals | Priya / Dana (CFO, backup approver) |
 | An agent needs information (e.g. unknown owner) | #finance-ops | Priya |
-| Dispute sent, vendor followed up, vendor replied | #vendor-disputes | FYI to Priya |
+| Dispute sent, vendor followed up, vendor replied, liaison answered | #vendor-disputes | FYI to Priya |
+| Vendor offered less, or asked for something only staff know | #vendor-disputes + DM | Priya |
 | Dispute unanswered 30 days | #vendor-disputes + DM | Priya |
 | Dispute denied, charge moved to a team | #vendor-disputes | Priya and that team's lead |
 | Team trending over budget | #budget-alerts | Team lead, plus Priya when at risk or over |
 
-**Connecting the real thing.** For email, sign up for Resend with the address you put in `VENDOR_EMAIL` and set `RESEND_API_KEY` (Resend's test sender can only email the account owner), or use a Gmail app password in `SMTP_URL`. For Slack, create a free workspace, add an app with the `chat:write` scope, install it, set `SLACK_BOT_TOKEN`, create the four channels and invite the bot, and set `SLACK_USER_IDS` for whoever should be mentioned.
+**Connecting the real thing.** For email, sign up for Resend with the address you put in `VENDOR_EMAIL` and set `RESEND_API_KEY` (Resend's test sender can only email the account owner), or use a Gmail app password in `SMTP_URL`. For Slack, create a free workspace, add an app with the scopes above, install it, set `SLACK_BOT_TOKEN`, and set `SLACK_USER_IDS` for whoever should be mentioned. Open `/api/comms/check` to see what is connected; `POST` it to retry failed messages, send a test to Slack and the vendor inbox, and check the mailbox for replies now.
 
 ### Agents and tools
 
@@ -213,7 +228,7 @@ src/server/domain      money, billing, allocation, state machine
 src/server/security    actors, permissions, guard
 src/server/sim         seed data, demo scenarios, feed schedule, AP history (simulated source systems)
 src/server/sync        billing feed sync with cursors (simulated outbox and HTTP adapter)
-src/server/comms       people and channels, the outbox, email and Slack delivery
+src/server/comms       people and channels, the outbox, email and Slack delivery, the AP mailbox reader
 src/server/scheduler.ts, clock.ts   what starts work on its own, and the business clock
 src/app                pages and API routes (SSE at /api/stream)
 src/components         dashboard, investigation workspace, autonomy page, audit trail
@@ -226,7 +241,7 @@ tests/                 Vitest suite
 
 - **LLM mode:** no OpenAI key was available while building, so LLM mode was verified through the SDK's scripted model, not live model calls. Deterministic replay is the default when no key is set.
 - **One demo user:** there is no login. Every human action is taken as the controller, Priya Natarajan.
-- **Simulated systems:** source systems, the ERP, AP history, the billing feeds, and the vendor portal are simulated, and vendor responses are triggered from the UI. Email and Slack are delivered only when a mail server or Slack is configured; otherwise they are recorded. Vendor replies are not read from the inbox; use the vendor buttons on the task.
+- **Simulated systems:** source systems, the ERP, AP history, the billing feeds, and the vendor portal are simulated, and vendor responses are triggered from the UI. Email and Slack are delivered only when a mail server or Slack is configured; otherwise they are recorded. Vendor replies are read from the mailbox when IMAP is set up (or pasted on the task); the "Simulate vendor" buttons still work without email.
 - **Investigation page:** the Flow tab on an investigation still shows only the Compute Investigator and the Cost Accountant. The Canvas shows all six.
 - **Existing databases:** actors are append-only, so a database created before the rename keeps the old names "Compute Agent" and "Finance Agent" until **Reset demo**. New employees are added automatically at startup.
 - **Runs while the server runs:** SQLite runs on one node, and the worker and scheduler run inside the Next.js server process, so nothing happens while it is stopped (queued jobs and due follow-ups resume on restart); restart the dev server after changing server code.

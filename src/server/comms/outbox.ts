@@ -45,9 +45,11 @@ export function queueEmail(
     workItemId?: string | null;
     ref?: string | null;
     attachments?: { filename: string; content: string; contentType: string }[];
+    headers?: Record<string, string> | null;
   },
 ) {
   return queue(ctx, {
+    headers: input.headers ?? null,
     channel: "email",
     destination: input.to,
     subject: input.subject,
@@ -71,6 +73,7 @@ function queue(
     subject?: string | null;
     html?: string | null;
     attachments?: { filename: string; content: string; contentType: string }[];
+    headers?: Record<string, string> | null;
     workItemId?: string | null;
     ref?: string | null;
     mentions: string[];
@@ -86,6 +89,7 @@ function queue(
       html: row.html ?? null,
       mentions: row.mentions,
       attachments: row.attachments ?? [],
+      headers: row.headers ?? null,
       event: row.event,
       workItemId: row.workItemId ?? null,
       ref: row.ref ?? null,

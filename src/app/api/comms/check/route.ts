@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { CHANNELS } from "@/server/comms/directory";
 import { dispatchOutbox } from "@/server/comms/dispatch";
+import { pollVendorInbox, verifyInbox } from "@/server/comms/inbox";
 import { postSlack, queueEmail } from "@/server/comms/outbox";
 import { resolveSlackChannel, slackApi, verifyEmail } from "@/server/comms/transports";
 import { tx } from "@/server/context";
@@ -38,6 +39,7 @@ async function diagnose() {
   return {
     slack,
     email: { ...(await verifyEmail(ctx)), vendorEmail: c.vendorEmail, from: c.emailFrom },
+    inbox: await verifyInbox(ctx),
     outbox: {
       failed: failed.length,
       recentErrors: [...new Set(failed.map((f) => f.lastError))].slice(0, 5),
@@ -50,7 +52,7 @@ export async function GET() {
   return Response.json(await diagnose());
 }
 
-/** Retry failed messages and send one test message to Slack and to the vendor inbox. */
+/** Retry failed messages, send one test message to Slack and to the vendor inbox, and check the mailbox for vendor replies now. */
 export async function POST() {
   const ctx = getContext();
   tx(ctx, () => {
@@ -66,5 +68,11 @@ export async function POST() {
     }
   });
   for (let i = 0; i < 10; i++) if ((await dispatchOutbox(ctx)) === 0) break;
-  return Response.json(await diagnose());
+  let replies: unknown = null;
+  try {
+    replies = await pollVendorInbox(ctx, { force: true });
+  } catch (e) {
+    replies = { error: e instanceof Error ? e.message : String(e) };
+  }
+  return Response.json({ ...(await diagnose()), replies });
 }

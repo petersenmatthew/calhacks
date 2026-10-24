@@ -1,5 +1,7 @@
 import { METHOD_LABELS, RESERVATION_METHODS, type AllocationMethod } from "../domain/allocation";
+import { formatCents } from "../domain/money";
 import { ACTOR } from "../security/actors";
+import { amountsIn } from "../workflow/vendor-replies";
 import { invokeTool } from "./gateway";
 import type { AgentRunContext } from "./tools";
 import type { AppContext } from "../context";
@@ -343,6 +345,115 @@ async function vendorPolicy(c: Caller) {
   });
 }
 
+const DENIAL = /\b(deny|denied|declin\w*|reject\w*|cannot (?:issue|approve|credit)|unable to (?:issue|approve|credit)|(?:charges?|invoice) (?:stands|is valid|was valid|is correct)|upheld|not eligible)\b/i;
+const CREDIT = /\b(credit(?:ed)?|credit memo|refund(?:ed)?)\b/i;
+const CREDIT_DONE = /\b(issued|applied|approved|processed|accept(?:ed)?|will issue|have issued|granted)\b/i;
+const ASK = /\?|\b(please (?:send|provide|share|confirm)|could you|can you|we need|need (?:the|a|your|more)|require)\b/i;
+const STAFF_ONLY = /\b(PO|purchase order|signature|sign|W-?9|tax id|bank|remittance|contact person|account manager)\b/i;
+
+/** Vendor Liaison: the provider wrote back. Book a decision, answer a question, or take an offer to the controller. */
+async function vendorReplyPolicy(c: Caller, run: AgentRunContext) {
+  await c.call("get_work_item", {});
+  const t = await c.call("get_vendor_thread", {});
+  const d = t.dispute as Json;
+  const disputed = amountsIn(String(d.disputed_amount))[0];
+  const waiting = t.waiting_for_you as Json[];
+  const vendor = (t.provider as Json).name as string;
+  const ev = t.evidence_you_can_share as Json | null;
+  const grounds = ((ev?.grounds as string[] | undefined) ?? []).join(" ");
+  if (run.trigger.trigger === "human_info") {
+    const answer = String(((t.controller_answers as Json[])[0] ?? {}).answer ?? "");
+    const offer = waiting.find((w) => w.status === "waiting_on_controller") ?? waiting[waiting.length - 1];
+    if (!offer) throw new Error("No vendor message is waiting on the controller's answer");
+    const offered = amountsIn(String(offer.body)).filter((a) => a !== disputed && a < disputed);
+    const declined = /\b(no|reject|decline|don'?t|do not|refuse|hold out|push back)\b/i.test(answer);
+    if (!declined && offered.length) {
+      const amount = offered[0];
+      await c.call("record_vendor_decision", {
+        message_id: offer.id,
+        decision: "partial_credit",
+        credit_reference: null,
+        credit_amount_cents: amount,
+        confirmation_message:
+          "Thank you. Atlas Research accepts your credit of " + formatCents(amount) + " to settle dispute " + d.id + ". Please send the credit memo for our records.",
+        summary: vendor + " offered " + formatCents(amount) + " of the " + d.disputed_amount + "; the controller accepted it. The rest is charged to the owning project.",
+      });
+      return;
+    }
+    await c.call("reply_to_vendor", {
+      answering: [offer.id],
+      message:
+        "Thank you for your reply. After review, Atlas Research maintains its dispute of the full " + d.disputed_amount + ". " +
+        (grounds || String(d.reason)) + " Please issue a credit memo for " + d.disputed_amount + ".",
+      attach_evidence: true,
+      kind: offered.length ? "counter_offer" : "question",
+    });
+    return;
+  }
+  const msg = waiting[waiting.length - 1];
+  if (!msg) throw new Error("No vendor message is waiting");
+  const body = String(msg.body);
+  const others = amountsIn(body).filter((a) => a !== disputed);
+  const mentionsDisputed = amountsIn(body).includes(disputed);
+  if (DENIAL.test(body) && !CREDIT_DONE.test(body.replace(DENIAL, ""))) {
+    await c.call("record_vendor_decision", {
+      message_id: msg.id,
+      decision: "denied",
+      credit_reference: null,
+      credit_amount_cents: null,
+      confirmation_message: null,
+      summary: vendor + " refused the credit: \u201c" + body.replace(/\s+/g, " ").slice(0, 200) + "\u201d The disputed " + d.disputed_amount + " is charged to the owning project; the controller can reopen it.",
+    });
+    return;
+  }
+  if (others.length && !mentionsDisputed) {
+    await c.call("ask_controller", {
+      message_id: msg.id,
+      question: vendor + " offered " + others.map(formatCents).join(" / ") + " instead of the disputed " + d.disputed_amount + " on " + d.id + ". Accept it?",
+      recommendation:
+        others[0] >= disputed * 0.75
+          ? "Accept: it recovers most of the overcharge and closes the case now."
+          : "Decline and hold out for the full amount: the evidence shows the whole " + d.disputed_amount + " was billed after termination.",
+      kind: "counter_offer",
+    });
+    return;
+  }
+  if (CREDIT.test(body) && CREDIT_DONE.test(body)) {
+    await c.call("record_vendor_decision", {
+      message_id: msg.id,
+      decision: "credited",
+      credit_reference: body.match(/\b(?:CM|CR|CN)[-\s#]?\d{2,}\b/i)?.[0] ?? null,
+      credit_amount_cents: null,
+      confirmation_message: "Thank you for issuing the credit of " + d.disputed_amount + ". We have applied it against invoice line " + (ev?.invoice as Json | undefined)?.line + " and closed dispute " + d.id + ".",
+      summary: vendor + " credited the full " + d.disputed_amount + ". The payable drops by that amount.",
+    });
+    return;
+  }
+  if (ASK.test(body)) {
+    if (STAFF_ONLY.test(body)) {
+      await c.call("ask_controller", {
+        message_id: msg.id,
+        question: vendor + " asks: \u201c" + body.replace(/\s+/g, " ").slice(0, 300) + "\u201d I don't have this in the systems of record. What should I send?",
+        recommendation: "Reply with the requested detail so the credit is not held up.",
+        kind: "question",
+      });
+      return;
+    }
+    const calc = (ev?.calculation as string[] | undefined) ?? [];
+    await c.call("reply_to_vendor", {
+      answering: [msg.id],
+      message:
+        "Thanks for looking into this. Here is what you asked for. " + (grounds || String(d.reason)) +
+        (calc.length ? " Calculation: " + calc.join(" ") : "") +
+        " The full records (instance lifecycle with your termination acknowledgment, usage, and the calculation) are attached as CSV. Please issue a credit memo for " + d.disputed_amount + ".",
+      attach_evidence: true,
+      kind: "question",
+    });
+    return;
+  }
+  await c.call("note_vendor_update", { message_id: msg.id, summary: vendor + " acknowledged " + d.id + " and has not decided yet." });
+}
+
 const BURN_RANK: Record<string, number> = { on_track: 0, watch: 1, at_risk: 2, over: 3 };
 
 /** Budget Analyst: forecast every team this item charged, and record the one most at risk. */
@@ -426,6 +537,7 @@ export async function runDeterministicAgent(ctx: AppContext, run: AgentRunContex
   const trigger = String(run.trigger.trigger ?? "");
   if (run.agentId === ACTOR.policy && trigger === "onboarding") await onboardingPolicy(caller);
   else if (run.agentId === ACTOR.vendorLiaison && (trigger === "dispute_follow_up" || trigger === "dispute_escalation")) await followUpPolicy(caller, run);
+  else if (run.agentId === ACTOR.vendorLiaison && (trigger === "vendor_message" || trigger === "human_info")) await vendorReplyPolicy(caller, run);
   else if (run.agentId === ACTOR.compute || run.agentId === ACTOR.capacity) await computePolicy(caller);
   else if (run.agentId === ACTOR.finance) await financePolicy(caller);
   else if (run.agentId === ACTOR.policy) await policyAnalystPolicy(caller, run);

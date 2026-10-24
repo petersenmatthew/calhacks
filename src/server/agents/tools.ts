@@ -56,6 +56,16 @@ import { buildDisputeEvidence, relevantClauses } from "../workflow/dispute-evide
 import { CONTROLLER, leadFor } from "../comms/directory";
 import { dmSlack, mention, postSlack, queueEmail, taskLink } from "../comms/outbox";
 import { renderLetterHtml } from "../workflow/decisions";
+import {
+  askControllerAboutVendor,
+  disputeFor,
+  disputeThread,
+  noteVendorUpdate,
+  quotableAmounts,
+  recordVendorDecision,
+  replyToVendor,
+  unansweredFor,
+} from "../workflow/vendor-replies";
 
 export interface AgentRunContext {
   runId: string;
@@ -1739,6 +1749,200 @@ const escalateDispute = defineTool({
 });
 
 /* ------------------------------------------------------------------ */
+/* Vendor Liaison: the vendor's replies                                */
+/* ------------------------------------------------------------------ */
+
+const messageId = z.string().describe("A vendor message id from get_vendor_thread, for example VM-7001.");
+
+const getVendorThread = defineTool({
+  name: "get_vendor_thread",
+  agent: "vendor",
+  permission: "dispute:read",
+  category: "read",
+  description:
+    "The email conversation with the provider on your dispute, oldest first: the letter, follow-ups, the vendor's replies, and Atlas's answers. Lists the replies still waiting for you, the evidence you may quote back, and any answer the controller gave you.",
+  schema: z.object({ work_item_id: workItemId }),
+  handler: ({ ctx, item }) => {
+    const dispute = disputeFor(ctx, item);
+    const provider = ctx.db.select().from(providers).where(eq(providers.id, dispute.providerId)).get();
+    const thread = disputeThread(ctx, dispute);
+    const waiting = unansweredFor(ctx, dispute.id);
+    const contract = contractForProvider(ctx, dispute.providerId);
+    const ev = item.checks.kind === "instance" ? buildDisputeEvidence(ctx, item) : null;
+    const answers = ctx.db
+      .select()
+      .from(findings)
+      .where(and(eq(findings.workItemId, item.id), eq(findings.kind, "human")))
+      .orderBy(desc(findings.createdAt))
+      .all()
+      .slice(0, 3);
+    return {
+      result: {
+        dispute: {
+          id: dispute.id,
+          status: dispute.status,
+          case_reference: dispute.vendorReference,
+          disputed_amount: formatCents(dispute.amountCents),
+          sent_to: dispute.sentTo,
+          reason: dispute.reason,
+        },
+        provider: { id: dispute.providerId, name: provider?.name },
+        thread: thread.map((t) => ({
+          id: t.id,
+          at: t.at,
+          direction: t.direction,
+          from: t.from,
+          subject: t.subject,
+          body: t.body.slice(0, 2500),
+          status: t.status,
+        })),
+        waiting_for_you: waiting.map((m) => ({ id: m.id, from: m.fromAddr, received_at: m.receivedAt, status: m.status, body: m.body.slice(0, 2500) })),
+        evidence_you_can_share: ev
+          ? { grounds: ev.grounds.map((g) => g.statement), calculation: ev.calculation, instance: ev.instance, invoice: ev.invoice }
+          : null,
+        contract_clauses: contract.clauses.map((c) => ({ ref: c.ref, title: c.title, text: c.text })),
+        amounts_you_may_quote: [...quotableAmounts(ctx, item, dispute)].sort((a, b) => b - a).slice(0, 12).map(formatCents),
+        controller_answers: answers.map((a) => ({ question: (a.data as { question?: string }).question ?? null, answer: a.summary, at: a.createdAt })),
+        open_question_to_controller: item.pendingQuestion?.question ?? null,
+      },
+      evidence: waiting.map((m) => ({
+        sourceType: "vendor_message",
+        sourceId: m.id,
+        label: "Vendor reply " + m.id + " on " + dispute.id,
+        snapshot: { from: m.fromAddr, subject: m.subject, body: m.body, receivedAt: m.receivedAt },
+      })),
+      title: waiting.length
+        ? "Read " + (provider?.name ?? "the vendor") + "'s reply on " + dispute.id
+        : "Read the thread on " + dispute.id + " (" + thread.length + " messages)",
+      summary: waiting.length ? waiting[waiting.length - 1].body.replace(/\s+/g, " ").slice(0, 300) : "No reply waiting.",
+    };
+  },
+});
+
+const replyToVendorTool = defineTool({
+  name: "reply_to_vendor",
+  agent: "vendor",
+  permission: "dispute:follow_up",
+  category: "write",
+  terminal: true,
+  description:
+    "Email the provider in the same thread: answer their question, send the records they asked for, or restate Atlas's position. Set attach_evidence to resend the evidence CSV. You may only quote amounts already in the approved dispute; anything else needs ask_controller. Ends your run.",
+  schema: z.object({
+    work_item_id: workItemId,
+    answering: z.array(messageId).describe("The vendor message ids this reply answers."),
+    message: z.string().describe("The email to the provider's billing team. Plain text, no signature needed."),
+    attach_evidence: z.boolean(),
+    kind: z.enum(["question", "counter_offer", "denial", "update"]).describe("What the vendor's message was."),
+  }),
+  handler: ({ ctx, run, item }, args) => {
+    const text = args.message.trim().slice(0, 3000);
+    if (text.length < 40) fail("The reply is too short to be useful to the vendor.");
+    if (!args.answering.length) fail("Say which vendor message(s) you are answering.");
+    const sent = replyToVendor(ctx, item, { agentId: run.agentId, answering: args.answering, text, attachEvidence: args.attach_evidence, kind: args.kind });
+    const vendor = ctx.db.select().from(providers).where(eq(providers.id, sent.dispute.providerId)).get()?.name ?? "the vendor";
+    return {
+      result: { sent: true, to: sent.to, subject: sent.subject, message_id: sent.id, attached_evidence: args.attach_evidence },
+      title: "Vendor Liaison answered " + vendor + " on " + sent.dispute.id,
+      summary: text,
+      activityType: "DISPUTE",
+      changes: ["Reply " + sent.id + " emailed to " + sent.to],
+      terminal: { summary: "answered the vendor on " + sent.dispute.id },
+    };
+  },
+});
+
+const recordVendorDecisionTool = defineTool({
+  name: "record_vendor_decision",
+  agent: "vendor",
+  permission: "dispute:close",
+  category: "posting",
+  terminal: true,
+  description:
+    "The vendor's reply settles the dispute. credited: they issued the full disputed credit. denied: they refused it. partial_credit: they offered less AND the controller has since told you to accept it (credit_amount_cents = the amount). Books the outcome through the ledger gateway and closes the work item: a credit reduces the payable; whatever is not credited is charged to the owning project. Optionally emails the vendor a short confirmation in the thread. Ends your run.",
+  schema: z.object({
+    work_item_id: workItemId,
+    message_id: messageId.describe("The vendor message that states the decision or the offer."),
+    decision: z.enum(["credited", "partial_credit", "denied"]),
+    credit_reference: z.string().nullable().describe("The vendor's credit memo number, if they gave one."),
+    credit_amount_cents: z.number().int().nullable().describe("Only for partial_credit: the credit the controller accepted, in cents."),
+    confirmation_message: z.string().nullable().describe("A short note to the vendor confirming what Atlas booked, or null to send nothing."),
+    summary: z.string().describe("One or two sentences on what the vendor decided and why."),
+  }),
+  handler: ({ ctx, run, item }, args) => {
+    const closed = recordVendorDecision(ctx, item, {
+      agentId: run.agentId,
+      messageId: args.message_id,
+      decision: args.decision,
+      creditReference: args.credit_reference,
+      creditCents: args.credit_amount_cents,
+      confirmation: args.confirmation_message,
+    });
+    const credited = closed.outcome === "VENDOR_CREDIT";
+    return {
+      result: { outcome: closed.outcome, journal_entry_id: closed.entryId, dispute_id: closed.dispute.id, amount: formatCents(closed.dispute.amountCents) },
+      title: credited
+        ? "Vendor Liaison booked the vendor's " + formatCents(closed.dispute.creditedCents ?? closed.dispute.amountCents) + " credit and closed " + item.id
+        : "Vendor Liaison booked the upheld charge after the vendor refused, and closed " + item.id,
+      summary: args.summary.trim().slice(0, 500),
+      activityType: "COMPLETED",
+      changes: ["Journal entry " + closed.entryId + " posted", "State: RESOLVED"],
+      terminal: { summary: credited ? "booked vendor credit" : "booked upheld charge" },
+    };
+  },
+});
+
+const askControllerTool = defineTool({
+  name: "ask_controller",
+  agent: "vendor",
+  permission: "dispute:follow_up",
+  category: "write",
+  terminal: true,
+  description:
+    "The vendor proposed something the approval does not cover (a partial credit, a different amount, a payment plan) or asked for something only Atlas staff know (a PO number, a contact, a signature). Ask the controller, with your recommendation. The case stays open with the vendor; you resume when the controller answers. Ends your run.",
+  schema: z.object({
+    work_item_id: workItemId,
+    message_id: messageId,
+    question: z.string().describe("What the controller needs to decide, with the vendor's offer stated exactly."),
+    recommendation: z.string().describe("What you would do and why, in one or two sentences."),
+    kind: z.enum(["counter_offer", "question", "denial", "update"]),
+  }),
+  handler: ({ ctx, run, item }, args) => {
+    const question = args.question.trim();
+    if (question.length < 10) fail("Question is too short.");
+    const asked = askControllerAboutVendor(ctx, item, { agentId: run.agentId, messageId: args.message_id, question, recommendation: args.recommendation, kind: args.kind });
+    return {
+      result: { asked: true, question: asked.question },
+      title: "Vendor Liaison asked the controller how to answer the vendor on " + asked.dispute.id,
+      summary: asked.question,
+      activityType: "APPROVAL_REQUEST",
+      changes: ["Question to controller on " + asked.dispute.id],
+      terminal: { summary: "asked the controller about the vendor's reply" },
+    };
+  },
+});
+
+const noteVendorUpdateTool = defineTool({
+  name: "note_vendor_update",
+  agent: "vendor",
+  permission: "dispute:follow_up",
+  category: "write",
+  terminal: true,
+  description:
+    "The vendor's message needs no answer and decides nothing (an acknowledgement, \"we are reviewing it\", an expected date). Record it and keep waiting. Ends your run.",
+  schema: z.object({ work_item_id: workItemId, message_id: messageId, summary: z.string() }),
+  handler: ({ ctx, run, item }, args) => {
+    const noted = noteVendorUpdate(ctx, item, { agentId: run.agentId, messageId: args.message_id });
+    return {
+      result: { noted: true },
+      title: "Vendor Liaison noted the vendor's update on " + noted.dispute.id + "; still waiting on a decision",
+      summary: args.summary.trim().slice(0, 400),
+      activityType: "DISPUTE",
+      terminal: { summary: "noted the vendor's update" },
+    };
+  },
+});
+
+/* ------------------------------------------------------------------ */
 /* Policy Analyst: onboarding (learn from AP history)                  */
 /* ------------------------------------------------------------------ */
 
@@ -1969,6 +2173,11 @@ export const TOOLS: ToolDefinition[] = [
   getDisputePackage,
   sendVendorDispute,
   closeVendorDispute,
+  getVendorThread,
+  replyToVendorTool,
+  recordVendorDecisionTool,
+  askControllerTool,
+  noteVendorUpdateTool,
   getPostedCharges,
   forecastProjectBurn,
   recordBudgetNote,

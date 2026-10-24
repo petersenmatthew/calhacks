@@ -26,6 +26,7 @@ import {
   providers,
   reconciliations,
   vendorDisputes,
+  vendorMessages,
   workItems,
   workItemTransitions,
 } from "./db/schema";
@@ -206,7 +207,8 @@ export function getDashboard(ctx: AppContext, requestedPeriod?: string | null) {
       outcome: i.outcome,
       updatedAt: i.updatedAt,
       createdAt: i.createdAt,
-      pendingApproval: pending.some((p) => p.workItemId === i.id),
+      // A question from the Vendor Liaison while the case is open with the vendor also waits on you.
+      pendingApproval: pending.some((p) => p.workItemId === i.id) || (i.state === "DISPUTED" && Boolean(i.pendingQuestion)),
     })),
     activity: ctx.db.select().from(activityEvents).orderBy(desc(activityEvents.id)).limit(30).all(),
     agents: getAgentStatuses(ctx),
@@ -324,6 +326,8 @@ export function getWorkspace(ctx: AppContext, id: string) {
     journal: entries.map((e) => ({ ...e, lines: entryLines.filter((l) => l.entryId === e.id) })),
     apOutstandingCents: apOutstanding,
     dispute: ctx.db.select().from(vendorDisputes).where(eq(vendorDisputes.workItemId, id)).get() ?? null,
+    /** Vendor replies and the Vendor Liaison's answers, oldest first. */
+    vendorMessages: ctx.db.select().from(vendorMessages).where(eq(vendorMessages.workItemId, id)).orderBy(asc(vendorMessages.receivedAt)).all(),
     agents: getAgentStatuses(ctx),
     settings: getSettingsView(ctx),
     ...lookups(ctx),

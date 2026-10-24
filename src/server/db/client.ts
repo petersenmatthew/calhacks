@@ -67,5 +67,5 @@ export const ALL_TABLES = [
   "precedents", "ledger_accounts", "journal_entries", "journal_lines", "actors", "ingestion_events",
   "reconciliations", "work_items", "work_item_transitions", "findings", "evidence", "activity_events",
   "agent_runs", "jobs", "proposals", "approval_requests", "policies", "vendor_disputes", "audit_events",
-  "feed_events", "sync_cursors", "follow_ups", "erp_ap_history", "outbox",
+  "feed_events", "sync_cursors", "follow_ups", "erp_ap_history", "outbox", "vendor_messages",
 ] as const;

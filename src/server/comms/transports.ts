@@ -15,7 +15,12 @@ export interface EmailMessage {
   text: string;
   html?: string | null;
   attachments: { filename: string; content: string; contentType: string }[];
+  /** Extra headers, e.g. In-Reply-To and References so a reply stays in the vendor's thread. */
+  headers?: Record<string, string> | null;
 }
+
+/** Set on every email we send, so the inbox poller never mistakes our own letters for vendor replies. */
+export const OUR_HEADER = "X-Atlas-Outbox";
 
 export type Delivery = { status: "sent"; id: string | null } | { status: "simulated" };
 
@@ -29,6 +34,7 @@ export function slackConfigured(ctx: AppContext) {
 
 export async function sendEmail(ctx: AppContext, m: EmailMessage): Promise<Delivery> {
   const c = ctx.config.comms;
+  const headers = { ...(m.headers ?? {}), [OUR_HEADER]: "1" };
   if (c.resendApiKey) {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -40,6 +46,7 @@ export async function sendEmail(ctx: AppContext, m: EmailMessage): Promise<Deliv
         text: m.text,
         ...(m.html ? { html: m.html } : {}),
         ...(c.replyTo ? { reply_to: c.replyTo } : {}),
+        headers,
         attachments: m.attachments.map((a) => ({ filename: a.filename, content: Buffer.from(a.content).toString("base64") })),
       }),
     });
@@ -58,6 +65,7 @@ export async function sendEmail(ctx: AppContext, m: EmailMessage): Promise<Deliv
       text: m.text,
       ...(m.html ? { html: m.html } : {}),
       ...(c.replyTo ? { replyTo: c.replyTo } : {}),
+      headers,
       attachments: m.attachments.map((a) => ({ filename: a.filename, content: a.content, contentType: a.contentType })),
     });
     return { status: "sent", id: info.messageId ?? null };
