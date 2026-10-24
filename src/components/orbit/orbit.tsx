@@ -768,7 +768,7 @@ export function Orbit({
             <YouCard here={Boolean(here)} label={w ? (here ? "your call" : "all clear") : waiting ? waiting + (waiting === 1 ? " needs you" : " need you") : "all clear"} onClick={onYou} />
           </div>
 
-          <HandoffRunner handoffs={handoffs} seats={NODE} center={{ x: CX, y: CY }} radius={R} showMarks={Boolean(w)} hidden={level === "frame"} />
+          <HandoffRunner handoffs={handoffs} seats={NODE} center={{ x: CX, y: CY }} radius={R} hidden={level === "frame"} />
         </div>
       ) : null}
       </div>

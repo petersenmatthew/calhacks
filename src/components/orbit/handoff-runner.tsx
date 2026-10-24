@@ -108,7 +108,6 @@ export function HandoffRunner({
   seats,
   center,
   radius,
-  showMarks,
   hidden,
 }: {
   handoffs: Handoff[];
@@ -116,12 +115,10 @@ export function HandoffRunner({
   center: { x: number; y: number };
   radius: number;
   /** Leave a small envelope on each path that was used, click to replay. */
-  showMarks: boolean;
   hidden: boolean;
 }) {
   const [since] = useState(() => Date.now() - 30_000);
   const [played, setPlayed] = useState<number[]>([]);
-  const [asked, setAsked] = useState<number[]>([]);
   const [current, setCurrent] = useState<{ id: number; at: number } | null>(null);
   const [now, setNow] = useState(0);
   const queue = useRef<number[]>([]);
@@ -175,16 +172,6 @@ export function HandoffRunner({
     return () => cancelAnimationFrame(raf);
   }, [freshKey]);
 
-  // Replays asked for by clicking a mark.
-  useEffect(() => {
-    if (!asked.length) return;
-    const raf = requestAnimationFrame(() => {
-      setAsked([]);
-      enqueueRef.current(asked);
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [asked]);
-
   useEffect(() => {
     if (!current) return;
     let raf = 0;
@@ -205,8 +192,6 @@ export function HandoffRunner({
     const a = (deg * Math.PI) / 180;
     return { x: center.x + r * Math.cos(a), y: center.y + r * Math.sin(a) };
   };
-  // Latest hand-off on each path gets a mark.
-  const marks = showMarks ? [...new Map(handoffs.map((x) => [x.from + ">" + x.to, x])).values()] : [];
 
   let scene: React.ReactNode = null;
   if (h && p && current && !hidden) {
@@ -300,29 +285,6 @@ export function HandoffRunner({
 
   return (
     <div className="pointer-events-none absolute inset-0 z-30">
-      {hidden
-        ? null
-        : marks.map((m) => {
-            if (current?.id === m.id) return null;
-            const mp = plan(m, seats, radius);
-            const q = pt(mp.start + mp.span / 2);
-            return (
-              <button
-                key={m.from + ">" + m.to}
-                type="button"
-                title={m.label + (m.detail ? "\n\n" + m.detail : "") + "\n\nClick to replay"}
-                aria-label={"Replay hand-off: " + m.label}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setAsked((a) => [...a, m.id]);
-                }}
-                className="pointer-events-auto absolute grid size-8 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white text-brand-ink shadow-sm ring-1 ring-zinc-300 transition-transform hover:scale-125 hover:ring-zinc-500"
-                style={{ left: q.x, top: q.y }}
-              >
-                <Mail className="size-4" strokeWidth={2.25} />
-              </button>
-            );
-          })}
       {scene}
     </div>
   );
