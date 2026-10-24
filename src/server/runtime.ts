@@ -72,6 +72,20 @@ function commsFromEnv(): CommsConfig {
   };
 }
 
+/** Lambda's billing runs in Lago when both are set (npm run sandboxes:up). */
+function lagoFromEnv() {
+  const env = process.env;
+  if (!env.LAGO_API_URL || !env.LAGO_API_KEY) return null;
+  return { url: env.LAGO_API_URL, apiKey: env.LAGO_API_KEY, providerId: env.LAGO_PROVIDER_ID || "PRV-HELIOS" };
+}
+
+/** Journal entries are recorded in Odoo when ODOO_URL is set. */
+function odooFromEnv() {
+  const env = process.env;
+  if (!env.ODOO_URL) return null;
+  return { url: env.ODOO_URL, db: env.ODOO_DB || "atlas", user: env.ODOO_USER || "admin", password: env.ODOO_PASSWORD || "admin" };
+}
+
 interface Runtime {
   ctx: AppContext;
   orchestrator: Orchestrator;
@@ -100,6 +114,8 @@ export function getRuntime(): Runtime {
         defaultMode: envMode() ?? (llmAvailable ? "llm" : "deterministic"),
         schedulerIntervalMs: process.env.AUTONOMY === "off" ? 0 : Number(process.env.SCHEDULER_INTERVAL_MS ?? 5000),
         feedUrl: process.env.BILLING_FEED_URL || null,
+        lago: lagoFromEnv(),
+        odoo: odooFromEnv(),
         comms: commsFromEnv(),
         defaultRunMode: process.env.RUN_MODE === "all" ? "all" : "one",
       },

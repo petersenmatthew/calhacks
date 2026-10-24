@@ -257,8 +257,8 @@ export function buildReservationCase(input: ReservationCaseInput): ScenarioData 
   };
 }
 
-/** Write simulated source-system records, then ingest the invoice line. */
-export function ingestCase(ctx: AppContext, data: ScenarioData): IngestionResult {
+/** Write simulated source-system records (scheduler, infrastructure, tracker, meter). */
+export function writeSourceRecords(ctx: AppContext, data: ScenarioData) {
   tx(ctx, () => {
     authorize(ctx, ACTOR.simulator, "environment:simulate");
     if (data.experiments.length) ctx.db.insert(experiments).values(data.experiments).onConflictDoNothing().run();
@@ -281,6 +281,11 @@ export function ingestCase(ctx: AppContext, data: ScenarioData): IngestionResult
       },
     });
   });
+}
+
+/** Write simulated source-system records, then ingest the invoice line. */
+export function ingestCase(ctx: AppContext, data: ScenarioData): IngestionResult {
+  writeSourceRecords(ctx, data);
   return ingestBillingEvent(ctx, data.event);
 }
 

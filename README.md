@@ -13,7 +13,7 @@ Autonomous finance operations for AI research labs. A team of six AI employees r
 
 **Seats it fills:** the GPU accounts-payable accountant who reconciles compute invoices against what actually ran, and the cost accountant who allocates shared cluster spend to research teams.
 
-The fictional lab is **Atlas Research**. All source systems (scheduler, infrastructure controller, provider meters, invoices, ERP) are simulated in SQLite. The agent decisions, approvals, postings, and audit trail are real application state.
+The fictional lab is **Atlas Research**. With the sandboxes running, Lambda's invoices come from a real billing system (Lago) and every posting is recorded in a real ERP (Odoo). Without them, those systems are simulated in SQLite. The scheduler, infrastructure controller, and experiment tracker are always simulated. See [What is real](#proof-it-works).
 
 Work starts on its own: a scheduler syncs provider billing feeds on a cursor, follows up on approvals and vendor disputes as business days pass, and the Policy Analyst learned its first policy by mining six months of AP history. See [What runs on its own](#what-runs-on-its-own) and [Proof it works](#proof-it-works).
 
@@ -35,6 +35,29 @@ Production build:
 npm run build && npm start
 ```
 
+### Real billing and ERP (optional)
+
+Two free, open-source systems run locally in Docker. No accounts needed.
+
+| System | Plays | Open |
+| --- | --- | --- |
+| [Lago](https://getlago.com) | Lambda's usage billing. Issues the invoice, its number, and its PDF. | http://localhost:8090 |
+| [Odoo 18 Community](https://www.odoo.com) | Atlas Research's ERP. Vendor bills, credit notes, journal entries by research team. | http://localhost:8069 (admin / admin) |
+
+```bash
+brew install colima docker docker-compose   # or Docker Desktop
+colima start --cpu 4 --memory 8
+npm run sandboxes:up      # prints the values for .env.local and the Lago login
+npm run sandboxes:check   # end-to-end check against both systems
+```
+
+Then add the printed `LAGO_*` and `ODOO_*` values to `.env.local` and restart `npm run dev`. Stop with `npm run sandboxes:down`; add `-v` to that command to wipe their data.
+
+How it fits together:
+
+- **Lambda bills in Lago.** Each GPU instance is a Lago subscription on a per-GPU-hour plan. When an instance ends, Lambda's meter sends the hours and Lago issues the invoice. The scheduler pulls finalized invoices from Lago's API on a cursor and ingests each GPU-hour fee. A new database starts after the newest invoice, so a demo reset never re-imports old ones.
+- **Postings land in Odoo.** The ledger gateway still decides every posting. After it commits, the scheduler records the entry in Odoo: a vendor invoice becomes a vendor bill with Lambda's PDF attached, a vendor credit becomes a credit note applied to that bill, and an allocation becomes a journal entry tagged with each research team. Failed writes are retried. The audit trail links each entry to its Odoo record.
+
 ## Environment variables
 
 Copy `.env.example` to `.env.local`. All are optional.
@@ -50,6 +73,10 @@ Copy `.env.example` to `.env.local`. All are optional.
 | `SCHEDULER_INTERVAL_MS` | `5000` | How often the scheduler syncs billing feeds and runs follow-up rules. |
 | `AUTONOMY` | on | Set to `off` to disable the scheduler (agents still run when work is queued). |
 | `BILLING_FEED_URL` | unset | Optional external billing feed polled on a cursor: `GET <url>?after=<cursor>` returns `{ events, next_cursor }`. |
+| `LAGO_API_URL`, `LAGO_API_KEY` | unset | Lambda's billing runs in Lago. Printed by `npm run sandboxes:up`. |
+| `LAGO_PROVIDER_ID` | `PRV-HELIOS` (Lambda) | Which provider bills through Lago. |
+| `ODOO_URL` | unset | Record every journal entry in Odoo, e.g. `http://localhost:8069`. |
+| `ODOO_DB`, `ODOO_USER`, `ODOO_PASSWORD` | `atlas`, `admin`, `admin` | Odoo database and login. |
 | `VENDOR_EMAIL` | each provider's billing address | Send every vendor email to this inbox instead (use your own address for the demo). |
 | `RESEND_API_KEY` | unset | Send email through [Resend](https://resend.com). |
 | `SMTP_URL` | unset | Or send through any SMTP server, e.g. `smtps://you%40gmail.com:APP_PASSWORD@smtp.gmail.com:465`. |
@@ -69,7 +96,7 @@ Copy `.env.example` to `.env.local`. All are optional.
 ## Three-minute demo
 
 1. **Work** has two views. **Board** is a Kanban (Investigate, Propose, Needs you, Vendor, Done) where the card an agent is on shows its live steps. **Canvas** puts the six employees on a ring around you. Each one spawns a small frame per piece of work; click an employee to zoom to its frames, and click a frame to zoom in and replay it (the query it ran, the rows it got back, the rules it checked, the letter it wrote).
-2. Click **Simulate billing event**, keep **GPU overbilling**, and send it. Lambda bills 36 h at $100/h for an instance whose lifecycle shows 24 h. Deterministic checks open a work item and assign the Compute Investigator.
+2. Click **Simulate billing event**, keep **GPU overbilling**, and send it. Lambda bills 36 h at $100/h for an instance whose lifecycle shows 24 h. Deterministic checks open a work item and assign the Compute Investigator. With the sandboxes running, the invoice is issued by Lago (open it at http://localhost:8090) and pulled in about a second; the vendor bill, the $2,400 allocation, and later the $1,200 credit note appear in Odoo.
 3. Open the investigation. The **Flow** tab shows each agent's steps and what it gathered; **Log** has every tool call. Watch the Compute Investigator pull the lifecycle, scheduler log, provider meter, and contract, then hand off. The Cost Accountant cites the Lambda precedent and proposes a $1,200 dispute. The chart shows the 12 h billed after termination.
 4. **Approve** the dispute. The Vendor Liaison writes the letter and sends it; the ledger gateway submits it and posts only the supported $2,400. Accounts payable stays at $3,600 until you click **Vendor issues credit**, after which the Vendor Liaison reads the reply, books the credit, and closes the case. The Budget Analyst checks the team's burn after each posting.
 5. Simulate **Shared cluster allocation** ($12,400, two teams). The Capacity Planner reconstructs usage and idle capacity. The Cost Accountant follows written policy v1 (usage split: $6,975 / $5,425) and tries to post it. The ledger gateway denies the posting because v1 conflicts with the reservation terms (a red denied event in the timeline and audit), so the agent requests approval instead.
@@ -182,7 +209,16 @@ All arithmetic is application code: billable hours, expected charges, allocation
 
 ## Proof it works
 
-**What is real:** every agent decision, tool call, approval, policy, journal entry, follow-up, and audit event is application state, enforced by the same gateway in both execution modes. **What is simulated:** the provider feeds, scheduler, infrastructure controller, meters, experiment tracker, ERP, AP history, and vendor portal.
+| Part | Real or simulated |
+| --- | --- |
+| Agent decisions, tool calls, approvals, policies, ledger, audit log | Real application state, enforced by the same gateway in both execution modes |
+| Lambda invoices (number, fees, PDF) | Real, issued by Lago when the sandboxes run. Otherwise simulated |
+| ERP: vendor bills, credit notes, journal entries | Real, recorded in Odoo when the sandboxes run. Otherwise SQLite only |
+| Email to vendors, vendor replies, Slack | Real when configured |
+| CoreWeave and Nebius invoices, provider meters, AP history | Simulated |
+| Scheduler, infrastructure controller, experiment tracker | Simulated |
+
+`npm run sandboxes:check` proves the real path: Lago issues an overbilled and an exact invoice, the app opens a work item for one and auto-matches the other, and every entry is posted in Odoo with Lambda's PDFs attached.
 
 The seeded-case harness scores the agents against an answer key for every case (see [Evaluation](#evaluation)).
 

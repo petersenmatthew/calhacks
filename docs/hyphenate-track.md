@@ -87,8 +87,8 @@ Added for autonomy (see README, "What runs on its own"):
 Remaining gaps:
 
 - **Live LLM:** LLM mode has only been tested with the SDK's scripted model. Run `npm run eval -- --llm` once a key is available; the deterministic score is a check of the plumbing, not of model judgment.
-- **Simulated systems of record:** provider feeds, meters, the ERP and the vendor portal are simulated. Email (with vendor replies read over IMAP) and Slack are real when configured.
+- **Simulated systems of record:** Lambda's billing (Lago) and the ERP (Odoo) are real when the sandboxes run (`npm run sandboxes:up`). CoreWeave and Nebius feeds, meters, and the vendor portal are still simulated. Email (with vendor replies read over IMAP) and Slack are real when configured.
 - **Time across periods:** cases run within one period. Show an earlier decision (for example, a March dispute or correction) changing a later period's outcome.
 - **Judge's own scenario:** no way to enter a new invoice or case live at judging.
-- **Real vs. simulated table:** not written up yet for the submission.
+- **Real vs. simulated table:** in the README under "Proof it works".
 - **Period close:** the ledger is double-entry and append-only, but closed periods are not locked.

@@ -10,6 +10,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "eval": "node --import tsx scripts/eval.ts",
+    "sandboxes:up": "./sandboxes/up.sh",
+    "sandboxes:down": "docker compose -f sandboxes/docker-compose.yml down",
+    "sandboxes:check": "node --import tsx scripts/sandbox-check.ts",
     "db:generate": "drizzle-kit generate",
     "db:reset": "node -e \"require('fs').rmSync('data',{recursive:true,force:true})\""
   },

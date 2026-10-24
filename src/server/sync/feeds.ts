@@ -197,7 +197,7 @@ export function feedStatus(ctx: AppContext) {
       "SELECT source, COUNT(*) AS total, SUM(CASE WHEN publish_at <= ? THEN 1 ELSE 0 END) AS published, MIN(CASE WHEN publish_at > ? THEN publish_at END) AS next_at FROM feed_events GROUP BY source ORDER BY source",
     )
     .all(now, now) as { source: string; total: number; published: number; next_at: string | null }[];
-  return sources.map((s) => {
+  const simulated = sources.map((s) => {
     const c = cursors.find((x) => x.source === s.source);
     return {
       source: s.source,
@@ -211,4 +211,14 @@ export function feedStatus(ctx: AppContext) {
       lastError: c?.lastError ?? null,
     };
   });
+  // Real systems: Lambda's invoices pulled from Lago, and entries recorded in Odoo.
+  const external = [
+    { source: "lago-lambda-billing", label: "Lambda invoices (Lago)" },
+    { source: "odoo-erp", label: "Recorded in Odoo" },
+  ].flatMap(({ source, label }) => {
+    const c = cursors.find((x) => x.source === source);
+    if (!c) return [];
+    return [{ source, label, published: c.totalCount, total: c.totalCount, cursor: c.cursor, syncedAt: c.syncedAt, synced: c.totalCount, nextAt: null, lastError: c.lastError }];
+  });
+  return [...simulated, ...external];
 }

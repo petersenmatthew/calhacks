@@ -48,6 +48,7 @@ export type Permission =
   | "environment:simulate"
   | "clock:advance"
   | "feed:sync"
+  | "erp:record"
   | "followup:create"
   | "dispute:follow_up"
   | "history:read";
@@ -78,7 +79,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   controller: ["workitem:read", "approval:decide", "workitem:respond", "settings:update", "environment:reset", "invoice:ingest", "clock:advance"],
   orchestrator: ["workflow:orchestrate"],
   ingestion: ["invoice:ingest"],
-  erp: ["invoice:record"],
+  erp: ["invoice:record", "erp:record"],
   ledger_gateway: ["ledger:post", "dispute:submit"],
   vendor_portal: ["vendor:respond"],
   simulator: ["environment:simulate"],

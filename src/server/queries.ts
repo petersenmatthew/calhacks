@@ -39,6 +39,7 @@ import { policyFitForWorkItem, POLICY_KEYS } from "./workflow/policies";
 import { businessNowIso, clockOffsetMs } from "./clock";
 import { followUps } from "./db/schema";
 import { feedStatus } from "./sync/feeds";
+import { odooLinks } from "./sync/odoo";
 import { FOLLOW_UP_RULES } from "./workflow/follow-ups";
 import { ONBOARDING_ID } from "./workflow/onboarding";
 
@@ -368,12 +369,26 @@ export function getAuditView(ctx: AppContext) {
   const counts = ctx.sqlite
     .prepare("SELECT outcome, COUNT(*) AS n FROM audit_events GROUP BY outcome")
     .all() as { outcome: string; n: number }[];
+  const links = odooLinks(ctx);
+  const odooUrl = ctx.config.odoo?.url.replace(/\/$/, "") ?? null;
   return {
     events,
     chain: verifyAuditChain(ctx),
     counts: Object.fromEntries(counts.map((c) => [c.outcome, c.n])),
     policies: ctx.db.select().from(policies).orderBy(asc(policies.policyKey), asc(policies.version)).all(),
-    journal: entries.map((e) => ({ ...e, lines: lines.filter((l) => l.entryId === e.id) })),
+    journal: entries.map((e) => {
+      const link = links.find((l) => l.entryId === e.id);
+      return {
+        ...e,
+        lines: lines.filter((l) => l.entryId === e.id),
+        /** The same entry in Odoo, when the ERP is connected. */
+        erp:
+          link && odooUrl
+            ? { status: link.status, name: link.odooName, url: link.odooId ? odooUrl + "/web#model=account.move&view_type=form&id=" + link.odooId : null, error: link.lastError }
+            : null,
+      };
+    }),
+    erpConnected: Boolean(odooUrl),
     trialBalance: trial,
     accounts: ctx.db.select().from(ledgerAccounts).all(),
     ...lookups(ctx),

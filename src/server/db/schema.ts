@@ -627,6 +627,21 @@ export const syncCursors = sqliteTable("sync_cursors", {
   lastError: text("last_error"),
 });
 
+/** The ERP (Odoo) record of each journal entry. One row per entry; failed writes are retried. */
+export const erpLinks = sqliteTable("erp_links", {
+  entryId: text("entry_id").primaryKey(),
+  status: text("status").notNull(), // synced | failed
+  odooModel: text("odoo_model"),
+  odooId: integer("odoo_id"),
+  odooName: text("odoo_name"),
+  kind: text("kind"), // vendor_bill | credit_note | journal_entry
+  /** The provider's invoice PDF on an Odoo vendor bill: attached | pending (provider still rendering). */
+  document: text("document"),
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  syncedAt: text("synced_at").notNull(),
+});
+
 /** Time-based actions the system took on its own (reminders, escalations, vendor chases). One row per key. */
 export const followUps = sqliteTable(
   "follow_ups",

@@ -1,6 +1,8 @@
 import { EventEmitter } from "node:events";
 import type Database from "better-sqlite3";
 import { openDatabase, type DB } from "./db/client";
+import type { LagoConfig } from "./sync/lago";
+import type { OdooConfig } from "./sync/odoo";
 
 export interface AppConfig {
   /** Pause between deterministic agent steps so the live timeline is watchable. */
@@ -15,6 +17,10 @@ export interface AppConfig {
   schedulerIntervalMs: number;
   /** Optional external billing feed polled by the scheduler. */
   feedUrl: string | null;
+  /** Lambda's billing system in Lago. Null: Lambda invoices are simulated. */
+  lago: LagoConfig | null;
+  /** Atlas Research's ERP in Odoo. Null: the ledger stays in SQLite only. */
+  odoo: OdooConfig | null;
   /** Email and Slack delivery. Empty values mean messages stay in the outbox as "simulated". */
   comms: CommsConfig;
   /** "one": the team works one case at a time. "all": cases run in parallel. */
@@ -82,6 +88,8 @@ export function createAppContext(options: { file: string; config?: Partial<AppCo
       defaultMode: options.config?.defaultMode ?? (llmAvailable ? "llm" : "deterministic"),
       schedulerIntervalMs: options.config?.schedulerIntervalMs ?? 0,
       feedUrl: options.config?.feedUrl ?? null,
+      lago: options.config?.lago ?? null,
+      odoo: options.config?.odoo ?? null,
       comms: { ...DEFAULT_COMMS, ...(options.config?.comms ?? {}) },
       defaultRunMode: options.config?.defaultRunMode ?? "all",
     },

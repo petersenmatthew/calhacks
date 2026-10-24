@@ -47,6 +47,8 @@ export const billingEventSchema = z.object({
     serviceStart: z.string(),
     serviceEnd: z.string(),
   }),
+  /** The provider's own invoice document, when the source has one (Lago issues a PDF). */
+  document: z.object({ issuer: z.string(), invoiceId: z.string(), url: z.string().nullable(), subscriptionId: z.string().nullable().optional() }).optional(),
 });
 
 export type BillingEvent = z.infer<typeof billingEventSchema>;

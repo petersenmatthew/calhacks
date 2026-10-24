@@ -244,7 +244,25 @@ function Ledger({ data }: { data: AuditData }) {
                 <summary className="flex cursor-pointer items-center gap-3 text-[12px]">
                   <span className="font-mono text-[11px] text-zinc-500">{entry.id}</span>
                   <span className="min-w-0 flex-1 truncate">{entry.memo}</span>
-                  <span className="hidden text-[11px] text-muted-foreground md:inline">{entry.source === "erp_ap" ? "ERP AP (simulated)" : "Ledger gateway"}</span>
+                  <span className="hidden text-[11px] text-muted-foreground md:inline">
+                    {entry.source === "erp_ap" ? (data.erpConnected ? "Vendor bill" : "ERP AP (simulated)") : "Ledger gateway"}
+                  </span>
+                  {entry.erp?.url ? (
+                    <a
+                      className="font-mono text-[11px] text-brand-ink hover:underline"
+                      href={entry.erp.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      title="Open in Odoo"
+                    >
+                      {entry.erp.name}
+                    </a>
+                  ) : entry.erp?.status === "failed" ? (
+                    <span className="text-[11px] text-destructive" title={entry.erp.error ?? ""}>
+                      Odoo retrying
+                    </span>
+                  ) : null}
                   <span className="font-medium tnum">{money(entry.totalCents)}</span>
                 </summary>
                 <div className="mt-2 space-y-2">

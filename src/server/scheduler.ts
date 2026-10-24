@@ -2,6 +2,8 @@ import { recordActivity } from "./activity";
 import type { AppContext } from "./context";
 import { ACTOR } from "./security/actors";
 import { syncHttpFeed, syncSimulatedFeeds, type SyncSummary } from "./sync/feeds";
+import { syncLagoInvoices } from "./sync/lago";
+import { syncOdoo } from "./sync/odoo";
 import { runFollowUps } from "./workflow/follow-ups";
 import { dispatchOutbox } from "./comms/dispatch";
 import { pollVendorInbox } from "./comms/inbox";
@@ -31,6 +33,14 @@ export async function runScheduledWork(ctx: AppContext, options: { feedUrl?: str
   } catch (error) {
     report(ctx, "Feed sync failed", error);
   }
+  if (ctx.config.lago) {
+    try {
+      const lago = await syncLagoInvoices(ctx, ctx.config.lago);
+      if (lago?.pulled) feeds.push(lago);
+    } catch (error) {
+      report(ctx, "Could not pull invoices from Lago", error);
+    }
+  }
   try {
     followUps = runFollowUps(ctx);
   } catch (error) {
@@ -45,6 +55,13 @@ export async function runScheduledWork(ctx: AppContext, options: { feedUrl?: str
     await dispatchOutbox(ctx);
   } catch (error) {
     report(ctx, "Message delivery failed", error);
+  }
+  if (ctx.config.odoo) {
+    try {
+      await syncOdoo(ctx, ctx.config.odoo, ctx.config.lago);
+    } catch (error) {
+      report(ctx, "Could not record entries in Odoo", error);
+    }
   }
   return { feeds, followUps };
 }

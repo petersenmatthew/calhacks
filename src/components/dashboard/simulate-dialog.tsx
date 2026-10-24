@@ -102,6 +102,8 @@ export function SimulateDialog({ onDone }: { onDone: () => void }) {
         });
       } else if (result.status === "auto_matched") {
         toast.success("Invoice matched the contract-supported charge. Posted " + result.entryId + " under the auto-match policy.");
+      } else if (result.status === "sent_to_provider") {
+        toast.message("Lambda's billing system is issuing the invoice. It will appear when the next sync pulls it.");
       } else {
         toast.message("Duplicate event ignored. No new work item, posting, or dispute was created.");
       }
