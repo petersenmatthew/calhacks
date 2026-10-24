@@ -6,7 +6,7 @@ import { ArrowLeft, ArrowUp, ArrowUpRight, Check, ChevronDown, ChevronUp, Loader
 import { agentSteps, boardStage } from "@/lib/agent-steps";
 import { postJson } from "@/lib/api";
 import { askVerb, buildDecision, outcomeOf, shortTitle } from "@/lib/decision";
-import { money } from "@/lib/format";
+import { compactMoney, dateOnly, money, periodLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { DashboardData, WorkspaceData } from "@/server/queries";
 import { DecisionCard } from "../review/decision-card";
@@ -93,6 +93,86 @@ function Section({ title, count, children, collapsible }: { title: string; count
 
 /* ------------------------------------------------------------------ home */
 
+function Donut({ pct }: { pct: number }) {
+  const r = 17;
+  const c = 2 * Math.PI * r;
+  return (
+    <svg width={44} height={44} viewBox="0 0 44 44" className="shrink-0 -rotate-90">
+      <circle cx={22} cy={22} r={r} fill="none" stroke="#f4f4f5" strokeWidth={5} />
+      <circle cx={22} cy={22} r={r} fill="none" stroke="var(--primary)" strokeWidth={5} strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - Math.min(1, pct))} className="transition-[stroke-dashoffset] duration-700" />
+      <text x={22} y={22} transform="rotate(90 22 22)" textAnchor="middle" dominantBaseline="central" className="fill-zinc-800" style={{ fontSize: 11, fontWeight: 600 }}>
+        {Math.round(pct * 100)}%
+      </text>
+    </svg>
+  );
+}
+
+/** The month at a glance: how far close has come, who closed it, and where each project's compute spend is heading. */
+function Books({ data }: { data: DashboardData }) {
+  const m = data.metrics;
+  const b = data.budgets;
+  if (!m.lineCount) return null;
+  const byYou = Math.max(0, m.completedReconciliations - m.autoMatched);
+  return (
+    <div className="mt-5 space-y-2 px-2.5">
+      <div className="flex items-center gap-3 rounded-xl bg-white p-3 ring-1 ring-zinc-200">
+        <Donut pct={m.completedReconciliations / m.lineCount} />
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-medium text-zinc-800">{periodLabel(data.period, true)} close</div>
+          <div className="text-[12px] text-zinc-500 tnum">
+            {m.completedReconciliations} of {m.lineCount} lines closed · target {dateOnly(m.monthClose.target + "T00:00:00Z")}
+          </div>
+          <div className="mt-1 flex gap-3 text-[11.5px] text-zinc-500 tnum">
+            <span className="flex items-center gap-1">
+              <span className="size-1.5 rounded-full bg-primary" />
+              {m.autoMatched} by agents
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="size-1.5 rounded-full bg-brand-ink" />
+              {byYou} after your review
+            </span>
+          </div>
+        </div>
+      </div>
+      {b.projects.length ? (
+        <div className="rounded-xl bg-white p-3 ring-1 ring-zinc-200">
+          <div className="flex items-baseline justify-between">
+            <span className="text-[13px] font-medium text-zinc-800">Compute budgets</span>
+            <span className="text-[11.5px] text-zinc-400 tnum">
+              Day {b.elapsed} of {b.daysInMonth}
+            </span>
+          </div>
+          <ul className="mt-2 space-y-2">
+            {b.projects.map((p) => {
+              const max = Math.max(p.budget, p.projected, 1);
+              const tone = p.projected > p.budget ? "bad" : p.projected > p.budget * 0.9 ? "warn" : "ok";
+              return (
+                <li key={p.id} title={compactMoney(p.posted) + " posted, on pace for " + compactMoney(p.projected) + " of " + compactMoney(p.budget)}>
+                  <div className="flex justify-between gap-2 text-[12px]">
+                    <span className="truncate text-zinc-700">{p.name}</span>
+                    <span className={cn("shrink-0 tnum", tone === "bad" ? "text-destructive" : tone === "warn" ? "text-amber-700" : "text-zinc-600")}>
+                      {compactMoney(p.projected)}
+                      <span className="text-zinc-400"> / {compactMoney(p.budget)}</span>
+                    </span>
+                  </div>
+                  <div className="relative mt-1 h-1.5 rounded-full bg-zinc-100">
+                    <div className="absolute inset-y-0 left-0 rounded-full bg-zinc-200" style={{ width: (p.projected / max) * 100 + "%" }} />
+                    <div
+                      className={cn("absolute inset-y-0 left-0 rounded-full", tone === "bad" ? "bg-red-500" : tone === "warn" ? "bg-amber-400" : "bg-primary")}
+                      style={{ width: (p.posted / max) * 100 + "%" }}
+                    />
+                    <div className="absolute -inset-y-0.5 w-px bg-zinc-500" style={{ left: (p.budget / max) * 100 + "%" }} />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function Home({ data, items, onOpen, onStart }: { data: DashboardData; items: Item[]; onOpen: (id: string) => void; onStart: () => void }) {
   const needs = items.filter((i) => groupOf(i) === "needs");
   const moving = items.filter((i) => groupOf(i) === "moving");
@@ -127,6 +207,7 @@ function Home({ data, items, onOpen, onStart }: { data: DashboardData; items: It
           </button>
         ) : null}
       </div>
+      <Books data={data} />
       <div className="mt-6">
         <Section title="Needs you" count={needs.length}>
           {needs.map((i) => (
@@ -227,7 +308,18 @@ function Linked({ text, onTask }: { text: string; onTask: (id: string) => void }
   );
 }
 
-function Thread({ messages, pending, onTask }: { messages: ChatMessage[]; pending: boolean; onTask: (id: string) => void }) {
+function Thread({
+  messages,
+  pending,
+  onTask,
+  speaker,
+}: {
+  messages: ChatMessage[];
+  pending: boolean;
+  onTask: (id: string) => void;
+  /** Who answers, when it is one employee rather than the assistant. */
+  speaker?: { actorId: string; name: string };
+}) {
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
     end.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -241,6 +333,12 @@ function Thread({ messages, pending, onTask }: { messages: ChatMessage[]; pendin
           </div>
         ) : (
           <div key={i} className="animate-enter text-[13.5px] leading-relaxed whitespace-pre-wrap text-zinc-800">
+            {speaker ? (
+              <div className="mb-1 flex items-center gap-1.5 text-[12px] font-medium text-zinc-500">
+                <AgentAvatar actorId={speaker.actorId} size="sm" />
+                {speaker.name}
+              </div>
+            ) : null}
             <Linked text={m.content} onTask={onTask} />
           </div>
         ),
@@ -303,6 +401,106 @@ function Composer({ placeholder, onSend, disabled }: { placeholder: string; onSe
 
 const SUGGESTIONS = ["What is blocking close?", "Where are we overbilled most?"];
 
+/** The frame the controller opened, and the employee who made it. */
+export type FrameChatTarget = {
+  /** Tagged frame id, unique across tasks; chats are kept per frame. */
+  key: string;
+  taskId: string;
+  /** Untagged frame id as the server builds it. */
+  frameId: string;
+  actorId: string;
+  agentName: string;
+  job: string;
+  label: string;
+  title: string;
+  tone: "ok" | "warn" | "denied" | "live";
+};
+
+const FRAME_TONE_DOT: Record<FrameChatTarget["tone"], string> = {
+  ok: "bg-emerald-500",
+  warn: "bg-amber-400",
+  denied: "bg-red-500",
+  live: "bg-primary animate-pulse",
+};
+
+function frameSuggestions(f: FrameChatTarget) {
+  if (f.tone === "denied") return ["Why was this blocked?", "What happens next?"];
+  if (f.tone === "live") return ["What are you doing right now?", "What have you found so far?"];
+  return ["Walk me through this", "Where do these numbers come from?", "What would change your call?"];
+}
+
+/** Talk to the employee who made the open frame, about that frame. */
+function FrameChat({
+  f,
+  messages,
+  pending,
+  onAsk,
+  onClose,
+  onTask,
+}: {
+  f: FrameChatTarget;
+  messages: ChatMessage[];
+  pending: boolean;
+  onAsk: (text: string) => void;
+  onClose: () => void;
+  onTask: (id: string) => void;
+}) {
+  return (
+    <>
+      <div className="flex h-12 shrink-0 items-center gap-1 border-b border-zinc-100 px-3">
+        <button
+          type="button"
+          onClick={onClose}
+          className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[12.5px] font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
+        >
+          <ArrowLeft className="size-3.5" />
+          Back to task
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="px-5 pt-5">
+          <div className="flex items-center gap-3">
+            <AgentAvatar actorId={f.actorId} size="lg" />
+            <div className="min-w-0">
+              <div className="text-[15px] font-semibold text-zinc-900">{f.agentName}</div>
+              <div className="text-[12.5px] text-zinc-500">{f.job}</div>
+            </div>
+          </div>
+          <div className="mt-4 rounded-xl bg-zinc-50 px-3.5 py-3 ring-1 ring-zinc-100">
+            <div className="flex items-center gap-1.5 text-[11.5px] font-medium text-zinc-500">
+              <span className={cn("size-1.5 rounded-full", FRAME_TONE_DOT[f.tone])} />
+              {f.label}
+            </div>
+            <div className="mt-1 text-[13.5px] leading-snug font-medium text-zinc-800">{f.title}</div>
+          </div>
+        </div>
+        {messages.length ? (
+          <Thread messages={messages} pending={pending} onTask={onTask} speaker={{ actorId: f.actorId, name: f.agentName }} />
+        ) : (
+          <p className="px-5 pt-5 text-[13px] leading-relaxed text-zinc-500">Ask about this frame. {f.agentName.split(" ")[0]} answers from the records behind it.</p>
+        )}
+      </div>
+      <div className="shrink-0 px-3 pt-2 pb-3">
+        {!messages.length ? (
+          <div className="mb-2 flex flex-wrap gap-1.5 px-0.5">
+            {frameSuggestions(f).map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => onAsk(s)}
+                className="rounded-full px-2.5 py-1 text-[12px] text-zinc-500 ring-1 ring-zinc-200 transition-colors hover:bg-zinc-50 hover:text-zinc-800"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <Composer placeholder={"Ask " + f.agentName + " about this"} onSend={onAsk} disabled={pending} />
+      </div>
+    </>
+  );
+}
+
 /* ------------------------------------------------------------------ sidebar */
 
 /**
@@ -317,6 +515,8 @@ export function Sidebar({
   onTask,
   onDecided,
   agentPanel,
+  frameChat,
+  onCloseFrame,
 }: {
   data: DashboardData;
   items: Item[];
@@ -327,10 +527,15 @@ export function Sidebar({
   onDecided: () => void;
   /** Rendered instead of everything else when a seat on the ring is focused. */
   agentPanel?: ReactNode;
+  /** The open frame: the sidebar becomes a chat with the employee who made it. */
+  frameChat?: FrameChatTarget;
+  onCloseFrame?: () => void;
 }) {
   const [chat, setChat] = useState<ChatMessage[]>([]);
   const [chatOpen, setChatOpen] = useState(false);
   const [pending, setPending] = useState(false);
+  const [frameChats, setFrameChats] = useState<Record<string, ChatMessage[]>>({});
+  const [framePending, setFramePending] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
 
   const needs = items.filter((i) => groupOf(i) === "needs");
@@ -379,13 +584,39 @@ export function Sidebar({
   };
 
   const ready = w && w.item.id === task ? w : undefined;
-  const mode = agentPanel ? "agent" : chatOpen ? "chat" : task ? "task" : "home";
+  const mode = frameChat ? "frame" : agentPanel ? "agent" : chatOpen ? "chat" : task ? "task" : "home";
+
+  const askFrame = async (f: FrameChatTarget, text: string) => {
+    const next = [...(frameChats[f.key] ?? []), { role: "user" as const, content: text }];
+    setFrameChats((m) => ({ ...m, [f.key]: next }));
+    setFramePending(f.key);
+    let reply: string;
+    try {
+      reply = (await postJson<{ reply: string }>("/api/assistant", { messages: next, taskId: f.taskId, frameId: f.frameId })).reply;
+    } catch (e) {
+      reply = "Something went wrong: " + (e as Error).message;
+    }
+    setFrameChats((m) => ({ ...m, [f.key]: [...(m[f.key] ?? []), { role: "assistant", content: reply }] }));
+    setFramePending((k) => (k === f.key ? null : k));
+  };
 
   const btn = "grid size-7 place-items-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 disabled:pointer-events-none disabled:opacity-30";
 
   return (
     <aside className="flex h-full w-[380px] shrink-0 flex-col border-l border-zinc-200/80 bg-white" onClick={(e) => e.stopPropagation()}>
-      {mode === "agent" ? (
+      {mode === "frame" && frameChat ? (
+        <FrameChat
+          f={frameChat}
+          messages={frameChats[frameChat.key] ?? []}
+          pending={framePending === frameChat.key}
+          onAsk={(t) => askFrame(frameChat, t)}
+          onClose={() => onCloseFrame?.()}
+          onTask={(id) => {
+            onCloseFrame?.();
+            onTask(id);
+          }}
+        />
+      ) : mode === "agent" ? (
         <div className="min-h-0 flex-1 overflow-y-auto">{agentPanel}</div>
       ) : (
         <>

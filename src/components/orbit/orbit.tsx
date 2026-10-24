@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { ArrowLeft, ChevronLeft, ChevronRight, LoaderCircle, RotateCcw, X } from "lucide-react";
 import { boardStage } from "@/lib/agent-steps";
 import { type Frame, type OrbitNodeId } from "@/lib/frames";
 import { cn } from "@/lib/utils";
 import type { DashboardData, WorkspaceData } from "@/server/queries";
 import { AgentAvatar } from "../status";
-import { DH, DW, FrameView } from "./frame-view";
+import { buildTime, DH, DW, FrameView } from "./frame-view";
 
 /* ------------------------------------------------------------------ geometry */
 
@@ -23,6 +23,63 @@ const FH = 96;
 const GAP = 14;
 const REACH = 40;
 const INNER = FW / DW;
+
+/** Frames created this recently before the canvas opened, or any time after, build in one at a time. */
+const FRESH_MS = 30_000;
+/** Wait before the next new frame starts building. Shorter when several are queued. */
+const NEXT_MS = 2200;
+const NEXT_BUSY_MS = 700;
+/** Lets the spawn pop finish before the frame starts filling in. */
+const BUILD_DELAY = 350;
+
+/**
+ * New frames enter one at a time and fill in on the card, so a burst of records
+ * written in one request (a billing event and its rule checks) reads as a sequence.
+ */
+function useStagedFrames(frames: Frame[]) {
+  const [since] = useState(() => Date.now() - FRESH_MS);
+  const [revealed, setRevealed] = useState<Record<string, true>>({});
+  const [building, setBuilding] = useState<Record<string, true>>({});
+  const lastAt = useRef(0);
+  const timers = useRef<number[]>([]);
+
+  const pending = frames
+    .filter((f) => f.tone !== "live" && !revealed[f.id] && Date.parse(f.createdAt) > since)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  // Live refreshes rebuild frame objects, so the timer keys on the id and duration.
+  const headId = pending[0]?.id;
+  const headTime = pending[0] ? buildTime(pending[0].spec) : 0;
+  const backlog = pending.length;
+
+  useEffect(() => {
+    if (!headId) return;
+    const wait = Math.max(0, lastAt.current + (backlog > 2 ? NEXT_BUSY_MS : NEXT_MS) - Date.now());
+    const id = window.setTimeout(() => {
+      lastAt.current = Date.now();
+      setRevealed((r) => ({ ...r, [headId]: true }));
+      setBuilding((b) => ({ ...b, [headId]: true }));
+      const done = window.setTimeout(() => {
+        setBuilding((b) => {
+          const next = { ...b };
+          delete next[headId];
+          return next;
+        });
+      }, BUILD_DELAY + headTime);
+      timers.current.push(done);
+    }, wait);
+    return () => window.clearTimeout(id);
+  }, [headId, headTime, backlog]);
+
+  useEffect(() => {
+    const list = timers.current;
+    return () => list.forEach((t) => window.clearTimeout(t));
+  }, []);
+
+  const hidden = new Set(pending.map((f) => f.id));
+  // The working indicator waits until the records it works from have appeared.
+  const visible = frames.filter((f) => !hidden.has(f.id) && !(f.tone === "live" && backlog > 0));
+  return { visible, building };
+}
 
 type Layout = "up" | "down" | "left" | "right";
 
@@ -245,24 +302,44 @@ function FrameCard({
   x,
   y,
   focused,
+  building,
   k,
   dim,
   lit,
   replay,
   onOpen,
   onHover,
+  onMeasure,
 }: {
   frame: Frame;
   x: number;
   y: number;
   focused: boolean;
+  /** Newly arrived: fill in on the card instead of appearing finished. */
+  building: boolean;
   k: number;
   dim: boolean;
   lit: boolean;
   replay: number;
   onOpen: () => void;
   onHover: (on: boolean) => void;
+  /** Reports the frame's full content height (in frame units) so a focused frame can show all of it. */
+  onMeasure: (id: string, h: number) => void;
 }) {
+  const inner = useRef<HTMLDivElement>(null);
+  const [contentH, setContentH] = useState(DH);
+  const id = frame.id;
+  useEffect(() => {
+    const el = inner.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      const h = Math.max(DH, el.scrollHeight);
+      setContentH(h);
+      onMeasure(id, h);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [onMeasure, id]);
   return (
     <div
       role="button"
@@ -279,7 +356,7 @@ function FrameCard({
       onMouseEnter={() => onHover(true)}
       onMouseLeave={() => onHover(false)}
       className={cn(
-        "orbit-spawn absolute overflow-hidden bg-white transition-opacity duration-500 outline-none",
+        "orbit-spawn absolute overflow-hidden bg-white transition-[opacity,height] duration-500 outline-none",
         !focused && "cursor-zoom-in rounded-[10px] shadow-[0_1px_2px_rgb(0_0_0/0.05),0_6px_16px_rgb(0_0_0/0.06)] ring-1 ring-zinc-200 hover:ring-zinc-400 focus-visible:ring-2 focus-visible:ring-primary",
         !focused && lit && "ring-zinc-400",
         !focused && frame.tone === "live" && "ring-2 ring-primary",
@@ -289,14 +366,21 @@ function FrameCard({
         left: x,
         top: y,
         width: FW,
-        height: FH,
+        height: focused ? contentH * INNER : FH,
         opacity: dim ? 0.12 : 1,
         zIndex: focused ? 50 : 10,
         ...(focused ? { borderRadius: 16 / k, boxShadow: "0 0 0 " + 1 / k + "px rgb(212 212 216), 0 " + 16 / k + "px " + 48 / k + "px rgb(0 0 0 / 0.14)" } : null),
       }}
     >
-      <div style={{ width: DW, height: DH, transform: "scale(" + INNER + ")", transformOrigin: "0 0" }}>
-        <FrameView key={focused ? "play-" + replay : "still"} spec={frame.spec} play={focused} delay={focused ? 700 : 0} scroll={focused} />
+      <div ref={inner} style={{ width: DW, transform: "scale(" + INNER + ")", transformOrigin: "0 0" }}>
+        <FrameView
+          key={focused && replay ? "play-" + replay : "still"}
+          spec={frame.spec}
+          play={building || (focused && replay > 0)}
+          delay={building ? BUILD_DELAY : 300}
+          fit
+          open={focused}
+        />
       </div>
       <div
         className={cn(
@@ -363,11 +447,14 @@ export function Orbit({
   const { ref, size } = useViewport();
   const [hover, setHover] = useState<OrbitNodeId | null>(null);
   const [replay, setReplay] = useState(0);
+  const [heights, setHeights] = useState<Record<string, number>>({});
+  const measure = useCallback((id: string, h: number) => setHeights((m) => (m[id] === h ? m : { ...m, [id]: h })), []);
+  const { visible, building } = useStagedFrames(frames);
 
   // Lay out the newest frames for each node.
   const placed = new Map<string, { frame: Frame; x: number; y: number }>();
   const groups = NODES.map((n) => {
-    const all = frames.filter((f) => f.node === n.id);
+    const all = visible.filter((f) => f.node === n.id);
     const shown = all.slice(-MAX_FRAMES);
     const pos = slots(n.id, shown.length || 2);
     shown.forEach((f, i) => placed.set(f.id, { frame: f, ...pos[i] }));
@@ -375,6 +462,14 @@ export function Orbit({
   });
 
   const focusedFrame = focus?.kind === "frame" ? placed.get(focus.id) : undefined;
+  // Replay is per visit: opening another frame shows it finished.
+  const [replayFor, setReplayFor] = useState<string | null>(null);
+  const focusedId = focusedFrame?.frame.id ?? null;
+  if (focusedId !== replayFor) {
+    setReplayFor(focusedId);
+    setReplay(0);
+  }
+  const focusH = focusedFrame ? Math.max(DH, heights[focusedFrame.frame.id] ?? DH) * INNER : FH;
   const focusNode: OrbitNodeId | null = focus?.kind === "node" ? focus.id : (focusedFrame?.frame.node ?? null);
   const level: "all" | "node" | "frame" = focusedFrame ? "frame" : focusNode ? "node" : "all";
 
@@ -391,11 +486,9 @@ export function Orbit({
   const fit = size.w && size.h ? Math.min(size.w / (bx1 - bx0), size.h / (by1 - by0)) : 1;
   let cam = { x: (bx0 + bx1) / 2, y: (by0 + by1) / 2, k: fit };
   if (focusedFrame) {
-    cam = {
-      x: focusedFrame.x + FW / 2,
-      y: focusedFrame.y + FH / 2,
-      k: Math.min((0.72 * size.w) / FW, (0.82 * size.h) / FH, 1.25 / INNER),
-    };
+    // Leave room for the breadcrumb bar above and the step controls below.
+    const k = Math.min((0.72 * size.w) / FW, (size.h - 150) / focusH, 1.25 / INNER);
+    cam = { x: focusedFrame.x + FW / 2, y: focusedFrame.y + focusH / 2 - 20 / k, k };
   } else if (focusNode) {
     const g = groups.find((x) => x.node.id === focusNode)!;
     const p = at(g.node.angle);
@@ -522,11 +615,13 @@ export function Orbit({
                     y={g.pos[i].y}
                     k={cam.k}
                     focused={focusedFrame?.frame.id === f.id}
+                    building={Boolean(building[f.id])}
                     dim={level === "frame" ? focusedFrame?.frame.id !== f.id : dimNode(g.node.id)}
                     lit={lit(g.node.id)}
                     replay={replay}
                     onOpen={() => setFocus({ kind: "frame", id: f.id })}
                     onHover={hoverOn(g.node.id)}
+                    onMeasure={measure}
                   />
                 ))
               : ghosts

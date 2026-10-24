@@ -7,7 +7,7 @@ import { fetcher } from "@/lib/api";
 import { buildDecision, shortTitle } from "@/lib/decision";
 import { buildFrames, type Frame } from "@/lib/frames";
 import type { DashboardData, WorkspaceData } from "@/server/queries";
-import { groupOf, Sidebar } from "../canvas/sidebar";
+import { groupOf, Sidebar, type FrameChatTarget } from "../canvas/sidebar";
 import { useLiveRefresh } from "../live-events";
 import { AgentPanel } from "../orbit/agent-panel";
 import { EMPLOYEES, Orbit, type Focus } from "../orbit/orbit";
@@ -18,7 +18,7 @@ const RECENT = 8;
 
 /** Frames from several tasks share one canvas, so their ids carry the task id. */
 function tagged(w: WorkspaceData): Frame[] {
-  return buildFrames(w).map((f) => ({ ...f, id: w.item.id + ":" + f.id }));
+  return buildFrames(w).map((f) => ({ ...f, id: w.item.id + ":" + f.id, members: f.members?.map((m) => w.item.id + ":" + m) }));
 }
 
 async function fetchMany([, ...ids]: string[]) {
@@ -64,6 +64,22 @@ export function SystemCanvas({ data, initialTask = null, onChanged }: { data: Da
 
   const current = task ? items.find((i) => i.id === task) : undefined;
   const seat = focus?.kind === "node" ? EMPLOYEES.find((e) => e.id === focus.id) : undefined;
+  const openFrame = focus?.kind === "frame" ? frames.find((f) => f.id === focus.id) : undefined;
+  const frameSeat = openFrame ? EMPLOYEES.find((e) => e.id === openFrame.node) : undefined;
+  const frameChat: FrameChatTarget | undefined =
+    openFrame && frameSeat
+      ? {
+          key: openFrame.id,
+          taskId: openFrame.id.slice(0, openFrame.id.indexOf(":")),
+          frameId: openFrame.id.slice(openFrame.id.indexOf(":") + 1),
+          actorId: frameSeat.actorId,
+          agentName: data.actors[frameSeat.actorId]?.name ?? frameSeat.label,
+          job: frameSeat.job,
+          label: openFrame.label,
+          title: openFrame.spec.title,
+          tone: openFrame.tone,
+        }
+      : undefined;
 
   const next = () => {
     const needs = items.filter((i) => groupOf(i) === "needs");
@@ -101,6 +117,8 @@ export function SystemCanvas({ data, initialTask = null, onChanged }: { data: Da
         task={task}
         w={w}
         onTask={setTask}
+        frameChat={frameChat}
+        onCloseFrame={() => setFocus(null)}
         onDecided={async () => {
           onChanged();
           // One at a time: stay on this case to watch it finish.
@@ -122,8 +140,9 @@ export function SystemCanvas({ data, initialTask = null, onChanged }: { data: Da
               onOpenTask={setTask}
               openOutput={(activityId, workItemId) => {
                 const id = workItemId + ":act-" + activityId;
-                if (!frames.some((f) => f.id === id)) return false;
-                setFocus({ kind: "frame", id });
+                const hit = frames.find((f) => f.id === id || f.members?.includes(id));
+                if (!hit) return false;
+                setFocus({ kind: "frame", id: hit.id });
                 return true;
               }}
             />
