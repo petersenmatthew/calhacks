@@ -65,37 +65,100 @@ export async function sendEmail(ctx: AppContext, m: EmailMessage): Promise<Deliv
   return { status: "simulated" };
 }
 
+export function slackUserId(ctx: AppContext, handle: string) {
+  const ids = ctx.config.comms.slackUserIds;
+  return ids[handle] ?? ids["*"] ?? null;
+}
+
 /** Turn <@handle> into a real Slack mention when the user id is known, else the person's name. */
 export function renderMentions(ctx: AppContext, text: string) {
   return text.replace(/<@([a-z]+)>/g, (_, handle: string) => {
-    const id = ctx.config.comms.slackUserIds[handle];
+    const id = slackUserId(ctx, handle);
     if (id) return "<@" + id + ">";
     return "@" + (PEOPLE.find((p) => p.handle === handle)?.name ?? handle);
   });
+}
+
+export class SlackError extends Error {
+  constructor(
+    public code: string,
+    public needed?: string,
+  ) {
+    super(
+      code === "missing_scope"
+        ? "Slack app is missing the " + needed + " scope. Add it under OAuth & Permissions, then reinstall the app."
+        : code === "invalid_auth" || code === "not_authed"
+          ? "SLACK_BOT_TOKEN is not valid for any workspace. Copy the Bot User OAuth Token (xoxb-...) again."
+          : code === "not_in_channel"
+            ? "The bot is not in that channel. Add the chat:write.public scope, or /invite @Ledger in the channel."
+            : "Slack: " + code,
+    );
+  }
+}
+
+/** Call a Slack Web API method with the bot token. Returns the parsed body and the token's scopes. */
+export async function slackApi(ctx: AppContext, method: string, body: Record<string, unknown> = {}) {
+  const res = await fetch("https://slack.com/api/" + method, {
+    method: "POST",
+    headers: { Authorization: "Bearer " + ctx.config.comms.slackBotToken, "Content-Type": "application/json; charset=utf-8" },
+    body: JSON.stringify(body),
+  });
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown> & { ok?: boolean; error?: string; needed?: string };
+  if (!json.ok) throw new SlackError(json.error ?? "http_" + res.status, json.needed);
+  return { json, scopes: (res.headers.get("x-oauth-scopes") ?? "").split(",").map((s) => s.trim()).filter(Boolean) };
+}
+
+const channelIds = new Map<string, string>();
+
+/**
+ * Find a channel's id by name, creating it if it does not exist yet (needs
+ * channels:read and channels:manage), and make sure the bot is in it.
+ */
+export async function resolveSlackChannel(ctx: AppContext, name: string, create = true): Promise<{ id: string; created: boolean }> {
+  const clean = name.replace(/^#/, "");
+  if (/^[CG][A-Z0-9]{6,}$/.test(clean)) return { id: clean, created: false };
+  const cached = channelIds.get(clean);
+  if (cached) return { id: cached, created: false };
+  let cursor: string | undefined;
+  do {
+    const { json } = await slackApi(ctx, "conversations.list", { types: "public_channel,private_channel", exclude_archived: true, limit: 1000, cursor });
+    for (const ch of (json.channels as { id: string; name: string; is_member?: boolean }[]) ?? []) {
+      channelIds.set(ch.name, ch.id);
+      if (ch.name === clean && !ch.is_member) {
+        await slackApi(ctx, "conversations.join", { channel: ch.id }).catch(() => undefined);
+      }
+    }
+    cursor = (json.response_metadata as { next_cursor?: string } | undefined)?.next_cursor || undefined;
+  } while (cursor && !channelIds.has(clean));
+  const found = channelIds.get(clean);
+  if (found) return { id: found, created: false };
+  if (!create) throw new SlackError("channel_not_found");
+  const { json } = await slackApi(ctx, "conversations.create", { name: clean });
+  const id = (json.channel as { id: string }).id;
+  channelIds.set(clean, id);
+  const people = [...new Set(Object.values(ctx.config.comms.slackUserIds))];
+  if (people.length) await slackApi(ctx, "conversations.invite", { channel: id, users: people.join(",") }).catch(() => undefined);
+  return { id, created: true };
 }
 
 export async function sendSlack(ctx: AppContext, destination: string, text: string): Promise<Delivery> {
   const c = ctx.config.comms;
   const rendered = renderMentions(ctx, text);
   if (c.slackBotToken) {
-    let channel = destination;
+    let channel: string;
     let body = rendered;
     if (destination.startsWith("@")) {
-      const id = c.slackUserIds[destination.slice(1)];
+      const id = slackUserId(ctx, destination.slice(1));
       if (id) channel = id;
       else {
-        channel = c.slackDmFallbackChannel;
+        channel = (await resolveSlackChannel(ctx, c.slackDmFallbackChannel)).id;
         body = "_(DM for " + renderMentions(ctx, "<@" + destination.slice(1) + ">") + ")_ " + rendered;
       }
+    } else {
+      channel = (await resolveSlackChannel(ctx, destination)).id;
     }
-    const res = await fetch("https://slack.com/api/chat.postMessage", {
-      method: "POST",
-      headers: { Authorization: "Bearer " + c.slackBotToken, "Content-Type": "application/json; charset=utf-8" },
-      body: JSON.stringify({ channel: channel.replace(/^#/, ""), text: body, unfurl_links: false }),
-    });
-    const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; ts?: string };
-    if (!json.ok) throw new Error("Slack: " + (json.error ?? res.status));
-    return { status: "sent", id: json.ts ?? null };
+    const { json } = await slackApi(ctx, "chat.postMessage", { channel, text: body, unfurl_links: false });
+    return { status: "sent", id: (json.ts as string) ?? null };
   }
   if (c.slackWebhookUrl) {
     const res = await fetch(c.slackWebhookUrl, {
@@ -107,4 +170,20 @@ export async function sendSlack(ctx: AppContext, destination: string, text: stri
     return { status: "sent", id: null };
   }
   return { status: "simulated" };
+}
+
+/** Check the mail server connection and login without sending anything. */
+export async function verifyEmail(ctx: AppContext): Promise<{ mode: string; ok: boolean; detail: string }> {
+  const c = ctx.config.comms;
+  if (c.smtpUrl) {
+    try {
+      const nodemailer = await import("nodemailer");
+      await nodemailer.createTransport(c.smtpUrl).verify();
+      return { mode: "smtp", ok: true, detail: "Logged in to " + new URL(c.smtpUrl).hostname };
+    } catch (e) {
+      return { mode: "smtp", ok: false, detail: e instanceof Error ? e.message : String(e) };
+    }
+  }
+  if (c.resendApiKey) return { mode: "resend", ok: true, detail: "Resend key set (checked on first send)" };
+  return { mode: "none", ok: false, detail: "Set SMTP_URL or RESEND_API_KEY in .env.local" };
 }

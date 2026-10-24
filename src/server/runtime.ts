@@ -8,6 +8,8 @@ import { isSeeded, seedEnvironment, upgradeEnvironment } from "./sim/seed";
 
 function parseUserIds(raw: string | undefined): Record<string, string> {
   if (!raw) return {};
+  // A single member id means "send every mention and DM to this person" (handy for a one-person demo workspace).
+  if (/^[UW][A-Z0-9]+$/.test(raw.trim())) return { "*": raw.trim() };
   try {
     const parsed = JSON.parse(raw) as Record<string, string>;
     return typeof parsed === "object" && parsed ? parsed : {};
