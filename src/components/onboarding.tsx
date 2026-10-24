@@ -3,9 +3,10 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowRight, LoaderCircle, X } from "lucide-react";
+import { X } from "lucide-react";
 import { postJson } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { FLOWER_COLORS, Flower, MeadowStrip } from "./landing/meadow";
+import { PixelAgent } from "./pixel-agent";
 
 const SEEN_KEY = "moa-onboarded-v1";
 
@@ -27,17 +28,16 @@ function markSeen() {
 }
 
 const STEPS = [
-  { title: "Start a case", body: "A Lambda invoice arrives that billed 12 GPU hours after the instance was shut down." },
-  { title: "Watch, then decide", body: "The agents investigate on the canvas and ask you to approve a $1,200 dispute." },
-  {
-    title: "Play the vendor",
-    body: "On the task, paste a reply like “We’ve issued credit memo CM-1042 for $1,200.00” and watch the case close.",
-  },
+  { title: "Start a case", body: "A Lambda bill charged 12 GPU hours after the instance was shut down." },
+  { title: "Watch, then decide", body: "The team digs in on the canvas and asks you to approve a $1,200 dispute." },
+  { title: "Play the vendor", body: "On the task, paste \u201cWe\u2019ve issued credit memo CM-1042 for $1,200.00\u201d and watch it close." },
 ];
 
+const CREW = ["agent.capacity", "agent.compute", "agent.finance", "you", "agent.vendor", "agent.budget", "agent.policy"];
+
 /**
- * A one-screen intro for first-time visitors (judges): what MOA is, what to
- * click, and a button that starts the sample case and opens it on the canvas.
+ * A one-screen intro for first-time visitors (judges): a little meadow with the
+ * team in it, three flower-bulleted steps, and a button that starts the sample case.
  */
 export function Onboarding({ open, publicDemo, onClose, onStarted }: { open: boolean; publicDemo: boolean; onClose: () => void; onStarted: () => void }) {
   const router = useRouter();
@@ -64,54 +64,65 @@ export function Onboarding({ open, publicDemo, onClose, onStarted }: { open: boo
   };
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-zinc-900/30 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
-      <div className="animate-enter relative w-full max-w-[560px] rounded-2xl bg-white p-7 shadow-xl ring-1 ring-zinc-200">
-        <button type="button" onClick={close} aria-label="Close" className="absolute top-4 right-4 grid size-8 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700">
-          <X className="size-4" />
-        </button>
-        <div className="flex items-center gap-2">
-          <span className="rounded-full bg-primary px-2.5 py-0.5 font-mono text-[11px] font-semibold tracking-wider text-primary-foreground uppercase">MOA</span>
-          <span className="font-mono text-[11px] tracking-wider text-zinc-500 uppercase">Mixture of Accountants</span>
-        </div>
-        <h1 id="onboarding-title" className="mt-4 text-[26px] leading-[1.15] font-semibold tracking-[-0.02em] text-zinc-950">An AI finance team for an AI lab</h1>
-        <p className="mt-2 text-[14px] leading-relaxed text-zinc-600">
-          Six AI employees run GPU payables for Atlas Research: they check every invoice line against what actually ran, dispute overcharges with the vendor, and book the result.
-          You&rsquo;re the controller. You only make the calls.
-        </p>
-
-        <ol className="mt-6 space-y-4">
-          {STEPS.map((s, i) => (
-            <li key={s.title} className="flex gap-3">
-              <span className={cn("grid size-6 shrink-0 place-items-center rounded-full text-[12px] font-semibold", i === 0 ? "bg-primary text-primary-foreground" : "bg-zinc-100 text-zinc-600")}>{i + 1}</span>
-              <div className="min-w-0">
-                <div className="text-[14px] font-medium text-zinc-900">{s.title}</div>
-                <div className="text-[13px] leading-snug text-zinc-500">{s.body}</div>
-              </div>
-            </li>
-          ))}
-        </ol>
-
-        <div className="mt-7 flex flex-wrap items-center gap-2">
+    <div className="fixed inset-0 z-50 grid place-items-center bg-[#1f3a17]/35 p-4" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+      {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" />
+      <div className="animate-enter relative w-full max-w-[500px] overflow-hidden border-[3px] border-[#2a2420] bg-[#fffaf0] shadow-[0_6px_0_#2a2420]">
+        <div className="relative h-[104px]">
+          <MeadowStrip className="absolute inset-0 size-full" />
+          <div className="absolute inset-x-0 bottom-2 flex items-end justify-center gap-2" aria-hidden>
+            {CREW.map((id) => (
+              <PixelAgent key={id} actorId={id} size={id === "you" ? 34 : 26} />
+            ))}
+          </div>
           <button
             type="button"
-            onClick={start}
-            disabled={busy}
-            className="inline-flex h-10 items-center gap-2 rounded-lg bg-zinc-900 px-4 text-[14px] font-medium text-white hover:bg-zinc-800 disabled:opacity-60"
+            onClick={close}
+            aria-label="Close"
+            className="absolute top-2 right-2 grid size-7 place-items-center border-2 border-[#2a2420] bg-[#fffaf0] text-[#2a2420] hover:bg-white"
           >
-            {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-            Start the sample case
-            {!busy ? <ArrowRight className="size-4" /> : null}
-          </button>
-          <button type="button" onClick={close} className="h-10 rounded-lg px-3 text-[14px] text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
-            Look around first
+            <X className="size-3.5" strokeWidth={3} />
           </button>
         </div>
 
-        {publicDemo ? (
-          <p className="mt-5 border-t border-zinc-100 pt-4 text-[12px] leading-snug text-zinc-500">
-            Shared demo: other people may be using it at the same time. Slack and email are recorded on each task here, not sent. <b className="font-medium text-zinc-700">Reset demo</b> starts everything over.
-          </p>
-        ) : null}
+        <div className="border-t-[3px] border-[#2a2420] px-6 pt-5 pb-6">
+          <h1 id="onboarding-title" className="text-[30px] leading-[1.1] font-semibold text-[#2a2420]" style={{ fontFamily: "'Fraunces', Georgia, serif" }}>
+            Meet your tiny finance team
+          </h1>
+          <p className="mt-1.5 text-[14px] leading-relaxed text-[#5b524a]">Six AI accountants run GPU payables for Atlas Research. You&rsquo;re the controller: you just make the calls.</p>
+
+          <ol className="mt-5 space-y-3.5">
+            {STEPS.map((s, i) => (
+              <li key={s.title} className="flex gap-3">
+                <Flower petal={FLOWER_COLORS[(i + 1) % FLOWER_COLORS.length].petal} eye={FLOWER_COLORS[(i + 1) % FLOWER_COLORS.length].eye} size={18} className="mt-0.5 shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-[14px] font-semibold text-[#2a2420]">{s.title}</div>
+                  <div className="text-[13px] leading-snug text-[#5b524a]">{s.body}</div>
+                </div>
+              </li>
+            ))}
+          </ol>
+
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={start}
+              disabled={busy}
+              className="border-[3px] border-[#2a2420] bg-[#c6d600] px-5 py-2 font-mono text-[14px] font-bold tracking-[0.12em] text-[#2a2420] uppercase shadow-[0_4px_0_#2a2420] transition-transform hover:-translate-y-0.5 hover:shadow-[0_6px_0_#2a2420] active:translate-y-1 active:shadow-[0_1px_0_#2a2420] disabled:opacity-70"
+            >
+              {busy ? "Starting\u2026" : "Start \u25B8"}
+            </button>
+            <button type="button" onClick={close} className="px-2 py-2 font-mono text-[13px] font-semibold tracking-wider text-[#5b524a] uppercase hover:text-[#2a2420]">
+              Look around
+            </button>
+          </div>
+
+          {publicDemo ? (
+            <p className="mt-5 border-t-2 border-dashed border-[#d9d0bf] pt-3 text-[12px] leading-snug text-[#7a7064]">
+              Shared demo: others may be playing at the same time. Slack and email are recorded here, not sent. Reset demo starts everything over.
+            </p>
+          ) : null}
+        </div>
       </div>
     </div>
   );

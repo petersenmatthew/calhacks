@@ -372,3 +372,19 @@
     display: none;
   }
 }
+
+/* Landing meadow: clouds drift, front flowers sway in hard steps. */
+@keyframes pxl-drift {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(6px); }
+}
+@keyframes pxl-sway {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(0.5px); }
+}
+.pxl-drift-a { animation: pxl-drift 18s steps(6, end) infinite; }
+.pxl-drift-b { animation: pxl-drift 24s steps(8, end) infinite reverse; }
+.pxl-sway { animation: pxl-sway 2.4s steps(1, end) infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .pxl-drift-a, .pxl-drift-b, .pxl-sway { animation: none; }
+}
