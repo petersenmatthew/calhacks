@@ -23,9 +23,9 @@ function schedule(): Scheduled[] {
       label: "Meridian line that matches the contract exactly",
       data: buildInstanceCase({
         key: "feed-1", providerId: "PRV-MERIDIAN", instanceId: "i-mer-2231", instanceType: "h200.8x", projectId: "PRJ-INF",
-        experimentId: "exp-inf-batching-v3", experimentName: "Continuous batching v3", owner: "Diego Alvarez",
+        experimentId: "exp-inf-batching-v4", experimentName: "Continuous batching v4", owner: "Diego Alvarez",
         provisionedAt: "2026-10-19T04:00:00.000Z", lifecycleHours: 16, jobHours: 15.6, billedHours: 16, rateCents: 12_000,
-        invoice: { id: "INV-MER-2026-10-027", number: "MER-2026-10-027", lineId: "MER-2026-10-027-L1" }, jobId: "job-88512",
+        invoice: { id: "INV-MER-2026-10-051", number: "MER-2026-10-051", lineId: "MER-2026-10-051-L1" }, jobId: "job-88512",
       }),
     },
     {
@@ -35,7 +35,7 @@ function schedule(): Scheduled[] {
         key: "feed-2", providerId: "PRV-HELIOS", instanceId: "i-hel-4541", instanceType: "a100.8x", projectId: "PRJ-MMP",
         experimentId: "exp-mmp-caption-rl", experimentName: "Caption model RLHF", owner: "Lena Ortiz",
         provisionedAt: "2026-10-20T02:00:00.000Z", lifecycleHours: 30, jobHours: 29.5, billedHours: 30, rateCents: 6_440,
-        invoice: { id: "INV-HEL-2026-10-131", number: "HEL-2026-10-131", lineId: "HEL-2026-10-131-L1" }, jobId: "job-88530",
+        invoice: { id: "INV-HEL-2026-10-151", number: "HEL-2026-10-151", lineId: "HEL-2026-10-151-L1" }, jobId: "job-88530",
       }),
     },
     {
@@ -45,7 +45,7 @@ function schedule(): Scheduled[] {
         key: "feed-3", providerId: "PRV-MERIDIAN", instanceId: "i-mer-2240", instanceType: "h200.8x", projectId: "PRJ-RLA",
         experimentId: "exp-rla-smoke-test", experimentName: "Environment smoke test", owner: "Elena Petrova",
         provisionedAt: "2026-10-21T13:00:00.000Z", lifecycleHours: 3, jobHours: 2.4, billedHours: 8, meterHours: 3, rateCents: 12_000,
-        invoice: { id: "INV-MER-2026-10-031", number: "MER-2026-10-031", lineId: "MER-2026-10-031-L1" }, jobId: "job-88560",
+        invoice: { id: "INV-MER-2026-10-052", number: "MER-2026-10-052", lineId: "MER-2026-10-052-L1" }, jobId: "job-88560",
       }),
     },
     {
@@ -55,7 +55,7 @@ function schedule(): Scheduled[] {
         key: "feed-4", providerId: "PRV-HELIOS", instanceId: "i-hel-4558", instanceType: "h100.8x", projectId: "PRJ-FLM",
         experimentId: "exp-flm-long-context-04", experimentName: "Long-context extension 04", owner: "Jonah Brooks",
         provisionedAt: "2026-10-22T06:00:00.000Z", lifecycleHours: 40, jobHours: 39.2, billedHours: 46, meterHours: 46, rateCents: 10_000,
-        invoice: { id: "INV-HEL-2026-10-137", number: "HEL-2026-10-137", lineId: "HEL-2026-10-137-L1" }, jobId: "job-88591",
+        invoice: { id: "INV-HEL-2026-10-152", number: "HEL-2026-10-152", lineId: "HEL-2026-10-152-L1" }, jobId: "job-88591",
         terminationRef: "hel-api-req-91c2e0",
       }),
     },
@@ -66,7 +66,7 @@ function schedule(): Scheduled[] {
         key: "feed-5", providerId: "PRV-HELIOS", instanceId: "i-hel-4570", instanceType: "h100.8x", projectId: "PRJ-RLA",
         experimentId: "exp-rla-critic-v2", experimentName: "Critic model v2", owner: "Elena Petrova",
         provisionedAt: "2026-10-24T08:00:00.000Z", lifecycleHours: 20, jobHours: 19.6, billedHours: 20, rateCents: 10_000,
-        invoice: { id: "INV-HEL-2026-10-142", number: "HEL-2026-10-142", lineId: "HEL-2026-10-142-L1" }, jobId: "job-88620",
+        invoice: { id: "INV-HEL-2026-10-153", number: "HEL-2026-10-153", lineId: "HEL-2026-10-153-L1" }, jobId: "job-88620",
       }),
     },
   ];

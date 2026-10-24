@@ -1,6 +1,10 @@
 export type Role =
   | "compute_agent"
   | "finance_agent"
+  | "capacity_planner"
+  | "vendor_liaison"
+  | "budget_analyst"
+  | "policy_analyst"
   | "controller"
   | "orchestrator"
   | "ingestion"
@@ -31,6 +35,10 @@ export type Permission =
   | "workitem:respond"
   | "ledger:post"
   | "dispute:submit"
+  | "dispute:read"
+  | "dispute:send"
+  | "dispute:close"
+  | "budget:note"
   | "invoice:ingest"
   | "invoice:record"
   | "vendor:respond"
@@ -62,9 +70,11 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "approval:request",
     "posting:request",
     "handoff:compute",
-    "dispute:follow_up",
-    "history:read",
   ],
+  capacity_planner: ["workitem:read", "compute:read", "contract:read", "findings:compute:write", "handoff:finance", "info:request"],
+  vendor_liaison: ["workitem:read", "contract:read", "dispute:read", "dispute:send", "dispute:close", "dispute:follow_up"],
+  budget_analyst: ["workitem:read", "budget:read", "budget:note"],
+  policy_analyst: ["workitem:read", "policy:read", "precedent:read", "policy:propose", "handoff:finance", "history:read"],
   controller: ["workitem:read", "approval:decide", "workitem:respond", "settings:update", "environment:reset", "invoice:ingest", "clock:advance"],
   orchestrator: ["workflow:orchestrate"],
   ingestion: ["invoice:ingest"],

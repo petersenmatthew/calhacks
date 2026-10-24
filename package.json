@@ -9,9 +9,10 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "eval": "node --import tsx scripts/eval.ts",
     "db:generate": "drizzle-kit generate",
     "db:reset": "node -e \"require('fs').rmSync('data',{recursive:true,force:true})\"",
-    "eval": "tsx scripts/eval.ts"
+    "eval:planted": "node --import tsx scripts/eval-planted.ts"
   },
   "dependencies": {
     "@openai/agents": "^0.21.0",

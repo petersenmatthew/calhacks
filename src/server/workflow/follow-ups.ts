@@ -165,12 +165,12 @@ function chaseDisputes(ctx: AppContext) {
           actorId: ACTOR.scheduler,
           type: "SYSTEM",
           status: "info",
-          title: d.id + " has had no vendor response for " + formatDuration(age) + "; assigned to the Finance Agent to follow up",
+          title: d.id + " has had no vendor response for " + formatDuration(age) + "; assigned to the Vendor Liaison to follow up",
         });
         enqueueJob(ctx, {
           workItemId: item.id,
           kind: "AGENT_RUN",
-          agentId: ACTOR.finance,
+          agentId: ACTOR.vendorLiaison,
           payload: { trigger: "dispute_follow_up", disputeId: d.id, daysOpen: Math.floor(age / DAY_MS) },
         });
       });
@@ -192,12 +192,12 @@ function chaseDisputes(ctx: AppContext) {
           actorId: ACTOR.scheduler,
           type: "SYSTEM",
           status: "info",
-          title: d.id + " is still unanswered after " + formatDuration(age) + "; Finance Agent asked to escalate",
+          title: d.id + " is still unanswered after " + formatDuration(age) + "; Vendor Liaison asked to escalate",
         });
         enqueueJob(ctx, {
           workItemId: item.id,
           kind: "AGENT_RUN",
-          agentId: ACTOR.finance,
+          agentId: ACTOR.vendorLiaison,
           payload: { trigger: "dispute_escalation", disputeId: d.id, daysOpen: Math.floor(age / DAY_MS) },
         });
       });

@@ -24,7 +24,8 @@ export type CheckFlagCode =
   | "METER_MISMATCH"
   | "NO_TERMINATION_RECORD"
   | "SHARED_RESOURCE"
-  | "MISSING_OWNER";
+  | "MISSING_OWNER"
+  | "DUPLICATE_CHARGE";
 
 export interface CheckFlag {
   code: CheckFlagCode;
@@ -54,6 +55,9 @@ export interface InstanceChecks {
   experimentIds: string[];
   jobIds: string[];
   flags: CheckFlag[];
+  /** Earlier invoice lines that already billed this instance. */
+  priorLineIds?: string[];
+  priorBilledHours?: number;
 }
 
 export interface ReservationChecks {

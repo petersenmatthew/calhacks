@@ -1,4 +1,4 @@
-import { RESERVATION_METHODS, type AllocationMethod } from "../domain/allocation";
+import { METHOD_LABELS, RESERVATION_METHODS, type AllocationMethod } from "../domain/allocation";
 import { ACTOR } from "../security/actors";
 import { invokeTool } from "./gateway";
 import type { AgentRunContext } from "./tools";
@@ -70,20 +70,30 @@ async function computePolicy(c: Caller) {
     const clauses = unexplained
       ? pickClauses(terms.clauses, ["termination", "minimum", "metering"])
       : pickClauses(terms.clauses, ["idle", "minimum", "metering"]);
-    const owner = checks.ownerProjectIds.length === 1 ? checks.ownerProjectIds[0] : null;
+    if (checks.priorLineIds?.length) {
+      anomalies.push({
+        code: "DUPLICATE_LINE",
+        description: "Line " + checks.priorLineIds.join(", ") + " already billed " + checks.priorBilledHours + " h for " + checks.instanceId + ".",
+      });
+    }
+    // Owner comes from the experiment tracker, or from the controller's answer when the tracker has none.
+    const named = (wi.findings as Json[])
+      .filter((f) => f.kind === "human")
+      .flatMap((f) => String(f.summary).match(/PRJ-[A-Z]+/g) ?? []);
+    const owner = checks.ownerProjectIds.length === 1 ? checks.ownerProjectIds[0] : (named.at(-1) ?? null);
     if (!owner) {
-      // Nobody can be charged without an owner, and guessing would misstate a project's costs.
+      const exps = (life.jobs as Json[]).map((j) => j.experiment_id).join(", ");
       await c.call("request_human_info", {
         question:
-          "Which research project owns " + checks.instanceId + "? " +
-          (checks.ownerProjectIds.length
-            ? "Its jobs belong to " + checks.ownerProjectIds.length + " projects (" + checks.ownerProjectIds.join(", ") + ")."
-            : "None of its experiments (" + (checks.experimentIds.join(", ") || "none recorded") + ") has an owning project in the tracker.") +
-          " The " + wi.amounts.invoiced + " charge cannot be allocated until an owner is confirmed.",
+          "No project owns " + exps + " on " + checks.instanceId + " (" + wi.amounts.invoiced + "). Which project should carry this charge? Reply with its project id, e.g. PRJ-FLM.",
       });
       return;
     }
-    const summary = unexplained
+    const summary = checks.priorLineIds?.length
+      ? "Instance " + checks.instanceId + " supports " + checks.billableHours + " billable h, and line " + checks.priorLineIds.join(", ") +
+        " already billed " + checks.priorBilledHours + " h. This line bills " + checks.billedHours + " h (" + wi.amounts.invoiced +
+        ") again; " + wi.amounts.discrepancy + " is a duplicate charge."
+      : unexplained
       ? "Instance " + checks.instanceId + " ran " + checks.lifecycleHours + " h from provisioning to termination, supporting " +
         checks.billableHours + " billable h (" + wi.amounts.contract_supported + "). The invoice bills " + checks.billedHours + " h (" +
         wi.amounts.invoiced + "); the extra " + (checks.billedHours - checks.billableHours) + " h fall after termination and no clause explains them."
@@ -143,7 +153,7 @@ function interpretCorrection(feedback: Json, rejectedMethod: string): Allocation
   return rejectedMethod === "usage_proportional" ? "owner_pays_idle" : "usage_proportional";
 }
 
-async function financePolicy(c: Caller, run: AgentRunContext) {
+async function financePolicy(c: Caller) {
   const wi = await c.call("get_work_item", {});
   const owner = wi.work_item.owner_project_id as string | null;
   if (owner) await c.call("get_project_budget", { project_id: owner });
@@ -151,6 +161,21 @@ async function financePolicy(c: Caller, run: AgentRunContext) {
 
   if (wi.work_item.type === "BILLING_VARIANCE") {
     const policy = await c.call("get_allocation_policy", {});
+    const latest = [...wi.proposals].reverse()[0] as Json | undefined;
+    const disputeRejected = latest?.kind === "VENDOR_DISPUTE" && (latest.status === "REJECTED" || latest.status === "CHANGES_REQUESTED");
+    if (disputeRejected) {
+      // The controller turned down the dispute: allocate the full invoice to the owner and ask again.
+      const feedback = [...wi.controller_feedback].reverse().find((f: Json) => f.proposal_id === latest.id);
+      const calc = await c.call("calculate_cost_allocation", { method: "single_owner" });
+      const proposal = await c.call("propose_adjustment", {
+        calculation_id: calc.calculation_id,
+        rationale: "Controller declined dispute " + latest.id + (feedback?.reason ? ": " + feedback.reason : ".") + " Allocating the full charge to the owning project.",
+        policy_id: null,
+        evidence_ids: c.ids,
+      });
+      await c.call("request_human_approval", { proposal_id: proposal.proposal_id, summary: "Allocate " + calc.total + " to the owning project. Revised after the dispute was declined." });
+      return;
+    }
     const materiality = policy.materiality_policy as Json | null;
     if (compute?.assessment === "not_explained" && materiality?.applies_to_this_item) {
       const calc = await c.call("calculate_cost_allocation", { method: "single_owner" });
@@ -203,7 +228,7 @@ async function financePolicy(c: Caller, run: AgentRunContext) {
   }
 
   const pol = await c.call("get_allocation_policy", {});
-  const precedents = await c.call("search_precedents", { query: "shared reservation allocation idle capacity owner controller correction" });
+  await c.call("search_precedents", { query: "shared reservation allocation idle capacity owner controller correction" });
   const latest = [...wi.proposals].reverse()[0] as Json | undefined;
   const feedback =
     latest && (latest.status === "REJECTED" || latest.status === "CHANGES_REQUESTED")
@@ -233,19 +258,6 @@ async function financePolicy(c: Caller, run: AgentRunContext) {
     policy_id: policyId,
     evidence_ids: c.ids,
   });
-  if (feedback && (!applicable || applicable.method !== method)) {
-    const precedentIds = (precedents.matches as Json[]).map((m) => m.id as string);
-    await c.call("propose_policy", {
-      method,
-      statement:
-        method === "owner_pays_idle"
-          ? "For shared GPU reservations, each project pays for the GPU-hours it used at the reservation rate, and unused reserved capacity is charged to the project that owns the reservation."
-          : "For shared GPU reservations, allocate the charge as follows: " + calc.method_label + ".",
-      rationale: "Learned from controller correction on " + run.workItemId + ": " + feedback.reason,
-      precedent_ids: precedentIds,
-      evidence_ids: c.ids,
-    });
-  }
   // Follow the written policy when one is cited; the ledger gateway decides whether it really covers this case.
   if (proposal.standing_authorization.authorized || policyId) {
     const posted = await c.try("submit_for_posting", { proposal_id: proposal.proposal_id });
@@ -257,6 +269,97 @@ async function financePolicy(c: Caller, run: AgentRunContext) {
       calc.method_label + ": " + calc.lines.map((l: Json) => l.project_name + " " + l.amount).join(", ") + "." +
       (feedback ? " Revised after controller feedback." : conflictText),
   });
+}
+
+/** Policy Analyst: turn a controller correction into a reusable policy, then hand the rework to the Cost Accountant. */
+async function policyAnalystPolicy(c: Caller, run: AgentRunContext) {
+  const wi = await c.call("get_work_item", {});
+  const latest = [...wi.proposals].reverse()[0] as Json | undefined;
+  const feedback =
+    latest && (latest.status === "REJECTED" || latest.status === "CHANGES_REQUESTED")
+      ? [...wi.controller_feedback].reverse().find((f: Json) => f.proposal_id === latest.id)
+      : undefined;
+  if (!feedback || wi.work_item.type !== "SHARED_ALLOCATION") {
+    await c.call("handoff_to_finance", {
+      note: feedback
+        ? "Controller feedback on " + latest!.id + ": " + feedback.reason + " No reusable allocation policy applies; rework the proposal."
+        : "No controller correction to learn from on this item.",
+    });
+    return;
+  }
+  const pol = await c.call("get_allocation_policy", {});
+  const precedents = await c.call("search_precedents", { query: "shared reservation allocation idle capacity owner controller correction" });
+  const method = interpretCorrection(feedback, latest?.method ?? "usage_proportional");
+  const applicable = pol.applicable_policy as Json | null;
+  let note: string;
+  if (!applicable || applicable.method !== method) {
+    const proposed = await c.call("propose_policy", {
+      method,
+      statement:
+        method === "owner_pays_idle"
+          ? "For shared GPU reservations, each project pays for the GPU-hours it used at the reservation rate, and unused reserved capacity is charged to the project that owns the reservation."
+          : "For shared GPU reservations, allocate the charge as follows: " + METHOD_LABELS[method] + ".",
+      rationale: "Learned from controller correction on " + run.workItemId + ": " + feedback.reason,
+      precedent_ids: (precedents.matches as Json[]).map((m) => m.id as string),
+      evidence_ids: c.ids,
+    });
+    note = "The controller wants: " + METHOD_LABELS[method] + ". I proposed " + proposed.policy_id + " for approval. Rework the allocation with this method.";
+  } else {
+    note = "Approved policy " + applicable.id + " already uses " + METHOD_LABELS[method] + ". Rework the allocation with it.";
+  }
+  await c.call("handoff_to_finance", { note });
+}
+
+/** Vendor Liaison: send the approved dispute, then close the case when the vendor replies. */
+async function vendorPolicy(c: Caller) {
+  const wi = await c.call("get_work_item", {});
+  const pkg = await c.call("get_dispute_package", {});
+  const vendor = pkg.provider.name as string;
+  if (wi.work_item.state === "APPROVED" && !pkg.vendor_dispute) {
+    const clauses = (pkg.clauses as Json[]).map((cl) => cl.ref + " (" + cl.title + ")").join(", ");
+    const message =
+      "Hello " + vendor + " billing team,\n\n" +
+      "We are disputing " + pkg.disputed_amount + " on invoice line " + pkg.invoice_line + ", which billed " + pkg.invoiced + ".\n\n" +
+      pkg.reason +
+      (clauses ? "\n\nThis follows our agreement, clauses " + clauses + "." : "") +
+      "\n\nWe accept the undisputed " + pkg.undisputed_amount + ". Please issue a credit memo for " + pkg.disputed_amount + ".\n\n" +
+      "Atlas Research Finance";
+    await c.call("send_vendor_dispute", { subject: "Billing dispute: " + pkg.invoice_line + " (" + pkg.disputed_amount + ")", message });
+    return;
+  }
+  const reply = pkg.vendor_dispute as Json | null;
+  await c.call("close_dispute", {
+    summary:
+      reply?.status === "CREDIT_ACCEPTED"
+        ? vendor + " credited " + pkg.disputed_amount + " (" + reply.vendor_reference + "). The payable drops by that amount."
+        : vendor + " denied the dispute. The disputed " + pkg.disputed_amount + " is charged to the owning project, and the controller can reopen it with the vendor.",
+  });
+}
+
+const BURN_RANK: Record<string, number> = { on_track: 0, watch: 1, at_risk: 2, over: 3 };
+
+/** Budget Analyst: forecast every team this item charged, and record the one most at risk. */
+async function budgetPolicy(c: Caller) {
+  const wi = await c.call("get_work_item", {});
+  const charges = await c.call("get_posted_charges", {});
+  const ids = (charges.project_ids as string[]).length ? (charges.project_ids as string[]) : [wi.work_item.owner_project_id].filter(Boolean);
+  let worst: Json | null = null;
+  for (const id of ids) {
+    const f = await c.call("forecast_project_burn", { project_id: id });
+    if (!worst || BURN_RANK[f.status] > BURN_RANK[worst.status]) worst = f;
+  }
+  if (!worst) throw new Error("No project to check");
+  const name = worst.project.name;
+  const summary =
+    worst.status === "on_track"
+      ? name + " is on pace for " + worst.projected_month_end + " of its " + worst.monthly_budget + " budget this month."
+      : worst.status === "over"
+        ? name + " has spent " + worst.posted_to_date + ", over its " + worst.monthly_budget + " budget."
+        : worst.status === "at_risk"
+          ? name + " is on pace for " + worst.projected_month_end + " against " + worst.monthly_budget + "; at this rate the budget runs out in " +
+            worst.days_of_budget_left + " days, before month end."
+          : name + " is on pace for " + worst.projected_month_end + " against " + worst.monthly_budget + ", within 10% of budget.";
+  await c.call("record_budget_note", { project_id: worst.project.id, status: worst.status, summary, evidence_ids: c.ids });
 }
 
 async function onboardingPolicy(c: Caller) {
@@ -314,9 +417,12 @@ async function followUpPolicy(c: Caller, run: AgentRunContext) {
 export async function runDeterministicAgent(ctx: AppContext, run: AgentRunContext) {
   const caller = new Caller(ctx, run);
   const trigger = String(run.trigger.trigger ?? "");
-  if (run.agentId === ACTOR.finance && trigger === "onboarding") await onboardingPolicy(caller);
-  else if (run.agentId === ACTOR.finance && (trigger === "dispute_follow_up" || trigger === "dispute_escalation")) await followUpPolicy(caller, run);
-  else if (run.agentId === ACTOR.compute) await computePolicy(caller);
-  else if (run.agentId === ACTOR.finance) await financePolicy(caller, run);
+  if (run.agentId === ACTOR.policy && trigger === "onboarding") await onboardingPolicy(caller);
+  else if (run.agentId === ACTOR.vendorLiaison && (trigger === "dispute_follow_up" || trigger === "dispute_escalation")) await followUpPolicy(caller, run);
+  else if (run.agentId === ACTOR.compute || run.agentId === ACTOR.capacity) await computePolicy(caller);
+  else if (run.agentId === ACTOR.finance) await financePolicy(caller);
+  else if (run.agentId === ACTOR.policy) await policyAnalystPolicy(caller, run);
+  else if (run.agentId === ACTOR.vendorLiaison) await vendorPolicy(caller);
+  else if (run.agentId === ACTOR.budget) await budgetPolicy(caller);
   else throw new Error("No deterministic policy for " + run.agentId);
 }

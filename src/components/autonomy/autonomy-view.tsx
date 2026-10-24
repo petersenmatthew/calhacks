@@ -70,7 +70,7 @@ function Onboarding({ data, refresh }: { data: AutonomyData; refresh: () => void
   return (
     <Section
       title="Onboarding: learned from AP history"
-      sub="On its first day the Finance Agent read six months of the ERP's AP lines and wrote down the rule the team followed but never documented."
+      sub="On its first day the Policy Analyst read six months of the ERP's AP lines and wrote down the rule the team followed but never documented."
     >
       {!run ? (
         <p className="text-[12.5px] text-muted-foreground">Waiting for the onboarding run to start.</p>
@@ -178,8 +178,8 @@ function FollowUps({ data }: { data: AutonomyData }) {
   const rules = [
     { label: "Remind the approver", after: data.rules.approvalReminderMs },
     { label: "Escalate the approval to the CFO", after: data.rules.approvalEscalationMs },
-    { label: "Finance Agent chases the vendor", after: data.rules.disputeChaseMs },
-    { label: "Finance Agent escalates the dispute", after: data.rules.disputeEscalationMs },
+    { label: "Vendor Liaison chases the vendor", after: data.rules.disputeChaseMs },
+    { label: "Vendor Liaison escalates the dispute", after: data.rules.disputeEscalationMs },
   ];
   return (
     <Section title="Time-based follow-ups" sub="Checked on the business clock. Each action happens once and is written to the audit trail.">

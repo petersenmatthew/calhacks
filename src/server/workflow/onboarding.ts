@@ -7,7 +7,7 @@ import { enqueueJob } from "./jobs";
 import { POLICY_KEYS } from "./policies";
 
 /**
- * Onboarding is not tied to an invoice: the Finance Agent reads the company's
+ * Onboarding is not tied to an invoice: the Policy Analyst reads the company's
  * history before its first close. Its runs, evidence, and approval requests
  * are filed under this id instead of a work item.
  */
@@ -40,9 +40,9 @@ export function scheduleOnboarding(ctx: AppContext) {
     actorId: ACTOR.orchestrator,
     type: "SYSTEM",
     status: "info",
-    title: "Onboarding: Finance Agent assigned to learn AP practice from " + history.n + " historical invoice lines",
+    title: "Onboarding: Policy Analyst assigned to learn AP practice from " + history.n + " historical invoice lines",
   });
-  enqueueJob(ctx, { workItemId: ONBOARDING_ID, kind: "AGENT_RUN", agentId: ACTOR.finance, payload: { trigger: "onboarding" } });
+  enqueueJob(ctx, { workItemId: ONBOARDING_ID, kind: "AGENT_RUN", agentId: ACTOR.policy, payload: { trigger: "onboarding" } });
   return true;
 }
 
