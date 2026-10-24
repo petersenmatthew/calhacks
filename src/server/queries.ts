@@ -34,6 +34,7 @@ import { ACTOR } from "./security/actors";
 import { getAgentSettings, getExecutionMode, getRunMode } from "./settings";
 import { activeWorkItemId } from "./workflow/jobs";
 import { toolsForAgent } from "./agents/tools";
+import { connectionsFor } from "@/lib/connections";
 import { contractForProvider, reservationUsage } from "./workflow/checks";
 import { policyFitForWorkItem, POLICY_KEYS } from "./workflow/policies";
 import { businessNowIso, clockOffsetMs } from "./clock";
@@ -421,6 +422,12 @@ export function getAgentView(ctx: AppContext, agentId: string) {
     .all()
     .map((e) => ({ id: e.id, workItemId: e.workItemId, title: e.title, type: e.type, at: e.createdAt }));
   const toolCalls = ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM activity_events WHERE actor_id = ? AND tool_name IS NOT NULL").get(agentId) as { n: number };
+  const usage = ctx.sqlite
+    .prepare(
+      "SELECT a.tool_name AS tool, w.provider_id AS provider, COUNT(*) AS n, MAX(a.created_at) AS last FROM activity_events a LEFT JOIN work_items w ON w.id = a.work_item_id WHERE a.actor_id = ? AND a.tool_name IS NOT NULL AND a.status = 'ok' GROUP BY a.tool_name, w.provider_id",
+    )
+    .all(agentId) as { tool: string; provider: string | null; n: number; last: string }[];
+  const agentTools = toolsForAgent(agentId);
   return {
     id: actor.id,
     name: actor.name,
@@ -429,7 +436,11 @@ export function getAgentView(ctx: AppContext, agentId: string) {
     status,
     settings: getAgentSettings(ctx, agentId),
     execution: getSettingsView(ctx),
-    tools: toolsForAgent(agentId).map((t) => ({ name: t.name, description: t.description, terminal: Boolean(t.terminal) })),
+    tools: agentTools.map((t) => ({ name: t.name, description: t.description, terminal: Boolean(t.terminal) })),
+    connections: connectionsFor(
+      agentTools.map((t) => t.name),
+      usage,
+    ),
     totals: { runs: runs.length, completed: runs.filter((r) => r.status === "completed").length, toolCalls: toolCalls.n },
     tasks,
     outputs,

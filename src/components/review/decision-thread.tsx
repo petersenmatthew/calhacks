@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Check, LoaderCircle } from "lucide-react";
 import { AGENT_SHORT } from "@/lib/agent-steps";
@@ -57,18 +57,13 @@ export function DecisionThread({
   decision,
   turns,
   pending,
-  onSomethingElse,
   onDone,
-  footer,
 }: {
   w: WorkspaceData;
   decision: Decision;
   turns: TalkTurn[];
   pending: boolean;
-  /** Focus the chat box to say something that is not one of the suggestions. */
-  onSomethingElse: () => void;
   onDone: () => void;
-  footer?: ReactNode;
 }) {
   const [opener, setOpener] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -180,36 +175,31 @@ export function DecisionThread({
                 ) : null}
               </button>
             ))}
-            {decision.custom ? (
-              <button type="button" onClick={onSomethingElse} className="justify-self-start rounded-full px-3 py-1.5 text-[12.5px] text-zinc-500 ring-1 ring-zinc-200 ring-inset hover:text-zinc-900">
-                Something else
-              </button>
-            ) : null}
           </div>
         ) : (
-          <div className="flex flex-wrap gap-1.5">
-            {decision.choices.map((c) => (
+          <div className="overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200">
+            {decision.choices.map((c, i) => (
               <button
                 key={c.id}
                 type="button"
                 disabled={busy !== null}
                 onClick={() => act(c)}
-                title={c.hint}
-                className={cn(
-                  "inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium ring-1 ring-inset transition-colors disabled:opacity-60",
-                  c.primary ? "bg-zinc-900 text-white ring-zinc-900 hover:bg-zinc-800" : "bg-white text-zinc-800 ring-zinc-200 hover:ring-zinc-400",
-                )}
+                className="group flex w-full items-center gap-3 border-t border-zinc-100 px-3.5 py-2.5 text-left transition-colors first:border-t-0 hover:bg-zinc-50 disabled:opacity-60"
               >
-                {c.label}
-                {c.hint ? <span className="font-normal opacity-55">{c.hint}</span> : null}
-                {busy === c.id ? <LoaderCircle className="size-3.5 animate-spin opacity-70" /> : null}
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[13.5px] font-medium text-zinc-900">{c.label}</span>
+                  {c.hint ? <span className="block text-[12px] text-zinc-500">{c.hint[0].toUpperCase() + c.hint.slice(1)}</span> : null}
+                </span>
+                {c.primary && decision.choices.length > 1 ? <span className="rounded-full bg-accent px-2 py-0.5 text-[10.5px] font-medium text-brand-ink">Recommended</span> : null}
+                {busy === c.id ? (
+                  <LoaderCircle className="size-4 animate-spin text-zinc-400" />
+                ) : (
+                  <kbd className="grid h-5 min-w-5 place-items-center rounded-[5px] bg-zinc-100 px-1 font-mono text-[10.5px] text-zinc-500 ring-1 ring-zinc-200/80 transition-colors group-hover:bg-zinc-900 group-hover:text-white group-hover:ring-zinc-900">
+                    {i + 1}
+                  </kbd>
+                )}
               </button>
             ))}
-            {decision.custom ? (
-              <button type="button" onClick={onSomethingElse} className="inline-flex h-8 items-center rounded-full px-3 text-[13px] text-zinc-500 ring-1 ring-zinc-200 ring-inset hover:text-zinc-900">
-                Something else
-              </button>
-            ) : null}
           </div>
         )
       ) : null}

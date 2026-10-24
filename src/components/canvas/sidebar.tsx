@@ -333,16 +333,20 @@ function Feed({ w }: { w: WorkspaceData }) {
   );
 }
 
-function HowWeGotHere({ w }: { w: WorkspaceData }) {
+/** One quiet footer row: the story so far on the left, the full record on the right. */
+function HowWeGotHere({ w, extra }: { w: WorkspaceData; extra?: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="mt-5">
-      <button type="button" onClick={() => setOpen(!open)} className="flex items-center gap-1 text-[12.5px] font-medium text-zinc-500 hover:text-zinc-900">
-        <ChevronDown className={cn("size-3.5 transition-transform", !open && "-rotate-90")} />
-        How we got here
-      </button>
+    <div className="mt-6 border-t border-zinc-100 pt-3">
+      <div className="flex items-center justify-between text-[12.5px] text-zinc-500">
+        <button type="button" onClick={() => setOpen(!open)} className="flex items-center gap-1 hover:text-zinc-900">
+          <ChevronDown className={cn("size-3.5 transition-transform", !open && "-rotate-90")} />
+          How we got here
+        </button>
+        {extra}
+      </div>
       {open ? (
-        <div className="mt-3">
+        <div className="mt-4">
           <Feed w={w} />
         </div>
       ) : null}
@@ -367,7 +371,6 @@ function TaskView({
   onDecided,
   turns,
   pending,
-  onSomethingElse,
   chat,
   chatPending,
   onTask,
@@ -376,7 +379,6 @@ function TaskView({
   onDecided: () => void;
   turns: TalkTurn[];
   pending: boolean;
-  onSomethingElse: () => void;
   /** Questions asked about this task, answered in place. */
   chat: ChatMessage[];
   chatPending: boolean;
@@ -398,11 +400,9 @@ function TaskView({
           decision={decision}
           turns={turns}
           pending={pending}
-          onSomethingElse={onSomethingElse}
           onDone={onDecided}
-          footer={record}
         />
-        <HowWeGotHere w={w} />
+        <HowWeGotHere w={w} extra={record} />
       </div>
     );
   }
@@ -699,7 +699,6 @@ export function Sidebar({
   // Conversations about pending decisions, one per decision.
   const [talks, setTalks] = useState<Record<string, TalkTurn[]>>({});
   const [talkPending, setTalkPending] = useState<string | null>(null);
-  const [focusKey, setFocusKey] = useState(0);
   // Questions about a task without a pending decision stay in that task's view.
   const [taskChats, setTaskChats] = useState<Record<string, ChatMessage[]>>({});
   const [taskPending, setTaskPending] = useState<string | null>(null);
@@ -874,7 +873,6 @@ export function Sidebar({
                 onDecided={onDecided}
                 turns={talkKey ? (talks[talkKey] ?? []) : []}
                 pending={talkPending !== null && talkPending === talkKey}
-                onSomethingElse={() => setFocusKey((n) => n + 1)}
                 chat={taskChats[ready.item.id] ?? []}
                 chatPending={taskPending === ready.item.id}
                 onTask={onTask}
@@ -909,10 +907,9 @@ export function Sidebar({
               </button>
             ) : null}
             <Composer
-              placeholder={talking ? "Reply to " + talkTo : task ? "Ask about this task" : "Ask about your books"}
+              placeholder={talking ? "Ask " + talkTo + ", or tell them what to do" : task ? "Ask about this task" : "Ask about your books"}
               onSend={talking ? reply : mode === "task" ? askTask : ask}
               disabled={talking ? talkPending === talkKey : mode === "task" ? taskPending === task : pending}
-              focusKey={focusKey}
             />
           </div>
         </>
