@@ -6,6 +6,7 @@
  */
 import { agentSteps } from "./agent-steps";
 import { dateTimeUtc, clockTime, money } from "./format";
+import { sourceForTool, WRITE_TOOLS, type SourceId } from "./sources";
 import type { ActivityRow, WorkspaceData } from "@/server/queries";
 
 /** Ring seats are employees (AI agents). Code they rely on (intake rules, ledger gateway, policy memory) shows up inside their work. */
@@ -16,6 +17,8 @@ export type Check = { label: string; detail?: string; ok?: boolean };
 export type FrameSpec = {
   eyebrow: string;
   title: string;
+  /** The system of record this frame read from or wrote to. */
+  source?: { id: SourceId; name: string; logo: string; write?: boolean };
   query?: { lang: "sql" | "json" | "call"; text: string };
   table?: { cols: string[]; rows: string[][] };
   bars?: { label: string; share: number; display: string }[];
@@ -713,13 +716,15 @@ export function buildFrames(w: WorkspaceData): Frame[] {
       continue;
     }
     if (!row.toolName) continue;
+    const src = sourceForTool(row.toolName, w.item.providerId);
+    const spec = toolSpec(row, w);
     frames.push({
       id: "act-" + row.id,
       node: agent,
       label: LABELS[row.toolName] ?? row.toolName,
       createdAt: row.createdAt,
       tone: "ok",
-      spec: toolSpec(row, w),
+      spec: src ? { ...spec, source: { id: src.id, name: src.name, logo: src.logo, write: WRITE_TOOLS.has(row.toolName) } } : spec,
     });
   }
   frames.push(...ledgerFrames(w, deniedPostings), ...vendorReplyFrames(w), ...policyFrames(w));

@@ -306,7 +306,12 @@ function FrameCard({
       >
         <span className={cn("size-1.5 shrink-0 rounded-full", TONE_DOT[frame.tone])} />
         <span className="truncate">{frame.label}</span>
-        {frame.tone === "live" ? <LoaderCircle className="ml-auto size-2.5 shrink-0 animate-spin text-brand-ink" /> : null}
+        {frame.tone === "live" ? (
+          <LoaderCircle className="ml-auto size-2.5 shrink-0 animate-spin text-brand-ink" />
+        ) : frame.spec.source ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={frame.spec.source.logo} alt={frame.spec.source.name} title={"From " + frame.spec.source.name} className="ml-auto size-3 shrink-0 rounded-[3px]" />
+        ) : null}
       </div>
     </div>
   );

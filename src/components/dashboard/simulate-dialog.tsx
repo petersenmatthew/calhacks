@@ -19,13 +19,13 @@ const OPTIONS: { key: Scenario; title: string; body: string; tag?: string }[] = 
   {
     key: "overbilling",
     title: "GPU overbilling",
-    body: "Helios bills 36 h at $100/h for an 8x H100 instance whose lifecycle shows 24 h.",
+    body: "Lambda bills 36 h at $100/h for an 8x H100 instance whose lifecycle shows 24 h.",
     tag: "Scenario 1",
   },
   {
     key: "shared_allocation",
     title: "Shared cluster allocation",
-    body: "Stratus bills a $12,400 reservation that two research teams used.",
+    body: "CoreWeave bills a $12,400 reservation that two research teams used.",
     tag: "Scenario 2",
   },
   {
@@ -51,8 +51,8 @@ const PROJECTS = [
 ];
 
 const PROVIDERS = {
-  "PRV-HELIOS": { label: "Helios Cloud · 8x H100 · $100/h · billed per started hour", rate: 10_000, min: 1 },
-  "PRV-MERIDIAN": { label: "Meridian Compute · 8x H200 · $120/h · 8 h minimum", rate: 12_000, min: 8 },
+  "PRV-HELIOS": { label: "Lambda · 8x H100 · $100/h · billed per started hour", rate: 10_000, min: 1 },
+  "PRV-MERIDIAN": { label: "Nebius · 8x H200 · $120/h · 8 h minimum", rate: 12_000, min: 8 },
 } as const;
 
 type ProviderId = keyof typeof PROVIDERS;
