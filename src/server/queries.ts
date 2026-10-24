@@ -55,7 +55,7 @@ export function getSettingsView(ctx: AppContext) {
 }
 
 export function getAgentStatuses(ctx: AppContext) {
-  return [ACTOR.compute, ACTOR.finance].map((agentId) => {
+  return [ACTOR.compute, ACTOR.finance, ACTOR.vendorLiaison, ACTOR.budget, ACTOR.policy, ACTOR.capacity].map((agentId) => {
     const running = ctx.db
       .select()
       .from(agentRuns)

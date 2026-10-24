@@ -4,7 +4,7 @@ import { createAppContext, type AppContext } from "./context";
 import { ALL_TABLES, dropGuards, installGuards } from "./db/client";
 import { Orchestrator } from "./orchestrator";
 import { authorize, guard } from "./security/authorize";
-import { isSeeded, seedEnvironment } from "./sim/seed";
+import { ensureActors, isSeeded, seedEnvironment } from "./sim/seed";
 
 interface Runtime {
   ctx: AppContext;
@@ -32,6 +32,7 @@ export function getRuntime(): Runtime {
       },
     });
     if (!isSeeded(ctx)) seedEnvironment(ctx);
+    else ensureActors(ctx);
     const orchestrator = new Orchestrator(ctx);
     globalRef.__experimentLedger = { ctx, orchestrator };
     if (process.env.NEXT_PHASE !== "phase-production-build") orchestrator.start();

@@ -64,3 +64,14 @@ export function hasPendingJobs(ctx: AppContext) {
   const row = ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE status IN ('queued','running')").get() as { n: number };
   return row.n > 0;
 }
+
+/** Queue an agent run unless the same agent already has one queued for this work item. */
+export function enqueueAgentOnce(ctx: AppContext, workItemId: string, agentId: string, payload: Record<string, unknown>) {
+  const queued = ctx.db
+    .select({ id: jobs.id })
+    .from(jobs)
+    .where(and(eq(jobs.workItemId, workItemId), eq(jobs.agentId, agentId), eq(jobs.status, "queued")))
+    .get();
+  if (queued) return null;
+  return enqueueJob(ctx, { workItemId, kind: "AGENT_RUN", agentId, payload });
+}

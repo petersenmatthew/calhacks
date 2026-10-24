@@ -29,6 +29,7 @@ const EXCEPTION_FLAGS = new Set([
   "NO_TERMINATION_RECORD",
   "SHARED_RESOURCE",
   "MISSING_OWNER",
+  "DUPLICATE_CHARGE",
 ]);
 
 export function needsInvestigation(checks: ReconciliationChecks) {
@@ -89,7 +90,15 @@ function analyzeInstanceLine(ctx: AppContext, line: InvoiceLineRow): InstanceChe
   const life = instanceLifecycle(ctx, instance.id, line.serviceEnd);
   const billableHours = contractBillableHours(life.lifecycleHours, contract);
   const contractRateCents = contract.rateCard[instance.instanceType] ?? 0;
-  const expectedCents = expectedChargeCents(billableHours, contractRateCents);
+  // Hours already billed for this instance on earlier lines are not billable again.
+  const prior = ctx.sqlite
+    .prepare(
+      "SELECT id, quantity FROM invoice_lines WHERE instance_id = ? AND rowid < (SELECT rowid FROM invoice_lines WHERE id = ?) ORDER BY rowid",
+    )
+    .all(instance.id, line.id) as { id: string; quantity: number }[];
+  const priorBilledHours = round2(prior.reduce((s, p) => s + p.quantity, 0));
+  const remainingHours = round2(Math.max(0, billableHours - priorBilledHours));
+  const expectedCents = expectedChargeCents(remainingHours, contractRateCents);
   const jobs = ctx.db.select().from(computeJobs).where(eq(computeJobs.instanceId, instance.id)).all();
   const schedulerHours = round2(unionHours(jobs.map((j) => ({ start: j.startedAt, end: j.endedAt }))));
   const usage = ctx.db.select().from(providerUsage).where(eq(providerUsage.instanceId, instance.id)).all();
@@ -107,11 +116,22 @@ function analyzeInstanceLine(ctx: AppContext, line: InvoiceLineRow): InstanceChe
       message: "Invoiced " + formatCents(line.amountCents) + " vs contract-supported " + formatCents(expectedCents) + ".",
     });
   }
-  if (line.quantity > billableHours + 1e-6) {
+  if (prior.length) {
+    flags.push({
+      code: "DUPLICATE_CHARGE",
+      severity: "high",
+      message:
+        "Earlier line " + prior.map((p) => p.id).join(", ") + " already billed " + priorBilledHours + " h for " + instance.id +
+        "; " + remainingHours + " billable h remain.",
+    });
+  }
+  if (line.quantity > remainingHours + 1e-6) {
     flags.push({
       code: "QUANTITY_EXCEEDS_LIFECYCLE",
       severity: "high",
-      message: "Billed " + line.quantity + " h but the instance lifecycle supports " + billableHours + " billable h.",
+      message:
+        "Billed " + line.quantity + " h but the instance lifecycle supports " + billableHours + " billable h" +
+        (prior.length ? " (" + remainingHours + " h not yet billed)." : "."),
     });
   }
   if (line.unitPriceCents !== contractRateCents) {
@@ -166,6 +186,7 @@ function analyzeInstanceLine(ctx: AppContext, line: InvoiceLineRow): InstanceChe
     experimentIds: expIds,
     jobIds: jobs.map((j) => j.id),
     flags,
+    ...(prior.length ? { priorLineIds: prior.map((p) => p.id), priorBilledHours } : {}),
   };
 }
 

@@ -313,6 +313,11 @@ export function isSeeded(ctx: AppContext) {
   return row.n > 0;
 }
 
+/** Add actors introduced after a database was seeded. Actors are append-only, so existing rows are left as they are. */
+export function ensureActors(ctx: AppContext) {
+  ctx.db.insert(actors).values(ACTOR_SEED).onConflictDoNothing().run();
+}
+
 /**
  * Load the simulated environment. Background invoices are auto-matched by the
  * real pipeline; one early-job-end invoice is left for the agents so the team
