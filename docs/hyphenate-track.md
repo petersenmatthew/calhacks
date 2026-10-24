@@ -13,10 +13,27 @@ Build the system a finance team would bring on board. Pick a company, pick a few
 
 ## How they judge
 
-1. Is it real enough?
-2. Would you hire it?
-3. Did we see something new?
-4. Did it have a "wow" moment?
+1. Is it real enough? Realistic data, a messy problem, and proof that it works.
+2. Would you hire it? For which seats, and would it earn them: limited access, a clean record of its work, and knowing when to ask?
+3. Did we see something new? A company, problem or approach not made autonomous before.
+4. The moment: it catches what others missed, recovers from something going wrong, or defends a decision when questioned.
+
+## What to submit
+
+- A demo video that opens with the moment.
+- A live demo at judging, running for real. Judges may ask us to try their own scenario.
+- One line on the seats the system fills.
+- Proof it works: what's real, what's simulated, and how we know (test set, planted errors with an answer key, or a benchmark score).
+
+## What makes it hard (from the brief)
+
+- **Sources that disagree:** bank, ledger and contract differ. Know which to trust and say why.
+- **Time:** what happened in March should change what the system does in June.
+- **Working with others:** busy approvers, half-finished handoffs, a controller who says no.
+- **Limits:** no one gets access to everything. Whoever requests a payment can't approve it.
+- **Explainable and accountable:** every call traces back to the data, rule or person behind it, however long ago.
+
+The company can be imaginative; how it works underneath must be strict.
 
 ## Strong vs. weak (from the deck)
 
@@ -66,4 +83,8 @@ Gaps to consider:
 - **Self-learning at onboarding:** precedents and policies are seeded by hand; agents do not mine history to draft them.
 - **Continuous sync:** events arrive only when someone clicks Simulate; there is no feed or cursor.
 - **Live LLM:** LLM mode has only been tested with the SDK's scripted model.
+- **Time across periods:** cases run within one period. Show an earlier decision (for example, a March dispute or correction) changing a later period's outcome.
+- **Judge's own scenario:** no way to enter a new invoice or case live at judging.
+- **Real vs. simulated table:** not written up yet for the submission.
+- **Period close:** the ledger is double-entry and append-only, but closed periods are not locked.
 
