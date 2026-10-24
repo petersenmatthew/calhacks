@@ -186,23 +186,29 @@ export function spriteTint(actorId: string) {
   return SPRITES[actorId]?.tint;
 }
 
+/** A one-off or held animation: reactions, sleeping while paused, slumping after a rejection. */
+export type SpriteMood = "hop" | "party" | "nod" | "shake" | "tilt" | "slump" | "sleep";
+
 /** A pixel employee. Idles with a slow bob and blink; bounces faster while working. */
 export function PixelAgent({
   actorId,
   size = 48,
   working = false,
   still = false,
+  mood,
   className,
 }: {
   actorId: string;
   size?: number;
   working?: boolean;
   still?: boolean;
+  mood?: SpriteMood;
   className?: string;
 }) {
   const sprite = SPRITES[actorId];
   if (!sprite) return null;
   const blinkDelay = BLINK_DELAY[actorId] ?? "0s";
+  const asleep = mood === "sleep";
   return (
     <svg
       viewBox="0 -1 16 17"
@@ -212,16 +218,18 @@ export function PixelAgent({
       aria-hidden
       className={cn("shrink-0 overflow-visible", className)}
     >
-      <g className={still ? undefined : working ? "px-bob-fast" : "px-bob"} style={{ animationDelay: blinkDelay }}>
+      <g className={mood && !asleep ? "px-mood-" + mood : undefined}>
+      <g className={still || asleep ? undefined : working ? "px-bob-fast" : "px-bob"} style={{ animationDelay: blinkDelay }}>
         {rects(sprite.rows, sprite.palette).map((r, i) => (
           <rect key={i} x={r.x} y={r.y} width={r.w} height={1} fill={r.fill} />
         ))}
-        {still ? null : (
-          <g className="px-blink" style={{ animationDelay: blinkDelay }}>
+        {still && !asleep ? null : (
+          <g className={asleep ? undefined : "px-blink"} style={{ animationDelay: blinkDelay }}>
             <rect x={5} y={6} width={1} height={1} fill={sprite.face} />
             <rect x={10} y={6} width={1} height={1} fill={sprite.face} />
           </g>
         )}
+      </g>
       </g>
     </svg>
   );

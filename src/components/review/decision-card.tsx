@@ -29,7 +29,7 @@ function Kbd({ children, dark }: { children: ReactNode; dark?: boolean }) {
   );
 }
 
-function doneMessage(d: Decision, c: Choice | null, w: WorkspaceData) {
+export function doneMessage(d: Decision, c: Choice | null, w: WorkspaceData) {
   const agent = AGENT_SHORT[d.askedBy] ?? "the agents";
   if (!c) return d.custom === "answer" ? "Sent. " + agent + " picks it back up." : "Sent back to " + agent + " with your note.";
   if (c.action.type === "answer") return c.label + " it is. " + agent + " picks it back up.";
@@ -40,6 +40,21 @@ function doneMessage(d: Decision, c: Choice | null, w: WorkspaceData) {
   }
   if (c.action.type === "changes" && c.action.directive) return "Done. " + agent + " redoes the split, and the agents propose a rule for next time.";
   return "Sent back to " + agent + ".";
+}
+
+/** Records a decision: a choice, or free text (a different instruction, or an answer to a question). */
+export async function submitDecision(w: WorkspaceData, decision: Decision, choice: Choice | null, text?: string) {
+  if (choice?.action.type === "answer" || (!choice && decision.custom === "answer")) {
+    const answer = choice?.action.type === "answer" ? choice.action.answer : (text ?? "");
+    await postJson("/api/work-items/" + w.item.id + "/info", { answer });
+  } else if (decision.approvalId) {
+    const a = choice?.action;
+    await postJson("/api/approvals/" + decision.approvalId, {
+      decision: !a ? "CHANGES_REQUESTED" : a.type === "approve" ? "APPROVED" : a.type === "reject" ? "REJECTED" : "CHANGES_REQUESTED",
+      reason: !a ? text : a.type === "reject" || a.type === "changes" ? a.reason : null,
+      directive: a?.type === "changes" ? (a.directive ?? null) : null,
+    });
+  }
 }
 
 /**
@@ -76,17 +91,7 @@ export function DecisionCard({
     if (busy || done) return;
     setBusy(choice?.id ?? "custom");
     try {
-      if (choice?.action.type === "answer" || (!choice && decision.custom === "answer")) {
-        const answer = choice?.action.type === "answer" ? choice.action.answer : (text ?? "");
-        await postJson("/api/work-items/" + w.item.id + "/info", { answer });
-      } else if (decision.approvalId) {
-        const a = choice?.action;
-        await postJson("/api/approvals/" + decision.approvalId, {
-          decision: !a ? "CHANGES_REQUESTED" : a.type === "approve" ? "APPROVED" : a.type === "reject" ? "REJECTED" : "CHANGES_REQUESTED",
-          reason: !a ? text : a.type === "reject" || a.type === "changes" ? a.reason : null,
-          directive: a?.type === "changes" ? (a.directive ?? null) : null,
-        });
-      }
+      await submitDecision(w, decision, choice, text);
       setDone(doneMessage(decision, choice, w));
       onDone?.();
     } catch (e) {

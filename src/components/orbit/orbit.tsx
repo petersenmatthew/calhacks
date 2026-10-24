@@ -10,6 +10,7 @@ import { AgentAvatar } from "../status";
 import { PixelAgent, spriteTint } from "../pixel-agent";
 import { buildTime, DH, DW, FrameView } from "./frame-view";
 import { HandoffRunner, handoffsFrom } from "./handoff-runner";
+import { ApprovalVisitors, FrameWorker, SeatLife, spriteMood, useAgentLife } from "./agent-life";
 
 /* ------------------------------------------------------------------ geometry */
 
@@ -523,6 +524,18 @@ export function Orbit({
   const live = Object.fromEntries(NODES.map((n) => [n.id, running(n.actorId)])) as Partial<Record<OrbitNodeId, boolean>>;
   const edges = flows(w);
   const handoffs = handoffsFrom(w ? w.activity : overview.activity);
+  const life = useAgentLife(overview.activity, overview.openApprovals);
+  const agentOf = (actorId: string) => overview.agents.find((a) => a.agentId === actorId);
+  const [away, setAway] = useState<Partial<Record<OrbitNodeId, boolean>>>({});
+  const [runner, setRunner] = useState<OrbitNodeId | null>(null);
+  // Where each working employee stands: on top of the frame it is building.
+  const workSpot = (g: (typeof groups)[number]) => {
+    const building_ = g.shown.filter((f) => building[f.id]);
+    const busy = live[g.node.id] || building_.length > 0;
+    const target = g.shown.findLast((f) => f.tone === "live") ?? building_.at(-1) ?? (busy ? g.shown.at(-1) : undefined);
+    const at_ = target && busy ? placed.get(target.id) : undefined;
+    return at_ ? { x: at_.x + FW - 26, y: at_.y + 8 } : null;
+  };
   const dimNode = (id: OrbitNodeId) => level !== "all" && focusNode !== id;
   const lit = (id: OrbitNodeId) => level !== "frame" && hover === id;
   const hoverOn = (id: OrbitNodeId) => (on: boolean) => setHover((h) => (on ? id : h === id ? null : h));
@@ -736,7 +749,13 @@ export function Orbit({
                       )}
                       style={{ background: spriteTint(g.node.actorId) }}
                     >
-                      <PixelAgent actorId={g.node.actorId} size={40} working={Boolean(live[g.node.id])} />
+                      <PixelAgent
+                        actorId={g.node.actorId}
+                        size={40}
+                        working={Boolean(live[g.node.id])}
+                        mood={spriteMood(life.reactions[g.node.id])}
+                        className={cn("transition-opacity duration-300", away[g.node.id] && "opacity-15")}
+                      />
                     </span>
                     <span
                       className={cn(
@@ -754,6 +773,14 @@ export function Orbit({
                     </span>
                   </button>
                 )}
+                {seatStyle === "ring" ? (
+                  <SeatLife
+                    agent={agentOf(g.node.actorId)}
+                    label={g.node.label}
+                    reaction={life.reactions[g.node.id]}
+                    hovered={hover === g.node.id && level !== "frame"}
+                  />
+                ) : null}
                 {g.hidden > 0 ? (
                   <span className="absolute top-1/2 -right-2 translate-x-full -translate-y-1/2 font-mono text-[10px] text-zinc-400">+{g.hidden}</span>
                 ) : null}
@@ -768,7 +795,37 @@ export function Orbit({
             <YouCard here={Boolean(here)} label={w ? (here ? "your call" : "all clear") : waiting ? waiting + (waiting === 1 ? " needs you" : " need you") : "all clear"} onClick={onYou} />
           </div>
 
-          <HandoffRunner handoffs={handoffs} seats={NODE} center={{ x: CX, y: CY }} radius={R} hidden={level === "frame"} />
+          {groups.map((g) => (
+            <FrameWorker
+              key={"worker-" + g.node.id}
+              actorId={g.node.actorId}
+              home={at(g.node.angle)}
+              spot={workSpot(g)}
+              tool={agentOf(g.node.actorId)?.runTools.at(-1)}
+              dim={level === "frame" ? 0.12 : dimNode(g.node.id) ? 0.35 : 1}
+              hidden={runner === g.node.id}
+              onAway={(v) => setAway((a) => (Boolean(a[g.node.id]) === v ? a : { ...a, [g.node.id]: v }))}
+            />
+          ))}
+          <HandoffRunner
+            handoffs={handoffs}
+            seats={NODE}
+            center={{ x: CX, y: CY }}
+            radius={R}
+            hidden={level === "frame"}
+            onPass={(n) => life.react(n, "nod")}
+            onArrive={(h) => h.kind !== "broadcast" && life.react(h.to, h.kind === "question" ? "question" : "nod")}
+            onRunner={setRunner}
+          />
+          <ApprovalVisitors
+            approvals={overview.openApprovals}
+            arrivals={life.arrivals}
+            leaving={life.leaving}
+            seats={NODE}
+            center={{ x: CX, y: CY - 8 }}
+            radius={R}
+            hidden={level !== "all"}
+          />
         </div>
       ) : null}
       </div>

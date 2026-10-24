@@ -240,3 +240,60 @@
 @media (prefers-reduced-motion: reduce) {
   .px-run > * { animation: none; }
 }
+
+/* Reactions. SVG groups animate around their own feet. */
+/* Each reaction plays once; slump holds. */
+[class*="px-mood-"] { transform-box: fill-box; transform-origin: 50% 100%; }
+@keyframes px-hop {
+  0%, 100% { transform: translateY(0); }
+  35% { transform: translateY(-4px); }
+  60% { transform: translateY(0); }
+}
+@keyframes px-nod {
+  0%, 100% { transform: translateY(0); }
+  25%, 75% { transform: translateY(1px); }
+  50% { transform: translateY(0); }
+}
+@keyframes px-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-1px); }
+  75% { transform: translateX(1px); }
+}
+.px-mood-hop { animation: px-hop 0.5s ease-out 2; }
+.px-mood-party { animation: px-hop 0.42s ease-out 5; }
+.px-mood-nod { animation: px-nod 0.7s steps(1, end) 1; }
+.px-mood-shake { animation: px-shake 0.16s steps(1, end) 8; }
+.px-mood-tilt { transform: rotate(-9deg); transition: transform 0.2s; }
+.px-mood-slump { transform: translateY(1px) rotate(5deg); }
+
+/* What a working employee is doing, shown on the icon in its bubble. */
+@keyframes act-sweep { from { transform: translateX(-2px); } to { transform: translateX(2px); } }
+@keyframes act-tap { 0%, 100% { transform: scale(1); } 50% { transform: scale(0.8); } }
+@keyframes act-scribble { from { transform: rotate(-12deg); } to { transform: rotate(12deg); } }
+@keyframes act-send { 0% { transform: translate(-1px, 1px); opacity: 1; } 70% { transform: translate(3px, -3px); opacity: 0.4; } 100% { transform: translate(-1px, 1px); opacity: 1; } }
+.act-sweep { animation: act-sweep 0.7s ease-in-out infinite alternate; }
+.act-tap { animation: act-tap 0.3s steps(1, end) infinite; }
+.act-scribble { animation: act-scribble 0.22s ease-in-out infinite alternate; }
+.act-send { animation: act-send 0.9s ease-in-out infinite; }
+
+@keyframes think-dot { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-3px); } }
+.think-dot { animation: think-dot 0.9s ease-in-out infinite; }
+
+/* Guidance lands on the seat as a sticky note. */
+@keyframes sticky-drop {
+  0% { transform: translateY(-60px) rotate(-40deg); opacity: 0; }
+  60% { transform: translateY(4px) rotate(6deg); opacity: 1; }
+  100% { transform: none; }
+}
+.sticky-drop { animation: sticky-drop 0.7s cubic-bezier(0.22, 1, 0.36, 1); }
+
+@keyframes stamp-in {
+  0% { transform: scale(2.2); opacity: 0; }
+  60% { transform: scale(0.94); opacity: 1; }
+  100% { transform: scale(1); }
+}
+.stamp-in { animation: stamp-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  [class*="px-mood-"], .act-sweep, .act-tap, .act-scribble, .act-send, .think-dot, .sticky-drop, .stamp-in { animation: none; }
+}
