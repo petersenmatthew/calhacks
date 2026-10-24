@@ -194,13 +194,11 @@ function NodePill({ id, icon, label, count, live, href, hover }: { id: NodeId; i
 function You({ overview, w }: { overview: DashboardData; w?: WorkspaceData }) {
   const waiting = overview.workItems.filter((i) => boardStage(i) === "needs_you");
   const here = w && (w.approvals.some((a) => a.status === "PENDING") || w.item.state === "NEEDS_INFO");
-  const target = here ? w!.item.id : waiting[0]?.id;
   const body = (
     <div
       className={cn(
         "relative flex w-[150px] flex-col items-center gap-1 rounded-2xl bg-white px-4 py-4 shadow-md ring-1 ring-zinc-200",
         waiting.length && "ring-2 ring-primary",
-        target && "hover:-translate-y-px transition-transform",
       )}
     >
       {waiting.length ? <span className="absolute -top-1 -right-1 size-3 animate-pulse rounded-full bg-primary ring-2 ring-white" /> : null}
@@ -211,7 +209,7 @@ function You({ overview, w }: { overview: DashboardData; w?: WorkspaceData }) {
       </span>
     </div>
   );
-  return <At x={CX} y={CY}>{target ? <Link href={"/investigations/" + target}>{body}</Link> : body}</At>;
+  return <At x={CX} y={CY}>{body}</At>;
 }
 
 /* ------------------------------------------------------------------ workspaces */
