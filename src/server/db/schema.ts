@@ -117,6 +117,8 @@ export interface PolicyRule {
   autoPostLimitCents: number;
   appliesTo: string;
   conditions: string[];
+  /** Materiality policies: largest per-line variance accepted without a dispute. */
+  thresholdCents?: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -149,6 +151,8 @@ export const providers = sqliteTable("providers", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   shortName: text("short_name").notNull(),
+  /** Where disputes and follow-ups are emailed. VENDOR_EMAIL overrides it for demos. */
+  billingEmail: text("billing_email"),
 });
 
 export const contracts = sqliteTable("contracts", {
@@ -556,10 +560,18 @@ export const vendorDisputes = sqliteTable("vendor_disputes", {
   approvalId: text("approval_id").notNull(),
   amountCents: integer("amount_cents").notNull(),
   status: text("status").notNull(), // SUBMITTED | CREDIT_ACCEPTED | DENIED
+  /** What the vendor actually credited, when the controller accepted less than the disputed amount. */
+  creditedCents: integer("credited_cents"),
   reason: text("reason").notNull(),
   vendorReference: text("vendor_reference"),
   submittedAt: text("submitted_at").notNull(),
   resolvedAt: text("resolved_at"),
+  /** The letter exactly as sent, and the evidence pack the application attached to it. */
+  letterSubject: text("letter_subject"),
+  letterBody: text("letter_body"),
+  evidence: text("evidence", { mode: "json" }).$type<Record<string, unknown> | null>(),
+  sentTo: text("sent_to"),
+  emailStatus: text("email_status"), // queued | sent | simulated | failed
 });
 
 export const auditEvents = sqliteTable(
@@ -584,4 +596,128 @@ export const auditEvents = sqliteTable(
     hash: text("hash").notNull(),
   },
   (t) => [index("audit_work_item_idx").on(t.workItemId)],
+);
+
+/* ------------------------------------------------------------------ */
+/* Autonomy: feed sync, follow-ups, and ERP history                    */
+/* ------------------------------------------------------------------ */
+
+/** Simulated provider billing outbox. Rows become visible to sync at publish_at (business time). */
+export const feedEvents = sqliteTable(
+  "feed_events",
+  {
+    seq: integer("seq").primaryKey({ autoIncrement: true }),
+    source: text("source").notNull(),
+    externalEventId: text("external_event_id").notNull(),
+    publishAt: text("publish_at").notNull(),
+    label: text("label").notNull(),
+    payload: text("payload", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [uniqueIndex("feed_events_external_idx").on(t.externalEventId), index("feed_events_source_idx").on(t.source, t.seq)],
+);
+
+/** Last position read from each source, so a re-sync never re-reads or duplicates. */
+export const syncCursors = sqliteTable("sync_cursors", {
+  source: text("source").primaryKey(),
+  cursor: text("cursor"),
+  syncedAt: text("synced_at").notNull(),
+  lastCount: integer("last_count").notNull().default(0),
+  totalCount: integer("total_count").notNull().default(0),
+  lastError: text("last_error"),
+});
+
+/** Time-based actions the system took on its own (reminders, escalations, vendor chases). One row per key. */
+export const followUps = sqliteTable(
+  "follow_ups",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    key: text("key").notNull(),
+    kind: text("kind").notNull(), // APPROVAL_REMINDER | APPROVAL_ESCALATION | DISPUTE_CHASE | DISPUTE_ESCALATION
+    workItemId: text("work_item_id"),
+    subjectId: text("subject_id").notNull(),
+    actorId: text("actor_id").notNull(),
+    businessAt: text("business_at").notNull(),
+    createdAt: text("created_at").notNull(),
+    details: text("details", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+  },
+  (t) => [uniqueIndex("follow_ups_key_idx").on(t.key)],
+);
+
+/** Past AP lines and how each variance was resolved (simulated ERP export the agents learn from). */
+export const erpApHistory = sqliteTable("erp_ap_history", {
+  id: text("id").primaryKey(),
+  providerId: text("provider_id").notNull(),
+  invoiceNumber: text("invoice_number").notNull(),
+  lineRef: text("line_ref").notNull(),
+  period: text("period").notNull(),
+  description: text("description").notNull(),
+  invoicedCents: integer("invoiced_cents").notNull(),
+  expectedCents: integer("expected_cents").notNull(),
+  varianceCents: integer("variance_cents").notNull(),
+  resolution: text("resolution").notNull(), // PAID_AS_BILLED | DISPUTED_CREDITED | DISPUTED_DENIED
+  resolvedBy: text("resolved_by").notNull(),
+  note: text("note").notNull(),
+  resolvedAt: text("resolved_at").notNull(),
+});
+
+/**
+ * Outbound messages (vendor email, Slack). Written in the same transaction as
+ * the action that caused them, then delivered by the scheduler, so a message
+ * is never sent for an action that rolled back and never lost if delivery fails.
+ */
+export const outbox = sqliteTable(
+  "outbox",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    channel: text("channel").notNull(), // email | slack
+    destination: text("destination").notNull(), // email address, #channel, or @handle for a DM
+    subject: text("subject"),
+    body: text("body").notNull(),
+    html: text("html"),
+    mentions: text("mentions", { mode: "json" }).$type<string[]>().notNull(),
+    attachments: text("attachments", { mode: "json" }).$type<{ filename: string; content: string; contentType: string }[]>().notNull(),
+    /** Extra email headers, e.g. In-Reply-To so a reply lands in the vendor's thread. */
+    headers: text("headers", { mode: "json" }).$type<Record<string, string> | null>(),
+    event: text("event").notNull(),
+    workItemId: text("work_item_id"),
+    ref: text("ref"),
+    status: text("status").notNull(), // pending | sent | simulated | failed
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    providerMessageId: text("provider_message_id"),
+    createdAt: text("created_at").notNull(),
+    sentAt: text("sent_at"),
+  },
+  (t) => [index("outbox_status_idx").on(t.status), index("outbox_channel_idx").on(t.channel, t.destination)],
+);
+
+/**
+ * The email conversation with a vendor about a dispute, beyond the original
+ * letter: replies the vendor sent (read from the AP inbox) and what the
+ * Vendor Liaison answered.
+ */
+export const vendorMessages = sqliteTable(
+  "vendor_messages",
+  {
+    id: text("id").primaryKey(),
+    disputeId: text("dispute_id").notNull(),
+    workItemId: text("work_item_id").notNull(),
+    direction: text("direction").notNull(), // inbound | outbound
+    fromAddr: text("from_addr"),
+    toAddr: text("to_addr"),
+    subject: text("subject"),
+    body: text("body").notNull(),
+    /** RFC 5322 Message-ID of an inbound email, used to skip duplicates and to thread our answer. */
+    messageId: text("message_id"),
+    inReplyTo: text("in_reply_to"),
+    /** inbound: new | handled | waiting_on_controller | ignored. outbound: sent */
+    status: text("status").notNull(),
+    /** What the Vendor Liaison made of it: credit | denial | question | counter_offer | update. */
+    kind: text("kind"),
+    handledBy: text("handled_by"),
+    handledAt: text("handled_at"),
+    receivedAt: text("received_at").notNull(),
+  },
+  (t) => [uniqueIndex("vendor_messages_message_id_idx").on(t.messageId), index("vendor_messages_dispute_idx").on(t.disputeId)],
 );

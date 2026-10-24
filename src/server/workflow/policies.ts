@@ -11,6 +11,7 @@ export const POLICY_KEYS = {
   autoMatch: "AUTO-MATCH",
   explainedVariance: "RECON-EXPLAINED",
   sharedReservation: "ALLOC-SHARED",
+  materiality: "VARIANCE-MATERIALITY",
 } as const;
 
 export function getApprovedPolicy(ctx: AppContext, key: string): PolicyRow | null {
@@ -46,6 +47,18 @@ export function evaluateStandingAuthorization(
     return { authorized: false, policyId: null, reason: "Vendor disputes always require controller approval." };
   }
   if (item.type === "BILLING_VARIANCE") {
+    const materiality = getApprovedPolicy(ctx, POLICY_KEYS.materiality);
+    const threshold = materiality?.rule.thresholdCents ?? 0;
+    const variance = item.invoicedCents - item.expectedCents;
+    if (materiality && variance >= 100 && variance <= threshold) {
+      if (proposal.method !== "single_owner") {
+        return { authorized: false, policyId: materiality.id, reason: "Only full single-owner allocations qualify under the materiality policy." };
+      }
+      if (proposal.payload.totalCents > materiality.rule.autoPostLimitCents) {
+        return { authorized: false, policyId: materiality.id, reason: "Amount exceeds the materiality policy's line limit." };
+      }
+      return { authorized: true, policyId: materiality.id, reason: materiality.title + " v" + materiality.version + " (variance at or below " + (threshold / 100).toFixed(2) + ")" };
+    }
     const policy = getApprovedPolicy(ctx, POLICY_KEYS.explainedVariance);
     if (!policy) return { authorized: false, policyId: null, reason: "No approved policy for explained variances." };
     if (proposal.method !== "single_owner") {

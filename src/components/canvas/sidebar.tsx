@@ -10,7 +10,10 @@ import { money } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { DashboardData, WorkspaceData } from "@/server/queries";
 import { DecisionCard } from "../review/decision-card";
+import { DisputeLetter } from "../comms/dispute-letter";
+import { VendorThread } from "../comms/vendor-thread";
 import { AgentAvatar } from "../status";
+import { LearnedPolicyRow, pendingLearnedPolicy, RunningOnItsOwn, useAutonomy } from "../autonomy/sidebar-parts";
 
 type Item = DashboardData["workItems"][number];
 export type ChatMessage = { role: "user" | "assistant"; content: string };
@@ -94,12 +97,15 @@ function Section({ title, count, children, collapsible }: { title: string; count
 /* ------------------------------------------------------------------ home */
 
 function Home({ data, items, onOpen, onStart }: { data: DashboardData; items: Item[]; onOpen: (id: string) => void; onStart: () => void }) {
+  const autonomy = useAutonomy();
+  const learned = pendingLearnedPolicy(autonomy.data) ? 1 : 0;
   const needs = items.filter((i) => groupOf(i) === "needs");
   const moving = items.filter((i) => groupOf(i) === "moving");
   const done = items.filter((i) => groupOf(i) === "done");
   const name = (data.actors["human.controller"]?.name ?? "").split(" ")[0];
   const [now] = useState(() => new Date());
-  const minutes = Math.max(1, Math.ceil((needs.length * 12) / 60));
+  const decisions = needs.length + learned;
+  const minutes = Math.max(1, Math.ceil((decisions * 12) / 60));
   const titles = items.map((i) => shortTitle(i, data.providers));
   const dup = (i: Item) => titles.filter((t) => t === shortTitle(i, data.providers)).length > 1;
   return (
@@ -110,8 +116,8 @@ function Home({ data, items, onOpen, onStart }: { data: DashboardData; items: It
           {name ? ", " + name : ""}
         </h2>
         <p className="mt-1 text-[13px] text-zinc-500">
-          {needs.length
-            ? needs.length + (needs.length === 1 ? " decision" : " decisions") + ", about " + minutes + " min"
+          {decisions
+            ? decisions + (decisions === 1 ? " decision" : " decisions") + ", about " + minutes + " min"
             : moving.length
               ? "Nothing needs you. Agents are on " + moving.length + "."
               : "All clear for " + data.period + "."}
@@ -128,7 +134,8 @@ function Home({ data, items, onOpen, onStart }: { data: DashboardData; items: It
         ) : null}
       </div>
       <div className="mt-6">
-        <Section title="Needs you" count={needs.length}>
+        <Section title="Needs you" count={decisions}>
+          {autonomy.data ? <LearnedPolicyRow data={autonomy.data} refresh={() => autonomy.mutate()} /> : null}
           {needs.map((i) => (
             <TaskRow key={i.id} item={i} data={data} dup={dup(i)} onOpen={() => onOpen(i.id)} />
           ))}
@@ -138,6 +145,7 @@ function Home({ data, items, onOpen, onStart }: { data: DashboardData; items: It
             <TaskRow key={i.id} item={i} data={data} dup={dup(i)} onOpen={() => onOpen(i.id)} />
           ))}
         </Section>
+        {autonomy.data ? <RunningOnItsOwn data={autonomy.data} /> : null}
         <Section title="Done" count={done.length} collapsible>
           {done.map((i) => (
             <TaskRow key={i.id} item={i} data={data} dup={dup(i)} onOpen={() => onOpen(i.id)} />
@@ -203,6 +211,8 @@ function TaskView({ w, onDecided }: { w: WorkspaceData; onDecided: () => void })
         </p>
       </div>
       <Working w={w} />
+      {w.dispute?.letterBody ? <DisputeLetter dispute={w.dispute} /> : null}
+      <VendorThread w={w} />
       <div className="text-[12.5px] text-zinc-500">{record}</div>
     </div>
   );

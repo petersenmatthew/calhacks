@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { GeistMono } from "geist/font/mono";
 import { GeistSans } from "geist/font/sans";
 import { AppShell } from "@/components/app-shell";
@@ -12,9 +12,17 @@ export const metadata: Metadata = {
   description: "Autonomous finance operations for AI research labs",
 };
 
+export const viewport: Viewport = {
+  // "only light" opts out of browsers' automatic dark mode, which turns the brand green black.
+  colorScheme: "only light",
+};
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={GeistSans.variable + " " + GeistMono.variable + " h-full antialiased"}>
+      <head>
+        <meta name="darkreader-lock" />
+      </head>
       <body className="h-full overflow-hidden bg-background text-foreground">
         <TooltipProvider delayDuration={150}>
           <LiveEventsProvider>

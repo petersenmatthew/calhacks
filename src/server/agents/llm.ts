@@ -4,7 +4,7 @@ import { getActor } from "../security/actors";
 import { getAgentSettings } from "../settings";
 import { invokeTool } from "./gateway";
 import { buildRunInput, instructionsFor } from "./prompts";
-import { toolsForAgent, type AgentRunContext } from "./tools";
+import { runScope, toolsForAgent, type AgentRunContext } from "./tools";
 
 let modelOverride: Model | null = null;
 
@@ -21,7 +21,7 @@ if (process.env.OPENAI_AGENTS_DISABLE_TRACING === "1") setTracingDisabled(true);
  * The run ends only after a terminal tool succeeds.
  */
 export async function runLlmAgent(ctx: AppContext, run: AgentRunContext) {
-  const sdkTools = toolsForAgent(run.agentId).map((def) =>
+  const sdkTools = toolsForAgent(run.agentId, runScope(run)).map((def) =>
     tool({
       name: def.name,
       description: def.description,
@@ -32,7 +32,7 @@ export async function runLlmAgent(ctx: AppContext, run: AgentRunContext) {
   );
   const agent = new Agent({
     name: getActor(ctx, run.agentId)?.name ?? run.agentId,
-    instructions: instructionsFor(run.agentId, getAgentSettings(ctx, run.agentId).guidance),
+    instructions: instructionsFor(run.agentId, getAgentSettings(ctx, run.agentId).guidance, run),
     model: modelOverride ?? ctx.config.model,
     tools: sdkTools,
     modelSettings: { toolChoice: "required", parallelToolCalls: false },

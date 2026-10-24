@@ -10,6 +10,7 @@ import { periodLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { DashboardData } from "@/server/queries";
 import { dashboardKey, Metrics } from "./dashboard/dashboard";
+import { ClockControl } from "./dashboard/clock-control";
 import { ResetButton } from "./dashboard/reset-button";
 import { SimulateDialog } from "./dashboard/simulate-dialog";
 
@@ -43,7 +44,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   if (here && here !== lastView) setLastView(here);
 
   const onTask = pathname.startsWith("/investigations");
-  const active = pathname === "/audit" || pathname.startsWith("/audit/") ? "audit" : pathname === "/canvas" || (onTask && lastView === "canvas") ? "canvas" : "board";
+  const active = pathname.startsWith("/audit")
+    ? "audit"
+    : pathname === "/canvas" || (onTask && lastView === "canvas")
+        ? "canvas"
+        : "board";
 
   return (
     <ShellContext.Provider value={{ period, setPeriod, lastView }}>
@@ -82,6 +87,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="ml-auto flex items-center gap-4">
             {data ? <Metrics data={data} /> : null}
             <div className="flex items-center gap-1.5">
+              {data ? <ClockControl now={data.clock.now} offsetMs={data.clock.offsetMs} onDone={() => mutate()} /> : null}
               <ResetButton onDone={() => mutate()} />
               <SimulateDialog onDone={() => mutate()} />
             </div>

@@ -11,9 +11,47 @@ export interface AppConfig {
   model: string;
   /** Default execution mode when nothing is stored in settings. */
   defaultMode: "llm" | "deterministic";
+  /** How often the scheduler syncs feeds and runs follow-ups. 0 disables it. */
+  schedulerIntervalMs: number;
+  /** Optional external billing feed polled by the scheduler. */
+  feedUrl: string | null;
+  /** Email and Slack delivery. Empty values mean messages stay in the outbox as "simulated". */
+  comms: CommsConfig;
   /** "one": the team works one case at a time. "all": cases run in parallel. */
   defaultRunMode: "one" | "all";
 }
+
+export interface CommsConfig {
+  appUrl: string;
+  vendorEmail: string | null;
+  emailFrom: string | null;
+  replyTo: string | null;
+  resendApiKey: string | null;
+  smtpUrl: string | null;
+  /** Mailbox the vendor's replies arrive in (imaps://user:pass@host:993). Derived from a Gmail SMTP_URL when unset. */
+  imapUrl: string | null;
+  /** How often to check that mailbox for vendor replies. 0 turns it off. */
+  inboxPollMs: number;
+  slackBotToken: string | null;
+  slackWebhookUrl: string | null;
+  slackUserIds: Record<string, string>;
+  slackDmFallbackChannel: string;
+}
+
+export const DEFAULT_COMMS: CommsConfig = {
+  appUrl: "http://localhost:3000",
+  vendorEmail: null,
+  emailFrom: null,
+  replyTo: null,
+  resendApiKey: null,
+  smtpUrl: null,
+  imapUrl: null,
+  inboxPollMs: 30_000,
+  slackBotToken: null,
+  slackWebhookUrl: null,
+  slackUserIds: {},
+  slackDmFallbackChannel: "finance-ops",
+};
 
 export interface AppContext {
   sqlite: Database.Database;
@@ -42,6 +80,9 @@ export function createAppContext(options: { file: string; config?: Partial<AppCo
       llmAvailable,
       model: options.config?.model ?? "gpt-5.6-luna",
       defaultMode: options.config?.defaultMode ?? (llmAvailable ? "llm" : "deterministic"),
+      schedulerIntervalMs: options.config?.schedulerIntervalMs ?? 0,
+      feedUrl: options.config?.feedUrl ?? null,
+      comms: { ...DEFAULT_COMMS, ...(options.config?.comms ?? {}) },
       defaultRunMode: options.config?.defaultRunMode ?? "all",
     },
   };

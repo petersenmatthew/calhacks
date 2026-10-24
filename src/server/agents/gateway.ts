@@ -8,7 +8,8 @@ import { getActor } from "../security/actors";
 import { authorize, guard, recordDenial } from "../security/authorize";
 import { ControlError, isControlError } from "../security/errors";
 import { getWorkItem } from "../workflow/work-items";
-import { TOOL_INDEX, toolsForAgent, type AgentRunContext, type ToolEvidence } from "./tools";
+import { runScope, TOOL_INDEX, toolsForAgent, type AgentRunContext, type ToolEvidence } from "./tools";
+import type { WorkItemRow } from "../workflow/work-items";
 
 export class RunAbortedError extends Error {
   constructor(message = "Environment was reset") {
@@ -67,7 +68,7 @@ export async function invokeTool(ctx: AppContext, run: AgentRunContext, name: st
     mode: run.mode,
   };
   const def = TOOL_INDEX.get(name);
-  const allowedForAgent = toolsForAgent(run.agentId).some((t) => t.name === name);
+  const allowedForAgent = toolsForAgent(run.agentId, runScope(run)).some((t) => t.name === name);
   if (!def || !allowedForAgent) {
     const error = new ControlError(
       (getActor(ctx, run.agentId)?.name ?? run.agentId) + " has no tool named " + name,
@@ -89,14 +90,15 @@ export async function invokeTool(ctx: AppContext, run: AgentRunContext, name: st
       if (typeof args.work_item_id === "string" && args.work_item_id !== run.workItemId) {
         throw new ControlError("Agents may only act on their assigned work item (" + run.workItemId + ")", "SCOPE");
       }
-      const item = getWorkItem(ctx, run.workItemId);
+      // Onboarding tools work on company history, not on a work item.
+      const item = def.scope === "onboarding" ? (null as unknown as WorkItemRow) : getWorkItem(ctx, run.workItemId);
       const { value: out, events: sideEffects } = collectActivity(ctx, () => def.handler({ ctx, run, item }, args));
-      const refs = (out.evidence ?? []).map((ev) => upsertEvidence(ctx, run, item.id, ev));
+      const refs = (out.evidence ?? []).map((ev) => upsertEvidence(ctx, run, run.workItemId, ev));
       const cited = Array.isArray(args.evidence_ids) ? (args.evidence_ids as string[]) : [];
       const evidenceIds = [...new Set([...refs.map((r) => r.id), ...cited])];
       const response: ToolResponse = { ok: true, ...out.result, evidence: refs.map((r) => ({ id: r.id, label: r.label })) };
       recordActivity(ctx, {
-        workItemId: item.id,
+        workItemId: run.workItemId,
         runId: run.runId,
         actorId: run.agentId,
         type: out.activityType ?? "TOOL_CALL",
@@ -116,8 +118,8 @@ export async function invokeTool(ctx: AppContext, run: AgentRunContext, name: st
         action: "tool:" + name,
         category: def.category,
         targetType: "work_item",
-        targetId: item.id,
-        workItemId: item.id,
+        targetId: run.workItemId,
+        workItemId: run.workItemId,
         evidenceIds,
         details: { runId: run.runId, mode: run.mode, args },
       });

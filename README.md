@@ -11,7 +11,11 @@ Autonomous finance operations for AI research labs. A team of six AI employees r
 | Budget Analyst | Checks a team's burn against its budget after anything posts to it |
 | Policy Analyst | Turns controller corrections into reusable policy |
 
+**Seats it fills:** the GPU accounts-payable accountant who reconciles compute invoices against what actually ran, and the cost accountant who allocates shared cluster spend to research teams.
+
 The fictional lab is **Atlas Research**. All source systems (scheduler, infrastructure controller, provider meters, invoices, ERP) are simulated in SQLite. The agent decisions, approvals, postings, and audit trail are real application state.
+
+Work starts on its own: a scheduler syncs provider billing feeds on a cursor, follows up on approvals and vendor disputes as business days pass, and the Policy Analyst learned its first policy by mining six months of AP history. See [What runs on its own](#what-runs-on-its-own) and [Proof it works](#proof-it-works).
 
 ## Quick start
 
@@ -39,10 +43,23 @@ Copy `.env.example` to `.env.local`. All are optional.
 | --- | --- | --- |
 | `OPENAI_API_KEY` | unset | Enables LLM agents through the OpenAI Agents SDK. Without it the app runs in **Deterministic replay**. Server-side only. |
 | `OPENAI_MODEL` | Agents SDK default | Model for LLM agents. |
-| `AGENT_MODE` | `llm` if a key is set, else `deterministic` | Starting execution mode. You can also switch modes in the sidebar. |
+| `AGENT_MODE` | `llm` if a key is set, else `deterministic` | Starting execution mode. Switch at runtime with `POST /api/settings {"mode": "llm"}`. |
 | `DETERMINISTIC_STEP_DELAY_MS` | `700` | Pause between deterministic agent steps so the live timeline is watchable. |
 | `DATABASE_PATH` | `./data/experiment-ledger.db` | SQLite file. |
 | `OPENAI_AGENTS_DISABLE_TRACING` | unset | Set to `1` to stop the SDK exporting traces to OpenAI. |
+| `SCHEDULER_INTERVAL_MS` | `5000` | How often the scheduler syncs billing feeds and runs follow-up rules. |
+| `AUTONOMY` | on | Set to `off` to disable the scheduler (agents still run when work is queued). |
+| `BILLING_FEED_URL` | unset | Optional external billing feed polled on a cursor: `GET <url>?after=<cursor>` returns `{ events, next_cursor }`. |
+| `VENDOR_EMAIL` | each provider's billing address | Send every vendor email to this inbox instead (use your own address for the demo). |
+| `RESEND_API_KEY` | unset | Send email through [Resend](https://resend.com). |
+| `SMTP_URL` | unset | Or send through any SMTP server, e.g. `smtps://you%40gmail.com:APP_PASSWORD@smtp.gmail.com:465`. |
+| `EMAIL_FROM`, `EMAIL_REPLY_TO` | Resend test sender / SMTP user | Sender and reply-to for vendor email. |
+| `IMAP_URL` | the Gmail account in `SMTP_URL` | Mailbox vendor replies are read from (`imaps://user:pass@host:993`). |
+| `INBOX_POLL_MS` | `30000` | How often to check it. `0` turns reading off. |
+| `SLACK_BOT_TOKEN` | unset | Post to a real Slack workspace. Scopes: `chat:write`, `chat:write.public`, `channels:read`, `channels:manage`, `channels:join`; the bot creates and joins the channels below. |
+| `SLACK_WEBHOOK_URL` | unset | Or post everything to one channel through an incoming webhook. |
+| `SLACK_USER_IDS` | `{}` | One member id (`U0123`, everyone pings you) or a JSON map from handle to id, e.g. `{"priya":"U0123"}`. |
+| `APP_URL` | `http://localhost:3000` | Base for the links in Slack messages. |
 
 ### Execution modes
 
@@ -61,6 +78,14 @@ Copy `.env.example` to `.env.local`. All are optional.
 8. Open **Audit trail**: every tool call, decision, posting, and denied action, hash-chained, plus policy versions, journal entries, and a trial balance.
 
 **Custom invoice line** lets you type any hours and rate to create a discrepancy that is not scripted. **Resend last billing event** proves idempotency. **Reset demo** reloads the sandbox.
+
+### Autonomy demo (no clicks needed for the work itself)
+
+1. Open **Canvas**. On boot the Policy Analyst read six months of AP history and proposed **VARIANCE-MATERIALITY v1**: variances up to $50 were always paid as billed, every dispute was $96 or more. Approve it. It is the first item under **Needs you** in the sidebar: expand it and approve. (It also appears on the board.) The sidebar's **Running on its own** list shows each feed's sync position and every follow-up as it fires.
+2. Wait two minutes, or use the clock in the top bar (**+1 hour**). The Helios and Meridian feeds publish new lines; the scheduler syncs them on a cursor and the agents work them: an exact match auto-posts, and a Helios A100 line billed $0.40/h over contract ($12) is accepted under the learned policy instead of disputed.
+3. **+3 days**: a Helios line billed 6 h after termination arrives and becomes a $600 dispute waiting for you. Approve it, and the Vendor Liaison writes the dispute letter and sends it.
+4. **+15 days**: Helios has not answered. The scheduler assigns the Vendor Liaison, which checks the dispute and sends a follow-up citing contract §7.2. **+16 days**: still nothing, so it escalates to the controller with a recommended next step. Leave an approval waiting and it is reminded after a day and escalated to the CFO after three.
+5. Open a disputed task: the letter and evidence exactly as emailed are on the task, and your Slack workspace shows each ping and who it mentioned.
 
 ## How it works
 
@@ -90,16 +115,57 @@ flowchart LR
 - **Durability.** Jobs live in SQLite. Interrupted jobs are re-queued on restart, and approvals pause a workflow until a human decides.
 - **Live updates.** Activity rows are streamed over server-sent events; a reconnect replays missed rows.
 
+## What runs on its own
+
+- **Scheduler.** Inside the worker, every `SCHEDULER_INTERVAL_MS`. It does not decide anything itself: it pulls work in and puts agent jobs on the same durable queue, so a crash or redeploy never loses work.
+- **Feed sync.** Each provider feed is read from a cursor stored in `sync_cursors`, so a re-sync never re-reads a line; ingestion is also idempotent on event and line ids. A line that fails is recorded and set aside so the feed keeps flowing. The demo feeds publish over business time (`sim/feed-schedule.ts`); `BILLING_FEED_URL` points the same code at a real HTTP feed.
+- **Business clock.** Finance runs over weeks. Reminders and chases measure age on a business clock that equals wall-clock time in production; the demo can move it forward, and every move is audited.
+- **Follow-ups** (`workflow/follow-ups.ts`). Approval waiting 1 day: remind the controller. 3 days: escalate to the CFO (backup approver). Vendor dispute unanswered 14 days: the Vendor Liaison runs `get_dispute_status` and `send_vendor_follow_up`. 30 days: it runs `escalate_dispute` with a recommendation. Each action is keyed so it happens once, and every one is in the audit trail.
+- **Onboarding** (`workflow/onboarding.ts`). Before the first close the Policy Analyst runs `query_ap_history` over the ERP's AP export and `propose_materiality_policy`. The application rejects a threshold that would have accepted any variance the vendor later credited. Once the controller approves, the ledger gateway lets variances at or below the threshold post without a dispute.
+
+## Email and Slack
+
+Everything the system tells a person or a vendor goes through an outbox table, written in the same transaction as the action that caused it and delivered by the scheduler. A message is never sent for an action that rolled back, and a failed send is retried. With no mail server or Slack configured, messages are kept in the outbox and marked "recorded" (letters still show on the dispute).
+
+**Vendor disputes.** When the controller approves a dispute, the Vendor Liaison writes the cover letter and the application attaches the evidence: the invoice line, the instance's PROVISIONED, STOP_REQUESTED and TERMINATED times with the provider's own API acknowledgment, the provider meter, the contract calculation, and the text of each cited clause with the reason it applies. Clauses are chosen by what is wrong with the line (billed after termination: termination and metering; wrong rate: rates; always the dispute-window clause), so a letter never cites one that does not apply. The letter, evidence, recipient, and delivery status are stored on the dispute record and shown on the task. The email carries a CSV of the same facts, and the subject carries the vendor case reference. Vendor follow-ups at 14 days go to the same address as replies.
+
+**When the vendor writes back.** The scheduler reads the AP mailbox over IMAP every 30 seconds (Gmail: the same app password as SMTP). A reply is matched to its dispute by email thread or by the case reference in the subject, stored once by Message-ID with the quoted original stripped, posted to #vendor-disputes, and handed to the Vendor Liaison, who reads the whole thread and does one of five things:
+
+| The vendor... | The Vendor Liaison | Guardrail |
+| --- | --- | --- |
+| Issued the full credit | Books it with their memo number and closes the case | A message naming a different amount cannot be booked as a full credit |
+| Refused | Books the charge to the owning team, pings Priya and the lead | |
+| Asked for records or pushed back | Answers in the same thread with the evidence and clause, CSV attached | May only quote amounts already in the approved dispute |
+| Offered a partial credit, or asked for something only staff know (PO, signature) | Asks Priya, with its recommendation, in Slack and on the task (Accept / Hold out / write an answer); the case stays open | A partial credit can only be booked after Priya answers, and is split: credit for what the vendor gave, the rest to the team |
+| Only acknowledged | Notes it and keeps waiting | |
+
+Our own outgoing mail carries an `X-Atlas-Outbox` header so it is never read back as a reply, a reply cannot predate its letter, and once the vendor has answered the 14-day chase stops. A reply that arrived some other way can be pasted on the task.
+
+**Who gets pinged** (Atlas Research Slack workspace):
+
+| Event | Where | Who |
+| --- | --- | --- |
+| Approval needed (proposal or learned policy) | #finance-approvals | Priya (controller) |
+| Approval waiting 1 day / 3 days | DM / DM + #finance-approvals | Priya / Dana (CFO, backup approver) |
+| An agent needs information (e.g. unknown owner) | #finance-ops | Priya |
+| Dispute sent, vendor followed up, vendor replied, liaison answered | #vendor-disputes | FYI to Priya |
+| Vendor offered less, or asked for something only staff know | #vendor-disputes + DM | Priya |
+| Dispute unanswered 30 days | #vendor-disputes + DM | Priya |
+| Dispute denied, charge moved to a team | #vendor-disputes | Priya and that team's lead |
+| Team trending over budget | #budget-alerts | Team lead, plus Priya when at risk or over |
+
+**Connecting the real thing.** For email, sign up for Resend with the address you put in `VENDOR_EMAIL` and set `RESEND_API_KEY` (Resend's test sender can only email the account owner), or use a Gmail app password in `SMTP_URL`. For Slack, create a free workspace, add an app with the scopes above, install it, set `SLACK_BOT_TOKEN`, and set `SLACK_USER_IDS` for whoever should be mentioned. Open `/api/comms/check` to see what is connected; `POST` it to retry failed messages, send a test to Slack and the vendor inbox, and check the mailbox for replies now.
+
 ### Agents and tools
 
 | Agent | Tools |
 | --- | --- |
 | Compute Investigator | `get_work_item`, `get_instance_lifecycle`, `get_gpu_job_logs`, `get_experiment`, `get_provider_usage`, `get_billing_terms`, `submit_compute_findings`, `handoff_to_finance`, `request_human_info` |
 | Capacity Planner | `get_work_item`, `find_related_experiments`, `get_experiment`, `get_billing_terms`, `submit_compute_findings`, `handoff_to_finance`, `request_human_info` |
-| Cost Accountant | `get_work_item`, `get_project_budget`, `get_allocation_policy`, `search_precedents`, `calculate_cost_allocation`, `propose_adjustment`, `propose_vendor_dispute`, `request_human_approval`, `submit_for_posting`, `request_more_info` |
-| Vendor Liaison | `get_work_item`, `get_dispute_package`, `get_billing_terms`, `send_vendor_dispute`, `close_dispute` |
+| Cost Accountant | `get_work_item`, `get_project_budget`, `get_allocation_policy`, `search_precedents`, `calculate_cost_allocation`, `propose_adjustment`, `propose_vendor_dispute`, `request_human_approval`, `submit_for_posting`, `request_more_info` (reads the learned materiality policy through `get_allocation_policy`) |
+| Vendor Liaison | `get_work_item`, `get_dispute_package`, `get_billing_terms`, `send_vendor_dispute`, `close_dispute`, and for follow-ups `get_dispute_status`, `send_vendor_follow_up`, `escalate_dispute` |
 | Budget Analyst | `get_work_item`, `get_posted_charges`, `get_project_budget`, `forecast_project_burn`, `record_budget_note` |
-| Policy Analyst | `get_work_item`, `get_allocation_policy`, `search_precedents`, `propose_policy`, `handoff_to_finance` |
+| Policy Analyst | `get_work_item`, `get_allocation_policy`, `search_precedents`, `propose_policy`, `handoff_to_finance`, and at onboarding `query_ap_history`, `propose_materiality_policy`, `finish_onboarding` |
 
 All arithmetic is application code: billable hours, expected charges, allocations (largest-remainder rounding, always summing exactly), and dispute amounts. Agents choose actions and cite evidence; they cannot type amounts.
 
@@ -114,12 +180,20 @@ All arithmetic is application code: billable hours, expected charges, allocation
 - Repeated billing events are ignored without new work or postings.
 - A dispute never reduces accounts payable. Only a vendor credit does.
 
+## Proof it works
+
+**What is real:** every agent decision, tool call, approval, policy, journal entry, follow-up, and audit event is application state, enforced by the same gateway in both execution modes. **What is simulated:** the provider feeds, scheduler, infrastructure controller, meters, experiment tracker, ERP, AP history, and vendor portal.
+
+The seeded-case harness scores the agents against an answer key for every case (see [Evaluation](#evaluation)).
+
 ## Tests
 
 ```bash
 npm test
 ```
 
+- **Autonomy:** feed sync on a cursor with no duplicates, onboarding proposes the $50 threshold the history supports, the learned policy changes the outcome of a $12 variance, approval reminders and escalations fire once, waiting time is measured from the request, and an unanswered dispute is chased at 14 days and escalated at 30.
+- **Email and Slack:** a dispute cites only the clauses that apply and carries the lifecycle evidence, the letter is stored on the dispute and emailed with a CSV attachment, the controller is pinged in Slack, and delivery through Resend and a Slack bot token is exercised with a stubbed network.
 - **Arithmetic:** exact allocation sums and contract billable hours.
 - **Correct billing:** an instance whose job ended early is explained with no dispute.
 - **Scenario 1:** the Vendor Liaison sends the $1,200 dispute, and the liability stays unchanged until the Liaison books the vendor's credit.
@@ -152,9 +226,13 @@ src/server/agents      tools, gateway, LLM runner (Agents SDK), deterministic po
 src/server/workflow    ingestion, checks, approvals, decisions, ledger gateway, policies, jobs
 src/server/domain      money, billing, allocation, state machine
 src/server/security    actors, permissions, guard
-src/server/sim         seed data and demo scenarios (simulated source systems)
+src/server/sim         seed data, demo scenarios, feed schedule, AP history (simulated source systems)
+src/server/sync        billing feed sync with cursors (simulated outbox and HTTP adapter)
+src/server/comms       people and channels, the outbox, email and Slack delivery, the AP mailbox reader
+src/server/scheduler.ts, clock.ts   what starts work on its own, and the business clock
 src/app                pages and API routes (SSE at /api/stream)
-src/components         dashboard, investigation workspace, audit trail
+src/components         dashboard, investigation workspace, autonomy page, audit trail
+scripts/eval.ts        npm run eval (seeded-case harness)
 drizzle/               SQL migrations
 tests/                 Vitest suite
 ```
@@ -162,9 +240,9 @@ tests/                 Vitest suite
 ## Limitations
 
 - **LLM mode:** no OpenAI key was available while building, so LLM mode was verified through the SDK's scripted model, not live model calls. Deterministic replay is the default when no key is set.
-- **One demo user:** there is no login. Every human action is taken as the controller, Matthew Petersen.
-- **Simulated systems:** source systems, the ERP, and the vendor portal are simulated, and vendor responses are triggered from the UI.
+- **One demo user:** there is no login. Every human action is taken as the controller, Priya Natarajan.
+- **Simulated systems:** source systems, the ERP, AP history, the billing feeds, and the vendor portal are simulated, and vendor responses are triggered from the UI. Email and Slack are delivered only when a mail server or Slack is configured; otherwise they are recorded. Vendor replies are read from the mailbox when IMAP is set up (or pasted on the task); the "Simulate vendor" buttons still work without email.
 - **Investigation page:** the Flow tab on an investigation still shows only the Compute Investigator and the Cost Accountant. The Canvas shows all six.
-- **Existing databases:** actors are append-only, so a database created before the rename keeps the old names "Compute Agent" and "Finance Agent" until **Reset demo**. The four new employees are added automatically at startup.
-- **Single-node storage:** SQLite runs on one node. The worker runs inside the Next.js server process; restart the dev server after changing server code.
+- **Existing databases:** actors are append-only, so a database created before the rename keeps the old names "Compute Agent" and "Finance Agent" until **Reset demo**. New employees are added automatically at startup.
+- **Runs while the server runs:** SQLite runs on one node, and the worker and scheduler run inside the Next.js server process, so nothing happens while it is stopped (queued jobs and due follow-ups resume on restart); restart the dev server after changing server code.
 - **Reset wipes everything:** Reset demo deletes the sandbox, including its audit log. It is a demo control, not a production feature.

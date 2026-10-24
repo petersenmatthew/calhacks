@@ -1,3 +1,4 @@
+import { and, eq, isNull } from "drizzle-orm";
 import type { AppContext } from "../context";
 import { tx } from "../context";
 import { appendAudit } from "../audit";
@@ -15,6 +16,9 @@ import {
 import { ACTOR, ACTOR_SEED } from "../security/actors";
 import { ingestCase } from "./scenarios";
 import { SEED_CASES } from "./cases";
+import { seedFeedSchedule } from "./feed-schedule";
+import { seedApHistory } from "./history";
+import { scheduleOnboarding } from "../workflow/onboarding";
 
 export const PROJECTS = [
   { id: "PRJ-FLM", name: "Frontier Language Models", lead: "Dr. Maya Chen", costCenter: "CC-410", monthlyBudgetCents: 52_000_000 },
@@ -24,9 +28,9 @@ export const PROJECTS = [
 ];
 
 const PROVIDERS = [
-  { id: "PRV-HELIOS", name: "Lambda", shortName: "Lambda" },
-  { id: "PRV-STRATUS", name: "CoreWeave", shortName: "CoreWeave" },
-  { id: "PRV-MERIDIAN", name: "Nebius", shortName: "Nebius" },
+  { id: "PRV-HELIOS", name: "Lambda", shortName: "Lambda", billingEmail: "billing@lambda.example" },
+  { id: "PRV-STRATUS", name: "CoreWeave", shortName: "CoreWeave", billingEmail: "ar@coreweave.example" },
+  { id: "PRV-MERIDIAN", name: "Nebius", shortName: "Nebius", billingEmail: "billing@nebius.example" },
 ];
 
 const HELIOS_CLAUSES: ContractClause[] = [
@@ -242,7 +246,11 @@ export function ensureActors(ctx: AppContext) {
  * loads every case in cases.ts for the eval and tests.
  */
 export function seedEnvironment(ctx: AppContext, cases: "demo" | "all" = "all") {
-  tx(ctx, () => seedReferenceData(ctx));
+  tx(ctx, () => {
+    seedReferenceData(ctx);
+    seedApHistory(ctx);
+    seedFeedSchedule(ctx);
+  });
   const seeded = cases === "all" ? SEED_CASES : SEED_CASES.filter((c) => c.category === "clean");
   for (const c of seeded) ingestCase(ctx, c.data);
   recordActivity(ctx, {
@@ -251,4 +259,25 @@ export function seedEnvironment(ctx: AppContext, cases: "demo" | "all" = "all") 
     status: "info",
     title: "Atlas Research sandbox loaded for the October 2026 close",
   });
+  scheduleOnboarding(ctx);
+}
+
+/**
+ * Bring a database seeded by an older version up to date without wiping it:
+ * new actors, AP history, the feed schedule, and onboarding.
+ */
+export function upgradeEnvironment(ctx: AppContext) {
+  tx(ctx, () => {
+    ensureActors(ctx);
+    const history = ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM erp_ap_history").get() as { n: number };
+    if (history.n === 0) seedApHistory(ctx);
+    const feed = ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM feed_events").get() as { n: number };
+    if (feed.n === 0) seedFeedSchedule(ctx);
+    for (const p of PROVIDERS) {
+      // Databases created before the providers were renamed to real GPU clouds pick up the new names.
+      ctx.db.update(providers).set({ name: p.name, shortName: p.shortName }).where(eq(providers.id, p.id)).run();
+      ctx.db.update(providers).set({ billingEmail: p.billingEmail }).where(and(eq(providers.id, p.id), isNull(providers.billingEmail))).run();
+    }
+  });
+  scheduleOnboarding(ctx);
 }

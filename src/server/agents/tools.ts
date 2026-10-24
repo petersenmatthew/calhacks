@@ -18,6 +18,7 @@ import {
   providerUsage,
   providers,
   approvalRequests,
+  erpApHistory,
   vendorDisputes,
   workItems,
   type AllocationLine,
@@ -48,6 +49,23 @@ import {
 } from "../workflow/policies";
 import { resolveReconciliation, setWorkItemOutcome } from "../workflow/reconciliation";
 import { assignAgent, transitionWorkItem, type WorkItemRow } from "../workflow/work-items";
+import { businessAgeMs, DAY_MS, formatDuration } from "../clock";
+import { followUpsFor, recordFollowUp } from "../workflow/follow-ups";
+import { MATERIALITY_POLICY_KEY, ONBOARDING_ID } from "../workflow/onboarding";
+import { buildDisputeEvidence, relevantClauses } from "../workflow/dispute-evidence";
+import { CONTROLLER, leadFor } from "../comms/directory";
+import { dmSlack, mention, postSlack, queueEmail, taskLink } from "../comms/outbox";
+import { renderLetterHtml } from "../workflow/decisions";
+import {
+  askControllerAboutVendor,
+  disputeFor,
+  disputeThread,
+  noteVendorUpdate,
+  quotableAmounts,
+  recordVendorDecision,
+  replyToVendor,
+  unansweredFor,
+} from "../workflow/vendor-replies";
 
 export interface AgentRunContext {
   runId: string;
@@ -98,6 +116,8 @@ export const AGENT_KEY: Record<string, AgentKey> = {
 export interface ToolDefinition {
   name: string;
   agent: AgentKey | AgentKey[] | "shared";
+  /** "onboarding" tools work on company history and run outside any work item. */
+  scope?: "work_item" | "onboarding";
   permission: Permission;
   category: AuditCategory;
   description: string;
@@ -672,6 +692,13 @@ const requestHumanInfo = defineTool({
       .set({ pendingQuestion: { agentId: run.agentId, question, askedBy: run.agentId } })
       .where(eq(workItems.id, item.id))
       .run();
+    postSlack(ctx, {
+      channel: "finance-ops",
+      event: "info.requested",
+      workItemId: item.id,
+      mentions: [CONTROLLER],
+      text: mention(CONTROLLER) + " " + (getActor(ctx, run.agentId)?.name ?? "An agent") + " has a question on " + taskLink(ctx, item.id) + ": " + question,
+    });
     return {
       result: { status: "NEEDS_INFO" },
       title: (getActor(ctx, run.agentId)?.name ?? "Agent") + " requested information from the controller",
@@ -768,6 +795,8 @@ const getAllocationPolicy = defineTool({
       };
     }
     const policy = getApprovedPolicy(ctx, POLICY_KEYS.explainedVariance);
+    const materiality = getApprovedPolicy(ctx, MATERIALITY_POLICY_KEY);
+    const threshold = materiality?.rule.thresholdCents ?? 0;
     return {
       result: {
         applicable_policy: policy
@@ -781,10 +810,20 @@ const getAllocationPolicy = defineTool({
             }
           : null,
         conditions: policy?.rule.conditions ?? [],
+        materiality_policy: materiality
+          ? {
+              id: materiality.id,
+              version: materiality.version,
+              statement: materiality.statement,
+              threshold: formatCents(threshold),
+              threshold_cents: threshold,
+              applies_to_this_item: item.discrepancyCents > 0 && item.discrepancyCents <= threshold,
+            }
+          : null,
       },
-      evidence: policy
-        ? [{ sourceType: "policy", sourceId: policy.id, label: "Policy " + policy.policyKey + " v" + policy.version, snapshot: policy }]
-        : [],
+      evidence: [policy, materiality]
+        .filter((p): p is NonNullable<typeof p> => Boolean(p))
+        .map((p) => ({ sourceType: "policy", sourceId: p.id, label: "Policy " + p.policyKey + " v" + p.version, snapshot: p })),
       title: "Retrieved policy " + (policy ? policy.policyKey + " v" + policy.version : "(none)"),
       summary: policy?.statement ?? "No standing policy for explained variances.",
     };
@@ -989,7 +1028,7 @@ const proposeVendorDispute = defineTool({
   permission: "dispute:propose",
   category: "write",
   description:
-    "Draft a vendor dispute for the amount not supported by the instance lifecycle and contract. The application computes the disputed amount and allocates the undisputed amount to the owner. Requires compute findings that the charge is not explained.",
+    "Draft a vendor dispute for the amount not supported by the instance lifecycle and contract. The application computes the disputed amount, allocates the undisputed amount to the owner, and chooses the contract clauses that apply to what is wrong with the line (clauses you cite that do not apply are dropped). Requires compute findings that the charge is not explained.",
   schema: z.object({
     work_item_id: workItemId,
     rationale: z.string(),
@@ -1014,6 +1053,11 @@ const proposeVendorDispute = defineTool({
       { projectId: owner, amountCents: undisputed, weight: 1, basis: "Contract-supported " + checks.billableHours + " h" },
     ];
     const rationale = args.rationale.trim().slice(0, 1200);
+    const line = ctx.db.select().from(invoiceLines).where(eq(invoiceLines.id, item.invoiceLineId)).get();
+    const issued = line ? ctx.db.select().from(invoices).where(eq(invoices.id, line.invoiceId)).get()?.issuedAt ?? null : null;
+    const applicable = relevantClauses(contractForProvider(ctx, item.providerId).clauses, checks, issued);
+    const clauseRefs = applicable.map((c) => c.ref);
+    const dropped = args.clause_refs.map((r) => r.replace(/^§\s*/, "")).filter((r) => !clauseRefs.includes(r));
     supersedeDrafts(ctx, item);
     const { version, previousId } = nextProposalVersion(ctx, item);
     const payload: ProposalPayload = {
@@ -1029,7 +1073,7 @@ const proposeVendorDispute = defineTool({
         undisputedCents: undisputed,
         invoicedCents: checks.invoicedCents,
         reason: rationale,
-        clauseRefs: args.clause_refs,
+        clauseRefs,
       },
     };
     const id = nextId(ctx, "PR", 2001);
@@ -1060,6 +1104,8 @@ const proposeVendorDispute = defineTool({
         version,
         disputed_amount: formatCents(disputed),
         undisputed_amount: formatCents(undisputed),
+        clauses_cited: applicable.map((c) => ({ ref: c.ref, title: c.title, why: c.why })),
+        clauses_dropped: dropped,
         liability_note: "Accounts payable stays at " + formatCents(checks.invoicedCents) + " until the vendor issues a credit.",
         next_step: "request_human_approval",
       },
@@ -1235,7 +1281,12 @@ const submitForPosting = defineTool({
     });
     setProposalStatus(ctx, proposal.id, "EXECUTED");
     transitionWorkItem(ctx, item.id, "POSTED", ACTOR.ledger, "Posted " + entryId);
-    const outcome = item.type === "SHARED_ALLOCATION" ? "ALLOCATED_UNDER_POLICY" : "CHARGE_EXPLAINED";
+    const outcome =
+      item.type === "SHARED_ALLOCATION"
+        ? "ALLOCATED_UNDER_POLICY"
+        : standing.policyId.startsWith("POL-" + MATERIALITY_POLICY_KEY)
+          ? "ACCEPTED_BELOW_MATERIALITY"
+          : "CHARGE_EXPLAINED";
     resolveReconciliation(ctx, item.invoiceLineId, outcome);
     setWorkItemOutcome(ctx, item.id, outcome);
     transitionWorkItem(ctx, item.id, "RESOLVED", ACTOR.orchestrator, "Reconciliation complete under " + standing.policyId);
@@ -1310,6 +1361,11 @@ const getDisputePackage = defineTool({
         undisputed_amount: formatCents(d.undisputedCents),
         reason: d.reason,
         clauses: clauses.map((c) => ({ ref: c.ref, title: c.title, text: c.text })),
+        evidence_pack: item.checks.kind === "instance" ? (() => {
+          const e = buildDisputeEvidence(ctx, item);
+          return { grounds: e.grounds.map((g) => g.statement), calculation: e.calculation, instance: e.instance, invoice: e.invoice };
+        })() : null,
+        evidence_note: "The application attaches the evidence pack and the cited clause text to your letter. Your letter should state the disputed amount, the instance id, and the grounds in a sentence or two.",
         vendor_dispute: record
           ? { id: record.id, status: record.status, vendor_reference: record.vendorReference, submitted_at: record.submittedAt, replied_at: record.resolvedAt }
           : null,
@@ -1330,7 +1386,7 @@ const sendVendorDispute = defineTool({
   category: "write",
   terminal: true,
   description:
-    "Send the approved dispute to the provider with the letter you wrote. The ledger gateway submits it and checks the controller approval. The letter must state the approved disputed amount. Ends your run.",
+    "Send the approved dispute to the provider with the letter you wrote. The ledger gateway submits it, checks the controller approval, attaches the evidence pack and clause text, stores the letter on the dispute record, and emails it to the provider's billing contact. The letter must state the approved disputed amount and the instance id. Ends your run.",
   schema: z.object({ work_item_id: workItemId, subject: z.string(), message: z.string().describe("The letter to the provider's billing team.") }),
   handler: ({ ctx, item }, args) => {
     const found = approvedDispute(ctx, item);
@@ -1339,7 +1395,8 @@ const sendVendorDispute = defineTool({
     const message = args.message.trim().slice(0, 3000);
     if (message.length < 80) fail("The letter is too short to send.");
     if (!message.includes(amount)) fail("The letter must state the approved disputed amount, " + amount + ".", "ARITHMETIC_CHECK");
-    const sent = submitApprovedDispute(ctx, item, message);
+    if (item.instanceId && !message.includes(item.instanceId)) fail("The letter must name the instance, " + item.instanceId + ", so the provider can find it.", "EVIDENCE_REQUIRED");
+    const sent = submitApprovedDispute(ctx, item, { subject: args.subject.trim().slice(0, 200), message });
     return {
       result: { dispute_id: sent.disputeId, vendor_reference: sent.vendorReference, provider: sent.provider, disputed_amount: amount },
       title: "Vendor Liaison sent " + sent.provider + " a dispute for " + amount,
@@ -1505,6 +1562,17 @@ const recordBudgetNote = defineTool({
         createdAt: nowIso(),
       })
       .run();
+    const lead = leadFor(b.project.id);
+    if (b.status !== "on_track") {
+      const who = [...(lead ? [lead.handle] : []), ...(b.status === "at_risk" || b.status === "over" ? [CONTROLLER] : [])];
+      postSlack(ctx, {
+        channel: "budget-alerts",
+        event: "budget." + b.status,
+        workItemId: item.id,
+        mentions: who,
+        text: who.map(mention).join(" ") + " " + b.project.name + " is *" + b.status.replace("_", " ") + "*: " + summary + " (" + taskLink(ctx, item.id) + ")",
+      });
+    }
     return {
       result: { finding_id: id, status: b.status, projected_month_end: formatCents(b.projected) },
       title: "Budget Analyst: " + b.project.name + " is " + b.status.replace("_", " "),
@@ -1514,6 +1582,571 @@ const recordBudgetNote = defineTool({
       terminal: { summary: b.project.name + " " + b.status.replace("_", " ") },
     };
   },
+});
+
+/* ------------------------------------------------------------------ */
+/* Vendor Liaison: dispute follow-ups (started by the scheduler)       */
+/* ------------------------------------------------------------------ */
+
+function openDispute(ctx: AppContext, item: WorkItemRow) {
+  const dispute = ctx.db.select().from(vendorDisputes).where(eq(vendorDisputes.workItemId, item.id)).get();
+  if (!dispute) fail("There is no vendor dispute on " + item.id + ".", "NOT_FOUND");
+  return dispute;
+}
+
+function vendorMessages(ctx: AppContext, disputeId: string) {
+  return followUpsFor(ctx, disputeId)
+    .filter((f) => f.kind === "VENDOR_MESSAGE")
+    .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+}
+
+const getDisputeStatus = defineTool({
+  name: "get_dispute_status",
+  agent: "vendor",
+  permission: "dispute:follow_up",
+  category: "read",
+  description:
+    "Status of the vendor dispute on your work item: amount, days open on the business clock, the contract's dispute clause, follow-ups already sent, and what is still owed.",
+  schema: z.object({ work_item_id: workItemId }),
+  handler: ({ ctx, item }) => {
+    const dispute = openDispute(ctx, item);
+    const age = businessAgeMs(ctx, dispute.submittedAt);
+    const daysOpen = Math.floor(age / DAY_MS);
+    const contract = contractForProvider(ctx, item.providerId);
+    const clauses = contract.clauses.filter((c) => /dispute/i.test(c.title));
+    const provider = ctx.db.select().from(providers).where(eq(providers.id, item.providerId)).get();
+    const prior = vendorMessages(ctx, dispute.id);
+    const ap = ctx.sqlite
+      .prepare("SELECT COALESCE(SUM(credit_cents - debit_cents), 0) AS bal FROM journal_lines l JOIN journal_entries e ON e.id = l.entry_id WHERE l.account_code = '2000' AND e.invoice_line_id = ?")
+      .get(item.invoiceLineId) as { bal: number };
+    const snapshot = { ...dispute, daysOpen, apOutstandingCents: ap.bal, priorFollowUps: prior.length };
+    return {
+      result: {
+        dispute: {
+          id: dispute.id,
+          status: dispute.status,
+          amount: formatCents(dispute.amountCents),
+          submitted_at: dispute.submittedAt,
+          days_open: daysOpen,
+          vendor_reference: dispute.vendorReference,
+          reason: dispute.reason,
+        },
+        provider: { id: item.providerId, name: provider?.name },
+        dispute_clauses: clauses.map((c) => ({ ref: c.ref, title: c.title, text: c.text })),
+        prior_follow_ups: prior.map((f) => ({ sent_at_business_time: f.businessAt, message: (f.details as { message?: string }).message ?? "" })),
+        accounts_payable_outstanding: formatCents(ap.bal),
+      },
+      evidence: [{ sourceType: "vendor_dispute", sourceId: dispute.id, label: "Dispute " + dispute.id + " status (day " + daysOpen + ")", snapshot }],
+      title: "Checked dispute " + dispute.id + ": " + dispute.status.toLowerCase() + ", " + formatDuration(age) + " open",
+      summary: prior.length ? prior.length + " follow-up(s) already sent." : "No follow-up sent yet.",
+    };
+  },
+});
+
+const sendVendorFollowUp = defineTool({
+  name: "send_vendor_follow_up",
+  agent: "vendor",
+  permission: "dispute:follow_up",
+  category: "write",
+  terminal: true,
+  description:
+    "Send a follow-up message to the vendor about the open dispute through the vendor portal (simulated). At most one follow-up per 7 days. Ends your run.",
+  schema: z.object({
+    work_item_id: workItemId,
+    message: z.string().describe("The message to the vendor's billing team. Reference the dispute, amount, and contract clause."),
+    evidence_ids: z.array(z.string()),
+  }),
+  handler: ({ ctx, run, item }, args) => {
+    const dispute = openDispute(ctx, item);
+    if (dispute.status !== "SUBMITTED" || item.state !== "DISPUTED") fail("Dispute " + dispute.id + " is " + dispute.status + "; nothing to chase.", "STATE_MACHINE");
+    const prior = vendorMessages(ctx, dispute.id);
+    const last = prior[prior.length - 1];
+    if (last && businessAgeMs(ctx, last.createdAt) < 7 * DAY_MS) fail("A follow-up was already sent in the last 7 days.", "FOLLOW_UP_RATE");
+    const message = args.message.trim().slice(0, 1500);
+    if (message.length < 40) fail("The follow-up message is too short to be useful to the vendor.");
+    const cited = requireEvidence(ctx, item, args.evidence_ids, 1);
+    const provider = ctx.db.select().from(providers).where(eq(providers.id, item.providerId)).get();
+    const n = prior.length + 1;
+    const daysOpen = Math.floor(businessAgeMs(ctx, dispute.submittedAt) / DAY_MS);
+    const to = dispute.sentTo ?? ctx.config.comms.vendorEmail ?? "billing@" + (provider?.shortName ?? "vendor").toLowerCase() + ".example";
+    const subject = "Re: " + (dispute.letterSubject ?? "[" + dispute.vendorReference + "] Billing dispute " + dispute.id);
+    const body = message + "\n\nReference: " + dispute.vendorReference + " (dispute " + dispute.id + ", " + formatCents(dispute.amountCents) + ", submitted " + dispute.submittedAt.slice(0, 10) + ").";
+    queueEmail(ctx, { to, subject, text: body, html: renderLetterHtml(body), event: "dispute.follow_up", workItemId: item.id, ref: dispute.id });
+    postSlack(ctx, {
+      channel: "vendor-disputes",
+      event: "dispute.follow_up",
+      workItemId: item.id,
+      ref: dispute.id,
+      text: "No reply from " + (provider?.name ?? "the vendor") + " on " + dispute.id + " after " + daysOpen + " days. Vendor Liaison sent follow-up #" + n + " to " + to + ". " + taskLink(ctx, item.id),
+    });
+    recordFollowUp(ctx, {
+      key: "vendor-message:" + dispute.id + ":" + n,
+      kind: "VENDOR_MESSAGE",
+      workItemId: item.id,
+      subjectId: dispute.id,
+      actorId: run.agentId,
+      details: { message, to, subject, channel: "email", number: n, daysOpen, evidenceIds: cited },
+    });
+    return {
+      result: { sent: true, follow_up_number: n, channel: "email", to, days_open: daysOpen },
+      title: "Vendor Liaison followed up with " + (provider?.name ?? "the vendor") + " on " + dispute.id + " (day " + daysOpen + ", no response)",
+      summary: message,
+      activityType: "DISPUTE",
+      changes: ["Follow-up #" + n + " sent on " + dispute.id],
+      terminal: { summary: "sent follow-up #" + n + " on " + dispute.id },
+    };
+  },
+});
+
+const escalateDispute = defineTool({
+  name: "escalate_dispute",
+  agent: "vendor",
+  permission: "dispute:follow_up",
+  category: "decision",
+  terminal: true,
+  description:
+    "Escalate an unanswered vendor dispute to the controller with a recommended next step. Only after at least one follow-up went unanswered. Ends your run.",
+  schema: z.object({
+    work_item_id: workItemId,
+    summary: z.string(),
+    recommended_action: z.string(),
+    evidence_ids: z.array(z.string()),
+  }),
+  handler: ({ ctx, run, item }, args) => {
+    const dispute = openDispute(ctx, item);
+    if (dispute.status !== "SUBMITTED") fail("Dispute " + dispute.id + " is " + dispute.status + ".", "STATE_MACHINE");
+    if (vendorMessages(ctx, dispute.id).length === 0) fail("Follow up with the vendor before escalating.", "FOLLOW_UP_FIRST");
+    const cited = requireEvidence(ctx, item, args.evidence_ids, 1);
+    const daysOpen = Math.floor(businessAgeMs(ctx, dispute.submittedAt) / DAY_MS);
+    const controller = getActor(ctx, ACTOR.controller)?.name ?? "the controller";
+    const note = args.summary.trim().slice(0, 600) + " Recommended: " + args.recommended_action.trim().slice(0, 400);
+    postSlack(ctx, {
+      channel: "vendor-disputes",
+      event: "dispute.escalated",
+      workItemId: item.id,
+      ref: dispute.id,
+      mentions: [CONTROLLER],
+      text: mention(CONTROLLER) + " " + dispute.id + " (" + taskLink(ctx, item.id) + ") is still unanswered after " + daysOpen + " days. " + note,
+    });
+    dmSlack(ctx, { to: CONTROLLER, event: "dispute.escalated", workItemId: item.id, ref: dispute.id, text: "Vendor dispute " + dispute.id + " needs you: " + note + " " + taskLink(ctx, item.id) });
+    recordFollowUp(ctx, {
+      key: "dispute-escalation-note:" + dispute.id,
+      kind: "ESCALATION_NOTE",
+      workItemId: item.id,
+      subjectId: dispute.id,
+      actorId: run.agentId,
+      details: { summary: args.summary.slice(0, 800), recommendedAction: args.recommended_action.slice(0, 800), daysOpen, evidenceIds: cited },
+    });
+    return {
+      result: { escalated_to: controller, days_open: daysOpen },
+      title: "Vendor Liaison escalated " + dispute.id + " to " + controller + " after " + daysOpen + " days without a vendor response",
+      summary: args.summary.trim().slice(0, 600) + " Recommended: " + args.recommended_action.trim().slice(0, 400),
+      activityType: "APPROVAL_REQUEST",
+      changes: ["Escalation note on " + dispute.id],
+      terminal: { summary: "escalated " + dispute.id + " to the controller" },
+    };
+  },
+});
+
+/* ------------------------------------------------------------------ */
+/* Vendor Liaison: the vendor's replies                                */
+/* ------------------------------------------------------------------ */
+
+const messageId = z.string().describe("A vendor message id from get_vendor_thread, for example VM-7001.");
+
+const getVendorThread = defineTool({
+  name: "get_vendor_thread",
+  agent: "vendor",
+  permission: "dispute:read",
+  category: "read",
+  description:
+    "The email conversation with the provider on your dispute, oldest first: the letter, follow-ups, the vendor's replies, and Atlas's answers. Lists the replies still waiting for you, the evidence you may quote back, and any answer the controller gave you.",
+  schema: z.object({ work_item_id: workItemId }),
+  handler: ({ ctx, item }) => {
+    const dispute = disputeFor(ctx, item);
+    const provider = ctx.db.select().from(providers).where(eq(providers.id, dispute.providerId)).get();
+    const thread = disputeThread(ctx, dispute);
+    const waiting = unansweredFor(ctx, dispute.id);
+    const contract = contractForProvider(ctx, dispute.providerId);
+    const ev = item.checks.kind === "instance" ? buildDisputeEvidence(ctx, item) : null;
+    const answers = ctx.db
+      .select()
+      .from(findings)
+      .where(and(eq(findings.workItemId, item.id), eq(findings.kind, "human")))
+      .orderBy(desc(findings.createdAt))
+      .all()
+      .slice(0, 3);
+    return {
+      result: {
+        dispute: {
+          id: dispute.id,
+          status: dispute.status,
+          case_reference: dispute.vendorReference,
+          disputed_amount: formatCents(dispute.amountCents),
+          sent_to: dispute.sentTo,
+          reason: dispute.reason,
+        },
+        provider: { id: dispute.providerId, name: provider?.name },
+        thread: thread.map((t) => ({
+          id: t.id,
+          at: t.at,
+          direction: t.direction,
+          from: t.from,
+          subject: t.subject,
+          body: t.body.slice(0, 2500),
+          status: t.status,
+        })),
+        waiting_for_you: waiting.map((m) => ({ id: m.id, from: m.fromAddr, received_at: m.receivedAt, status: m.status, body: m.body.slice(0, 2500) })),
+        evidence_you_can_share: ev
+          ? { grounds: ev.grounds.map((g) => g.statement), calculation: ev.calculation, instance: ev.instance, invoice: ev.invoice }
+          : null,
+        contract_clauses: contract.clauses.map((c) => ({ ref: c.ref, title: c.title, text: c.text })),
+        amounts_you_may_quote: [...quotableAmounts(ctx, item, dispute)].sort((a, b) => b - a).slice(0, 12).map(formatCents),
+        controller_answers: answers.map((a) => ({ question: (a.data as { question?: string }).question ?? null, answer: a.summary, at: a.createdAt })),
+        open_question_to_controller: item.pendingQuestion?.question ?? null,
+      },
+      evidence: waiting.map((m) => ({
+        sourceType: "vendor_message",
+        sourceId: m.id,
+        label: "Vendor reply " + m.id + " on " + dispute.id,
+        snapshot: { from: m.fromAddr, subject: m.subject, body: m.body, receivedAt: m.receivedAt },
+      })),
+      title: waiting.length
+        ? "Read " + (provider?.name ?? "the vendor") + "'s reply on " + dispute.id
+        : "Read the thread on " + dispute.id + " (" + thread.length + " messages)",
+      summary: waiting.length ? waiting[waiting.length - 1].body.replace(/\s+/g, " ").slice(0, 300) : "No reply waiting.",
+    };
+  },
+});
+
+const replyToVendorTool = defineTool({
+  name: "reply_to_vendor",
+  agent: "vendor",
+  permission: "dispute:follow_up",
+  category: "write",
+  terminal: true,
+  description:
+    "Email the provider in the same thread: answer their question, send the records they asked for, or restate Atlas's position. Set attach_evidence to resend the evidence CSV. You may only quote amounts already in the approved dispute; anything else needs ask_controller. Ends your run.",
+  schema: z.object({
+    work_item_id: workItemId,
+    answering: z.array(messageId).describe("The vendor message ids this reply answers."),
+    message: z.string().describe("The email to the provider's billing team. Plain text, no signature needed."),
+    attach_evidence: z.boolean(),
+    kind: z.enum(["question", "counter_offer", "denial", "update"]).describe("What the vendor's message was."),
+  }),
+  handler: ({ ctx, run, item }, args) => {
+    const text = args.message.trim().slice(0, 3000);
+    if (text.length < 40) fail("The reply is too short to be useful to the vendor.");
+    if (!args.answering.length) fail("Say which vendor message(s) you are answering.");
+    const sent = replyToVendor(ctx, item, { agentId: run.agentId, answering: args.answering, text, attachEvidence: args.attach_evidence, kind: args.kind });
+    const vendor = ctx.db.select().from(providers).where(eq(providers.id, sent.dispute.providerId)).get()?.name ?? "the vendor";
+    return {
+      result: { sent: true, to: sent.to, subject: sent.subject, message_id: sent.id, attached_evidence: args.attach_evidence },
+      title: "Vendor Liaison answered " + vendor + " on " + sent.dispute.id,
+      summary: text,
+      activityType: "DISPUTE",
+      changes: ["Reply " + sent.id + " emailed to " + sent.to],
+      terminal: { summary: "answered the vendor on " + sent.dispute.id },
+    };
+  },
+});
+
+const recordVendorDecisionTool = defineTool({
+  name: "record_vendor_decision",
+  agent: "vendor",
+  permission: "dispute:close",
+  category: "posting",
+  terminal: true,
+  description:
+    "The vendor's reply settles the dispute. credited: they issued the full disputed credit. denied: they refused it. partial_credit: they offered less AND the controller has since told you to accept it (credit_amount_cents = the amount). Books the outcome through the ledger gateway and closes the work item: a credit reduces the payable; whatever is not credited is charged to the owning project. Optionally emails the vendor a short confirmation in the thread. Ends your run.",
+  schema: z.object({
+    work_item_id: workItemId,
+    message_id: messageId.describe("The vendor message that states the decision or the offer."),
+    decision: z.enum(["credited", "partial_credit", "denied"]),
+    credit_reference: z.string().nullable().describe("The vendor's credit memo number, if they gave one."),
+    credit_amount_cents: z.number().int().nullable().describe("Only for partial_credit: the credit the controller accepted, in cents."),
+    confirmation_message: z.string().nullable().describe("A short note to the vendor confirming what Atlas booked, or null to send nothing."),
+    summary: z.string().describe("One or two sentences on what the vendor decided and why."),
+  }),
+  handler: ({ ctx, run, item }, args) => {
+    const closed = recordVendorDecision(ctx, item, {
+      agentId: run.agentId,
+      messageId: args.message_id,
+      decision: args.decision,
+      creditReference: args.credit_reference,
+      creditCents: args.credit_amount_cents,
+      confirmation: args.confirmation_message,
+    });
+    const credited = closed.outcome === "VENDOR_CREDIT";
+    return {
+      result: { outcome: closed.outcome, journal_entry_id: closed.entryId, dispute_id: closed.dispute.id, amount: formatCents(closed.dispute.amountCents) },
+      title: credited
+        ? "Vendor Liaison booked the vendor's " + formatCents(closed.dispute.creditedCents ?? closed.dispute.amountCents) + " credit and closed " + item.id
+        : "Vendor Liaison booked the upheld charge after the vendor refused, and closed " + item.id,
+      summary: args.summary.trim().slice(0, 500),
+      activityType: "COMPLETED",
+      changes: ["Journal entry " + closed.entryId + " posted", "State: RESOLVED"],
+      terminal: { summary: credited ? "booked vendor credit" : "booked upheld charge" },
+    };
+  },
+});
+
+const askControllerTool = defineTool({
+  name: "ask_controller",
+  agent: "vendor",
+  permission: "dispute:follow_up",
+  category: "write",
+  terminal: true,
+  description:
+    "The vendor proposed something the approval does not cover (a partial credit, a different amount, a payment plan) or asked for something only Atlas staff know (a PO number, a contact, a signature). Ask the controller, with your recommendation. The case stays open with the vendor; you resume when the controller answers. Ends your run.",
+  schema: z.object({
+    work_item_id: workItemId,
+    message_id: messageId,
+    question: z.string().describe("What the controller needs to decide, with the vendor's offer stated exactly."),
+    recommendation: z.string().describe("What you would do and why, in one or two sentences."),
+    kind: z.enum(["counter_offer", "question", "denial", "update"]),
+  }),
+  handler: ({ ctx, run, item }, args) => {
+    const question = args.question.trim();
+    if (question.length < 10) fail("Question is too short.");
+    const asked = askControllerAboutVendor(ctx, item, { agentId: run.agentId, messageId: args.message_id, question, recommendation: args.recommendation, kind: args.kind });
+    return {
+      result: { asked: true, question: asked.question },
+      title: "Vendor Liaison asked the controller how to answer the vendor on " + asked.dispute.id,
+      summary: asked.question,
+      activityType: "APPROVAL_REQUEST",
+      changes: ["Question to controller on " + asked.dispute.id],
+      terminal: { summary: "asked the controller about the vendor's reply" },
+    };
+  },
+});
+
+const noteVendorUpdateTool = defineTool({
+  name: "note_vendor_update",
+  agent: "vendor",
+  permission: "dispute:follow_up",
+  category: "write",
+  terminal: true,
+  description:
+    "The vendor's message needs no answer and decides nothing (an acknowledgement, \"we are reviewing it\", an expected date). Record it and keep waiting. Ends your run.",
+  schema: z.object({ work_item_id: workItemId, message_id: messageId, summary: z.string() }),
+  handler: ({ ctx, run, item }, args) => {
+    const noted = noteVendorUpdate(ctx, item, { agentId: run.agentId, messageId: args.message_id });
+    return {
+      result: { noted: true },
+      title: "Vendor Liaison noted the vendor's update on " + noted.dispute.id + "; still waiting on a decision",
+      summary: args.summary.trim().slice(0, 400),
+      activityType: "DISPUTE",
+      terminal: { summary: "noted the vendor's update" },
+    };
+  },
+});
+
+/* ------------------------------------------------------------------ */
+/* Policy Analyst: onboarding (learn from AP history)                  */
+/* ------------------------------------------------------------------ */
+
+const BANDS: { label: string; min: number; max: number }[] = [
+  { label: "$0 (exact)", min: 0, max: 0 },
+  { label: "$0.01 to $25", min: 1, max: 2_500 },
+  { label: "$25.01 to $50", min: 2_501, max: 5_000 },
+  { label: "$50.01 to $100", min: 5_001, max: 10_000 },
+  { label: "$100.01 to $500", min: 10_001, max: 50_000 },
+  { label: "over $500", min: 50_001, max: Number.MAX_SAFE_INTEGER },
+];
+
+const queryApHistory = defineTool({
+  name: "query_ap_history",
+  agent: "policy",
+  scope: "onboarding",
+  permission: "history:read",
+  category: "read",
+  description:
+    "Mine the ERP's AP history: every past GPU invoice line, what the contract supported, the variance, and how the controller resolved it (paid as billed, disputed and credited, disputed and denied). Returns counts by variance band and resolution, computed by the application.",
+  schema: z.object({
+    provider_id: z.string().nullable().describe("Limit to one provider, or null for all."),
+    months: z.number().int().min(1).max(12).describe("How many months back to read."),
+  }),
+  handler: ({ ctx }, args) => {
+    const all = ctx.db.select().from(erpApHistory).all();
+    const periods = [...new Set(all.map((r) => r.period))].sort().slice(-args.months);
+    const rows = all.filter((r) => periods.includes(r.period) && (!args.provider_id || r.providerId === args.provider_id));
+    if (!rows.length) fail("No AP history matches.", "NOT_FOUND");
+    const paid = rows.filter((r) => r.resolution === "PAID_AS_BILLED");
+    const credited = rows.filter((r) => r.resolution === "DISPUTED_CREDITED");
+    const denied = rows.filter((r) => r.resolution === "DISPUTED_DENIED");
+    const disputed = [...credited, ...denied];
+    const paidVar = paid.filter((r) => r.varianceCents > 0).map((r) => r.varianceCents);
+    const largestPaid = paidVar.length ? Math.max(...paidVar) : 0;
+    const smallestDisputed = disputed.length ? Math.min(...disputed.map((r) => r.varianceCents)) : null;
+    const smallestCredited = credited.length ? Math.min(...credited.map((r) => r.varianceCents)) : null;
+    const bands = BANDS.map((b) => {
+      const inBand = rows.filter((r) => r.varianceCents >= b.min && r.varianceCents <= b.max);
+      return {
+        band: b.label,
+        lines: inBand.length,
+        paid_as_billed: inBand.filter((r) => r.resolution === "PAID_AS_BILLED").length,
+        disputed_credited: inBand.filter((r) => r.resolution === "DISPUTED_CREDITED").length,
+        disputed_denied: inBand.filter((r) => r.resolution === "DISPUTED_DENIED").length,
+      };
+    });
+    const stats = {
+      periods: periods[0] + " to " + periods[periods.length - 1],
+      lines: rows.length,
+      lines_with_variance: rows.filter((r) => r.varianceCents > 0).length,
+      paid_as_billed_with_variance: paidVar.length,
+      disputed: disputed.length,
+      disputes_credited: credited.length,
+      largest_variance_paid_as_billed: formatCents(largestPaid),
+      largest_variance_paid_as_billed_cents: largestPaid,
+      smallest_variance_disputed: smallestDisputed === null ? null : formatCents(smallestDisputed),
+      smallest_variance_disputed_cents: smallestDisputed,
+      smallest_variance_credited_cents: smallestCredited,
+      consistent_threshold_range_cents:
+        smallestCredited !== null && largestPaid < smallestCredited ? { from: largestPaid, to: smallestCredited - 1 } : null,
+    };
+    const examples = [...paid.filter((r) => r.varianceCents > 0).slice(-3), ...disputed.slice(0, 3)].map((r) => ({
+      id: r.id,
+      line: r.lineRef,
+      variance: formatCents(r.varianceCents),
+      resolution: r.resolution,
+      note: r.note,
+    }));
+    return {
+      result: { stats, bands, examples },
+      evidence: [
+        {
+          sourceType: "erp_history",
+          sourceId: "AP:" + (args.provider_id ?? "ALL") + ":" + stats.periods,
+          label: "ERP AP history " + stats.periods + " (" + rows.length + " lines)",
+          snapshot: { stats, bands, lineIds: rows.map((r) => r.id) },
+        },
+      ],
+      title: "Mined " + rows.length + " historical AP lines (" + stats.periods + ")",
+      summary:
+        paidVar.length + " variances up to " + formatCents(largestPaid) + " were paid as billed; " + disputed.length +
+        " disputes started at " + (smallestDisputed === null ? "n/a" : formatCents(smallestDisputed)) + " (" + credited.length + " credited).",
+    };
+  },
+});
+
+const proposeMaterialityPolicy = defineTool({
+  name: "propose_materiality_policy",
+  agent: "policy",
+  scope: "onboarding",
+  permission: "policy:propose",
+  category: "write",
+  terminal: true,
+  description:
+    "Propose a written materiality policy that matches how the controller has actually resolved variances: invoice variances at or below the threshold are accepted and charged to the owning project; larger ones are disputed. The application checks the threshold against history. Creates a controller approval request. Ends your run.",
+  schema: z.object({
+    threshold_cents: z.number().int().positive(),
+    statement: z.string(),
+    rationale: z.string(),
+    evidence_ids: z.array(z.string()),
+  }),
+  handler: ({ ctx, run }, args) => {
+    const cited = [...new Set(args.evidence_ids)];
+    const historyEvidence = cited.length
+      ? ctx.db
+          .select()
+          .from(evidence)
+          .where(and(eq(evidence.workItemId, ONBOARDING_ID), eq(evidence.sourceType, "erp_history"), inArray(evidence.id, cited)))
+          .all()
+      : [];
+    if (!historyEvidence.length) fail("Cite the AP history evidence returned by query_ap_history.", "EVIDENCE_REQUIRED");
+    if (args.threshold_cents > 50_000) fail("A materiality threshold above $500 per line needs a controller-authored policy.", "POLICY");
+    const rows = ctx.db.select().from(erpApHistory).all();
+    const contradicts = rows.filter((r) => r.resolution === "DISPUTED_CREDITED" && r.varianceCents <= args.threshold_cents);
+    if (contradicts.length) {
+      fail(
+        "The threshold would have accepted " + contradicts.length + " variance(s) the vendor later credited (" +
+          contradicts.map((r) => r.lineRef + " " + formatCents(r.varianceCents)).join(", ") + "). Choose a lower threshold.",
+        "HISTORY_CONFLICT",
+      );
+    }
+    const existing = ctx.db
+      .select()
+      .from(policies)
+      .where(and(eq(policies.policyKey, MATERIALITY_POLICY_KEY), inArray(policies.status, ["PROPOSED", "APPROVED"])))
+      .get();
+    if (existing) fail("Policy " + existing.id + " is already " + existing.status.toLowerCase() + ".", "POLICY_EXISTS");
+    const statement = args.statement.trim().slice(0, 800);
+    if (statement.length < 20) fail("Policy statement is too short.");
+    const paidCovered = rows.filter((r) => r.resolution === "PAID_AS_BILLED" && r.varianceCents > 0 && r.varianceCents <= args.threshold_cents).length;
+    const paidAbove = rows.filter((r) => r.resolution === "PAID_AS_BILLED" && r.varianceCents > args.threshold_cents).length;
+    const versions = ctx.db.select().from(policies).where(eq(policies.policyKey, MATERIALITY_POLICY_KEY)).all();
+    const version = Math.max(0, ...versions.map((p) => p.version)) + 1;
+    const id = "POL-" + MATERIALITY_POLICY_KEY + "-v" + version;
+    ctx.db
+      .insert(policies)
+      .values({
+        id,
+        policyKey: MATERIALITY_POLICY_KEY,
+        version,
+        title: "Billing variance materiality",
+        status: "PROPOSED",
+        statement,
+        rule: {
+          method: "accept_below_threshold",
+          thresholdCents: args.threshold_cents,
+          autoPostLimitCents: 1_000_000,
+          appliesTo: "Instance invoice lines that exceed the contract-supported charge",
+          conditions: [
+            "Variance above $0 and at or below " + formatCents(args.threshold_cents) + " per line",
+            "A single owning project is established",
+            "Invoice line at or below $10,000",
+            "Larger variances are disputed with the vendor",
+          ],
+        },
+        rationale: args.rationale.trim().slice(0, 1200),
+        evidenceIds: cited,
+        precedentIds: [],
+        learnedFromWorkItemId: null,
+        proposedBy: run.agentId,
+        supersedesId: null,
+        createdAt: nowIso(),
+      })
+      .run();
+    const approvalId = createApprovalRequest(ctx, {
+      workItemId: ONBOARDING_ID,
+      subjectType: "POLICY",
+      subjectId: id,
+      requestedBy: run.agentId,
+      summary:
+        "Adopt " + MATERIALITY_POLICY_KEY + " v" + version + ": accept variances up to " + formatCents(args.threshold_cents) +
+        " per line. Matches " + paidCovered + " historical lines paid as billed; no credited dispute falls under it.",
+    });
+    return {
+      result: {
+        policy_id: id,
+        approval_id: approvalId,
+        history_check: { paid_lines_covered: paidCovered, paid_lines_above_threshold: paidAbove, credited_disputes_below_threshold: 0 },
+      },
+      title: "Policy Analyst proposed " + MATERIALITY_POLICY_KEY + " v" + version + " from AP history",
+      summary: statement,
+      activityType: "POLICY",
+      changes: ["Policy " + id + " proposed", "Approval " + approvalId + " pending"],
+      terminal: { summary: "proposed " + id + " for controller approval" },
+    };
+  },
+});
+
+const finishOnboarding = defineTool({
+  name: "finish_onboarding",
+  agent: "policy",
+  scope: "onboarding",
+  permission: "history:read",
+  category: "read",
+  terminal: true,
+  description: "End onboarding without proposing a policy, with a short note on what you found. Ends your run.",
+  schema: z.object({ summary: z.string() }),
+  handler: (_tc, args) => ({
+    result: { done: true },
+    title: "Policy Analyst finished onboarding",
+    summary: args.summary.slice(0, 600),
+    terminal: { summary: "finished onboarding" },
+  }),
 });
 
 export const TOOLS: ToolDefinition[] = [
@@ -1540,15 +2173,32 @@ export const TOOLS: ToolDefinition[] = [
   getDisputePackage,
   sendVendorDispute,
   closeVendorDispute,
+  getVendorThread,
+  replyToVendorTool,
+  recordVendorDecisionTool,
+  askControllerTool,
+  noteVendorUpdateTool,
   getPostedCharges,
   forecastProjectBurn,
   recordBudgetNote,
+  getDisputeStatus,
+  sendVendorFollowUp,
+  escalateDispute,
+  queryApHistory,
+  proposeMaterialityPolicy,
+  finishOnboarding,
 ];
 
 export const TOOL_INDEX = new Map(TOOLS.map((t) => [t.name, t]));
 
-export function toolsForAgent(agentId: string) {
+export function runScope(run: Pick<AgentRunContext, "workItemId">): "work_item" | "onboarding" {
+  return run.workItemId === ONBOARDING_ID ? "onboarding" : "work_item";
+}
+
+export function toolsForAgent(agentId: string, scope: "work_item" | "onboarding" = "work_item") {
   const key = AGENT_KEY[agentId];
   if (!key) return [];
-  return TOOLS.filter((t) => t.agent === "shared" || t.agent === key || (Array.isArray(t.agent) && t.agent.includes(key)));
+  return TOOLS.filter(
+    (t) => (t.scope ?? "work_item") === scope && (t.agent === "shared" || t.agent === key || (Array.isArray(t.agent) && t.agent.includes(key))),
+  );
 }

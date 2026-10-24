@@ -1,5 +1,7 @@
 import { METHOD_LABELS, RESERVATION_METHODS, type AllocationMethod } from "../domain/allocation";
+import { formatCents } from "../domain/money";
 import { ACTOR } from "../security/actors";
+import { amountsIn } from "../workflow/vendor-replies";
 import { invokeTool } from "./gateway";
 import type { AgentRunContext } from "./tools";
 import type { AppContext } from "../context";
@@ -176,6 +178,25 @@ async function financePolicy(c: Caller) {
       await c.call("request_human_approval", { proposal_id: proposal.proposal_id, summary: "Allocate " + calc.total + " to the owning project. Revised after the dispute was declined." });
       return;
     }
+    const materiality = policy.materiality_policy as Json | null;
+    if (compute?.assessment === "not_explained" && materiality?.applies_to_this_item) {
+      const calc = await c.call("calculate_cost_allocation", { method: "single_owner" });
+      const proposal = await c.call("propose_adjustment", {
+        calculation_id: calc.calculation_id,
+        rationale:
+          "The " + wi.amounts.discrepancy + " variance is at or below the " + materiality.threshold + " materiality threshold in " +
+          materiality.id + ", learned from how the controller resolved past variances. Accept it and charge the full " +
+          wi.amounts.invoiced + " to the owning project instead of opening a dispute.",
+        policy_id: materiality.id,
+        evidence_ids: c.ids,
+      });
+      if (proposal.standing_authorization.authorized) {
+        const posted = await c.try("submit_for_posting", { proposal_id: proposal.proposal_id });
+        if (posted.ok) return;
+      }
+      await c.call("request_human_approval", { proposal_id: proposal.proposal_id, summary: "Accept a " + wi.amounts.discrepancy + " variance below materiality." });
+      return;
+    }
     if (compute?.assessment === "not_explained") {
       await c.call("search_precedents", { query: wi.provider.name + " billing after termination dispute credit" });
       const dispute = await c.call("propose_vendor_dispute", {
@@ -297,14 +318,21 @@ async function vendorPolicy(c: Caller) {
   const pkg = await c.call("get_dispute_package", {});
   const vendor = pkg.provider.name as string;
   if (wi.work_item.state === "APPROVED" && !pkg.vendor_dispute) {
-    const clauses = (pkg.clauses as Json[]).map((cl) => cl.ref + " (" + cl.title + ")").join(", ");
+    const ev = pkg.evidence_pack as Json | null;
+    const grounds = ((ev?.grounds as string[] | undefined) ?? []).join(" ");
+    const all = pkg.clauses as Json[];
+    const procedural = all.find((cl) => /dispute/i.test(cl.title));
+    const clauses = all.filter((cl) => cl !== procedural).map((cl) => "section " + cl.ref + " (" + cl.title + ")").join(" and ");
     const message =
       "Hello " + vendor + " billing team,\n\n" +
-      "We are disputing " + pkg.disputed_amount + " on invoice line " + pkg.invoice_line + ", which billed " + pkg.invoiced + ".\n\n" +
-      pkg.reason +
-      (clauses ? "\n\nThis follows our agreement, clauses " + clauses + "." : "") +
-      "\n\nWe accept the undisputed " + pkg.undisputed_amount + ". Please issue a credit memo for " + pkg.disputed_amount + ".\n\n" +
-      "Atlas Research Finance";
+      "Atlas Research disputes " + pkg.disputed_amount + " of the " + pkg.invoiced + " billed on invoice line " + pkg.invoice_line +
+      (ev?.instance ? " for instance " + ev.instance.id : "") + ".\n\n" +
+      (grounds || pkg.reason) +
+      (clauses ? "\n\nUnder " + clauses + " of our agreement, the supported charge is " + pkg.undisputed_amount + "." : "") +
+      (procedural ? " We raise this under section " + procedural.ref + " (" + procedural.title + ")." : "") +
+      "\n\nWe will pay the undisputed " + pkg.undisputed_amount + ". Please issue a credit memo for " + pkg.disputed_amount +
+      ". The supporting records and the calculation are below and attached.\n\n" +
+      "Atlas Research Accounts Payable";
     await c.call("send_vendor_dispute", { subject: "Billing dispute: " + pkg.invoice_line + " (" + pkg.disputed_amount + ")", message });
     return;
   }
@@ -315,6 +343,115 @@ async function vendorPolicy(c: Caller) {
         ? vendor + " credited " + pkg.disputed_amount + " (" + reply.vendor_reference + "). The payable drops by that amount."
         : vendor + " denied the dispute. The disputed " + pkg.disputed_amount + " is charged to the owning project, and the controller can reopen it with the vendor.",
   });
+}
+
+const DENIAL = /\b(deny|denied|declin\w*|reject\w*|cannot (?:issue|approve|credit)|unable to (?:issue|approve|credit)|(?:charges?|invoice) (?:stands|is valid|was valid|is correct)|upheld|not eligible)\b/i;
+const CREDIT = /\b(credit(?:ed)?|credit memo|refund(?:ed)?)\b/i;
+const CREDIT_DONE = /\b(issued|applied|approved|processed|accept(?:ed)?|will issue|have issued|granted)\b/i;
+const ASK = /\?|\b(please (?:send|provide|share|confirm)|could you|can you|we need|need (?:the|a|your|more)|require)\b/i;
+const STAFF_ONLY = /\b(PO|purchase order|signature|sign|W-?9|tax id|bank|remittance|contact person|account manager)\b/i;
+
+/** Vendor Liaison: the provider wrote back. Book a decision, answer a question, or take an offer to the controller. */
+async function vendorReplyPolicy(c: Caller, run: AgentRunContext) {
+  await c.call("get_work_item", {});
+  const t = await c.call("get_vendor_thread", {});
+  const d = t.dispute as Json;
+  const disputed = amountsIn(String(d.disputed_amount))[0];
+  const waiting = t.waiting_for_you as Json[];
+  const vendor = (t.provider as Json).name as string;
+  const ev = t.evidence_you_can_share as Json | null;
+  const grounds = ((ev?.grounds as string[] | undefined) ?? []).join(" ");
+  if (run.trigger.trigger === "human_info") {
+    const answer = String(((t.controller_answers as Json[])[0] ?? {}).answer ?? "");
+    const offer = waiting.find((w) => w.status === "waiting_on_controller") ?? waiting[waiting.length - 1];
+    if (!offer) throw new Error("No vendor message is waiting on the controller's answer");
+    const offered = amountsIn(String(offer.body)).filter((a) => a !== disputed && a < disputed);
+    const declined = /\b(no|reject|decline|don'?t|do not|refuse|hold out|push back)\b/i.test(answer);
+    if (!declined && offered.length) {
+      const amount = offered[0];
+      await c.call("record_vendor_decision", {
+        message_id: offer.id,
+        decision: "partial_credit",
+        credit_reference: null,
+        credit_amount_cents: amount,
+        confirmation_message:
+          "Thank you. Atlas Research accepts your credit of " + formatCents(amount) + " to settle dispute " + d.id + ". Please send the credit memo for our records.",
+        summary: vendor + " offered " + formatCents(amount) + " of the " + d.disputed_amount + "; the controller accepted it. The rest is charged to the owning project.",
+      });
+      return;
+    }
+    await c.call("reply_to_vendor", {
+      answering: [offer.id],
+      message:
+        "Thank you for your reply. After review, Atlas Research maintains its dispute of the full " + d.disputed_amount + ". " +
+        (grounds || String(d.reason)) + " Please issue a credit memo for " + d.disputed_amount + ".",
+      attach_evidence: true,
+      kind: offered.length ? "counter_offer" : "question",
+    });
+    return;
+  }
+  const msg = waiting[waiting.length - 1];
+  if (!msg) throw new Error("No vendor message is waiting");
+  const body = String(msg.body);
+  const others = amountsIn(body).filter((a) => a !== disputed);
+  const mentionsDisputed = amountsIn(body).includes(disputed);
+  if (DENIAL.test(body) && !CREDIT_DONE.test(body.replace(DENIAL, ""))) {
+    await c.call("record_vendor_decision", {
+      message_id: msg.id,
+      decision: "denied",
+      credit_reference: null,
+      credit_amount_cents: null,
+      confirmation_message: null,
+      summary: vendor + " refused the credit: \u201c" + body.replace(/\s+/g, " ").slice(0, 200) + "\u201d The disputed " + d.disputed_amount + " is charged to the owning project; the controller can reopen it.",
+    });
+    return;
+  }
+  if (others.length && !mentionsDisputed) {
+    await c.call("ask_controller", {
+      message_id: msg.id,
+      question: vendor + " offered " + others.map(formatCents).join(" / ") + " instead of the disputed " + d.disputed_amount + " on " + d.id + ". Accept it?",
+      recommendation:
+        others[0] >= disputed * 0.75
+          ? "Accept: it recovers most of the overcharge and closes the case now."
+          : "Decline and hold out for the full amount: the evidence shows the whole " + d.disputed_amount + " was billed after termination.",
+      kind: "counter_offer",
+    });
+    return;
+  }
+  if (CREDIT.test(body) && CREDIT_DONE.test(body)) {
+    await c.call("record_vendor_decision", {
+      message_id: msg.id,
+      decision: "credited",
+      credit_reference: body.match(/\b(?:CM|CR|CN)[-\s#]?\d{2,}\b/i)?.[0] ?? null,
+      credit_amount_cents: null,
+      confirmation_message: "Thank you for issuing the credit of " + d.disputed_amount + ". We have applied it against invoice line " + (ev?.invoice as Json | undefined)?.line + " and closed dispute " + d.id + ".",
+      summary: vendor + " credited the full " + d.disputed_amount + ". The payable drops by that amount.",
+    });
+    return;
+  }
+  if (ASK.test(body)) {
+    if (STAFF_ONLY.test(body)) {
+      await c.call("ask_controller", {
+        message_id: msg.id,
+        question: vendor + " asks: \u201c" + body.replace(/\s+/g, " ").slice(0, 300) + "\u201d I don't have this in the systems of record. What should I send?",
+        recommendation: "Reply with the requested detail so the credit is not held up.",
+        kind: "question",
+      });
+      return;
+    }
+    const calc = (ev?.calculation as string[] | undefined) ?? [];
+    await c.call("reply_to_vendor", {
+      answering: [msg.id],
+      message:
+        "Thanks for looking into this. Here is what you asked for. " + (grounds || String(d.reason)) +
+        (calc.length ? " Calculation: " + calc.join(" ") : "") +
+        " The full records (instance lifecycle with your termination acknowledgment, usage, and the calculation) are attached as CSV. Please issue a credit memo for " + d.disputed_amount + ".",
+      attach_evidence: true,
+      kind: "question",
+    });
+    return;
+  }
+  await c.call("note_vendor_update", { message_id: msg.id, summary: vendor + " acknowledged " + d.id + " and has not decided yet." });
 }
 
 const BURN_RANK: Record<string, number> = { on_track: 0, watch: 1, at_risk: 2, over: 3 };
@@ -343,9 +480,65 @@ async function budgetPolicy(c: Caller) {
   await c.call("record_budget_note", { project_id: worst.project.id, status: worst.status, summary, evidence_ids: c.ids });
 }
 
+async function onboardingPolicy(c: Caller) {
+  const all = await c.call("query_ap_history", { provider_id: null, months: 6 });
+  const stats = all.stats as Json;
+  const range = stats.consistent_threshold_range_cents as { from: number; to: number } | null;
+  if (!range) {
+    await c.call("finish_onboarding", { summary: "History shows no consistent cut-off between variances paid as billed and variances disputed." });
+    return;
+  }
+  // A round number inside the range the history supports, never below what was routinely paid.
+  const candidates = [2_500, 5_000, 7_500, 10_000, 25_000, 50_000];
+  const threshold = candidates.find((t) => t >= range.from && t <= range.to) ?? range.from;
+  const dollars = "$" + (threshold / 100).toFixed(2);
+  await c.call("propose_materiality_policy", {
+    threshold_cents: threshold,
+    statement:
+      "GPU invoice lines that exceed the contract-supported charge by " + dollars + " or less are accepted as billed and charged to the owning project. " +
+      "Larger variances are investigated and disputed with the vendor.",
+    rationale:
+      "Across " + stats.lines + " AP lines (" + stats.periods + "), " + stats.paid_as_billed_with_variance + " variances up to " +
+      stats.largest_variance_paid_as_billed + " were paid as billed, while all " + stats.disputed + " disputes were for " +
+      stats.smallest_variance_disputed + " or more (" + stats.disputes_credited + " credited). Writing the practice down lets small variances post without a dispute that costs more than it recovers.",
+    evidence_ids: c.ids,
+  });
+}
+
+async function followUpPolicy(c: Caller, run: AgentRunContext) {
+  const wi = await c.call("get_work_item", {});
+  const status = await c.call("get_dispute_status", {});
+  const d = status.dispute as Json;
+  const clause = (status.dispute_clauses as Json[])[0];
+  if (run.trigger.trigger === "dispute_escalation") {
+    await c.call("escalate_dispute", {
+      summary:
+        (status.provider as Json).name + " has not responded to " + d.id + " (" + d.amount + ") after " + d.days_open + " days and " +
+        (status.prior_follow_ups as Json[]).length + " follow-up(s). Accounts payable still shows " + status.accounts_payable_outstanding + ".",
+      recommended_action:
+        "Short-pay the next " + (status.provider as Json).name + " invoice by " + d.amount + " citing " + d.vendor_reference +
+        (clause ? ", and confirm with the account manager before the §" + clause.ref + " window closes." : "."),
+      evidence_ids: c.ids,
+    });
+    return;
+  }
+  await c.call("send_vendor_follow_up", {
+    message:
+      "Following up on dispute " + d.id + " (your reference " + d.vendor_reference + ") for " + d.amount + " on invoice line " +
+      wi.invoice_line.external_line_id + ", submitted " + d.days_open + " days ago with no response. " +
+      (clause ? "Under §" + clause.ref + " (" + clause.title + "): \"" + clause.text + "\" " : "") +
+      "Please confirm the credit memo or tell us what you need to resolve it.",
+    evidence_ids: c.ids,
+  });
+}
+
 export async function runDeterministicAgent(ctx: AppContext, run: AgentRunContext) {
   const caller = new Caller(ctx, run);
-  if (run.agentId === ACTOR.compute || run.agentId === ACTOR.capacity) await computePolicy(caller);
+  const trigger = String(run.trigger.trigger ?? "");
+  if (run.agentId === ACTOR.policy && trigger === "onboarding") await onboardingPolicy(caller);
+  else if (run.agentId === ACTOR.vendorLiaison && (trigger === "dispute_follow_up" || trigger === "dispute_escalation")) await followUpPolicy(caller, run);
+  else if (run.agentId === ACTOR.vendorLiaison && (trigger === "vendor_message" || trigger === "human_info")) await vendorReplyPolicy(caller, run);
+  else if (run.agentId === ACTOR.compute || run.agentId === ACTOR.capacity) await computePolicy(caller);
   else if (run.agentId === ACTOR.finance) await financePolicy(caller);
   else if (run.agentId === ACTOR.policy) await policyAnalystPolicy(caller, run);
   else if (run.agentId === ACTOR.vendorLiaison) await vendorPolicy(caller);

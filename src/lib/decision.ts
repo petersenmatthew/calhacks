@@ -43,7 +43,7 @@ export type Choice = {
   action: Action;
 };
 
-export type DecisionKind = "dispute" | "book" | "split" | "rule" | "owner";
+export type DecisionKind = "dispute" | "book" | "split" | "rule" | "owner" | "vendor";
 
 export type Decision = {
   kind: DecisionKind;
@@ -94,7 +94,7 @@ export function shortTitle(item: Pick<Item, "title" | "type" | "resource" | "pro
 
 /** The verb a waiting task needs from you, for list rows. */
 export function askVerb(item: Pick<Item, "type" | "state" | "discrepancyCents">) {
-  if (item.state === "NEEDS_INFO") return "Answer";
+  if (item.state === "NEEDS_INFO" || item.state === "DISPUTED") return "Answer";
   if (item.type === "SHARED_ALLOCATION") return "Choose";
   if (item.discrepancyCents > 0) return "Dispute";
   return "Approve";
@@ -376,9 +376,42 @@ function ownerDecision(w: WorkspaceData): Decision | null {
   };
 }
 
+const dollars = (cents: number) => "$" + (cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** The Vendor Liaison needs you to decide how to answer the vendor (an offer, or a question only Atlas can answer). */
+function vendorDecision(w: WorkspaceData): Decision | null {
+  const q = w.item.pendingQuestion;
+  if (!q || !w.dispute) return null;
+  const msg = [...w.vendorMessages].reverse().find((m) => m.direction === "inbound" && m.status === "waiting_on_controller");
+  const disputed = w.dispute.amountCents;
+  const offered = msg
+    ? [...msg.body.matchAll(/\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/g)].map((m) => Math.round(Number(m[1].replace(/,/g, "")) * 100)).filter((c) => c > 0 && c < disputed)
+    : [];
+  const prov = providerName(w, w.item.providerId);
+  const offer = offered[0];
+  return {
+    kind: "vendor",
+    approvalId: null,
+    askedBy: q.askedBy ?? q.agentId,
+    context: prov + " · " + w.dispute.id,
+    title: offer ? prov + " offers " + dollars(offer) + " of " + dollars(disputed) : prov + " needs something from Atlas",
+    ask: msg ? "\u201c" + msg.body.replace(/\s+/g, " ").slice(0, 180) + (msg.body.length > 180 ? "\u2026\u201d" : "\u201d") : q.question,
+    proof: null,
+    choices: offer
+      ? [
+          { id: "accept", label: "Accept " + dollars(offer), hint: "close the case", action: { type: "answer", answer: "Yes, accept the " + dollars(offer) + " credit and close it." } },
+          { id: "hold", label: "Hold out for " + dollars(disputed), hint: "reply with the evidence", action: { type: "answer", answer: "No, decline the offer and hold out for the full " + dollars(disputed) + "." } },
+        ]
+      : [],
+    why: [q.question],
+    custom: "answer",
+  };
+}
+
 /** The decision waiting on you for this task, or null when nothing is. */
 export function buildDecision(w: WorkspaceData): Decision | null {
   if (w.item.state === "NEEDS_INFO") return ownerDecision(w);
+  if (w.item.state === "DISPUTED" && w.item.pendingQuestion) return vendorDecision(w);
   const approval = w.approvals.find((a) => a.status === "PENDING");
   if (!approval) return null;
   if (approval.subjectType === "POLICY") return ruleDecision(w, approval);
@@ -398,10 +431,18 @@ export function outcomeOf(w: WorkspaceData): Outcome {
   const executed = [...w.proposals].reverse().find((p) => p.status === "EXECUTED" || p.status === "APPROVED");
   const prov = providerName(w, w.item.providerId);
   if (w.item.state === "DISPUTED" && w.dispute) {
-    return { title: "Disputed " + whole(w.dispute.amountCents) + " with " + prov, detail: "Waiting for a credit", tone: "vendor" };
+    const replied = w.vendorMessages.some((m) => m.direction === "inbound" && m.status === "new");
+    return { title: "Disputed " + whole(w.dispute.amountCents) + " with " + prov, detail: replied ? prov + " replied; Vendor Liaison is on it" : "Waiting for a credit", tone: "vendor" };
   }
   if (w.item.state === "RESOLVED" || w.item.state === "POSTED") {
     if (executed?.kind === "VENDOR_DISPUTE" && executed.payload.dispute) {
+      const d = w.dispute;
+      if (d?.status === "DENIED") {
+        return { title: prov + " refused the " + whole(d.amountCents) + " credit", detail: "Charged to the owning team", tone: "done" };
+      }
+      if (d?.creditedCents != null && d.creditedCents < d.amountCents) {
+        return { title: prov + " credited " + whole(d.creditedCents) + " of " + whole(d.amountCents), detail: "You accepted their offer", tone: "done" };
+      }
       return {
         title: prov + " credited " + whole(executed.payload.dispute.disputedCents),
         detail: "Booked " + whole(executed.payload.dispute.undisputedCents),

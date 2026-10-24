@@ -9,6 +9,8 @@ import { ACTOR, getActor } from "../security/actors";
 import { authorize, guard } from "../security/authorize";
 import { ControlError } from "../security/errors";
 import { enqueueJob } from "./jobs";
+import { CONTROLLER } from "../comms/directory";
+import { mention, postSlack, taskLink } from "../comms/outbox";
 
 export type ApprovalRow = typeof approvalRequests.$inferSelect;
 export type Decision = "APPROVED" | "REJECTED" | "CHANGES_REQUESTED";
@@ -42,6 +44,16 @@ export function createApprovalRequest(
     approvalId: id,
     rule: "APPROVAL_REQUIRED",
     details: { summary: input.summary },
+  });
+  postSlack(ctx, {
+    channel: "finance-approvals",
+    event: "approval.requested",
+    workItemId: input.workItemId,
+    ref: id,
+    mentions: [CONTROLLER],
+    text:
+      mention(CONTROLLER) + " " + (getActor(ctx, input.requestedBy)?.name ?? input.requestedBy) + " needs your approval on " +
+      taskLink(ctx, input.workItemId) + " (" + id + "): " + input.summary,
   });
   recordActivity(ctx, {
     workItemId: input.workItemId,

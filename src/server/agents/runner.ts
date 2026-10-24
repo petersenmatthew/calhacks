@@ -5,6 +5,7 @@ import { agentRuns, workItems } from "../db/schema";
 import { ACTOR, getActor } from "../security/actors";
 import { getExecutionMode } from "../settings";
 import type { JobRow } from "../workflow/jobs";
+import { isOnboarding } from "../workflow/onboarding";
 import { getWorkItem, transitionWorkItem } from "../workflow/work-items";
 import { runDeterministicAgent } from "./deterministic";
 import { RunAbortedError } from "./gateway";
@@ -27,13 +28,19 @@ const ACTIVE_STATES: Record<string, Set<string>> = {
 
 function taskFor(agentId: string, trigger: Record<string, unknown>, workItemId: string) {
   const t = String(trigger.trigger ?? "");
+  if (t === "onboarding") return "Learn how Atlas resolves invoice variances from six months of AP history";
+  if (t === "dispute_follow_up") return "Follow up with the vendor on the open dispute for " + workItemId;
+  if (t === "dispute_escalation") return "Escalate the unanswered vendor dispute on " + workItemId;
   if (agentId === ACTOR.capacity) {
     if (t === "finance_question") return "Answer the Cost Accountant's question on " + workItemId;
     return "Reconstruct reservation usage for " + workItemId;
   }
   if (agentId === ACTOR.policy) return "Turn the controller's correction on " + workItemId + " into policy";
   if (agentId === ACTOR.vendorLiaison) {
-    return t === "vendor_reply" ? "Read the vendor's reply and close " + workItemId : "Send the approved dispute on " + workItemId;
+    if (t === "vendor_reply") return "Read the vendor's reply and close " + workItemId;
+    if (t === "vendor_message") return "Handle the vendor's email on " + workItemId;
+    if (t === "human_info") return "Answer the vendor on " + workItemId + " with the controller's decision";
+    return "Send the approved dispute on " + workItemId;
   }
   if (agentId === ACTOR.budget) return "Check team burn after the posting on " + workItemId;
   if (agentId === ACTOR.compute) {
@@ -50,9 +57,11 @@ function taskFor(agentId: string, trigger: Record<string, unknown>, workItemId: 
 export async function runAgentJob(ctx: AppContext, job: JobRow) {
   const agentId = job.agentId;
   if (!agentId) throw new Error("Agent job without agent");
-  const item = getWorkItem(ctx, job.workItemId);
+  const onboarding = isOnboarding(job.workItemId);
+  const item = onboarding ? null : getWorkItem(ctx, job.workItemId);
+  const workItemId = job.workItemId;
   const agentName = getActor(ctx, agentId)?.name ?? agentId;
-  if (!(ACTIVE_STATES[agentId] ?? ACTIVE_STATES[ACTOR.finance]).has(item.state)) {
+  if (item && !(ACTIVE_STATES[agentId] ?? ACTIVE_STATES[ACTOR.finance]).has(item.state)) {
     recordActivity(ctx, {
       workItemId: item.id,
       actorId: ACTOR.orchestrator,
@@ -62,18 +71,18 @@ export async function runAgentJob(ctx: AppContext, job: JobRow) {
     });
     return;
   }
-  if (item.agentRunCount >= MAX_AGENT_RUNS_PER_ITEM) {
+  if (item && item.agentRunCount >= MAX_AGENT_RUNS_PER_ITEM) {
     throw new Error("Agent run limit reached for " + item.id);
   }
   const mode = getExecutionMode(ctx);
   const runId = nextId(ctx, "RUN", 8001);
-  const task = taskFor(agentId, job.payload, item.id);
+  const task = taskFor(agentId, job.payload, workItemId);
   tx(ctx, () => {
     ctx.db
       .insert(agentRuns)
       .values({
         id: runId,
-        workItemId: item.id,
+        workItemId,
         agentId,
         mode,
         model: mode === "llm" ? ctx.config.model : null,
@@ -82,15 +91,17 @@ export async function runAgentJob(ctx: AppContext, job: JobRow) {
         startedAt: nowIso(),
       })
       .run();
-    ctx.db
-      .update(workItems)
-      // The Budget Analyst checks in after the fact; it does not take ownership of the work item.
-      .set({ agentRunCount: sql`${workItems.agentRunCount} + 1`, ...(agentId === ACTOR.budget ? {} : { assignedAgentId: agentId }) })
-      .where(eq(workItems.id, item.id))
-      .run();
-    if (item.state === "NEW") transitionWorkItem(ctx, item.id, "INVESTIGATING", ACTOR.orchestrator, "Assigned to " + agentName);
+    if (item) {
+      ctx.db
+        .update(workItems)
+        // The Budget Analyst checks in after the fact; it does not take ownership of the work item.
+        .set({ agentRunCount: sql`${workItems.agentRunCount} + 1`, ...(agentId === ACTOR.budget ? {} : { assignedAgentId: agentId }) })
+        .where(eq(workItems.id, item.id))
+        .run();
+      if (item.state === "NEW") transitionWorkItem(ctx, item.id, "INVESTIGATING", ACTOR.orchestrator, "Assigned to " + agentName);
+    }
     recordActivity(ctx, {
-      workItemId: item.id,
+      workItemId,
       runId,
       actorId: agentId,
       type: "AGENT_STARTED",
@@ -107,7 +118,7 @@ export async function runAgentJob(ctx: AppContext, job: JobRow) {
   const run: AgentRunContext = {
     runId,
     agentId,
-    workItemId: item.id,
+    workItemId,
     mode,
     epoch: ctx.epoch,
     terminal: null,
@@ -128,7 +139,7 @@ export async function runAgentJob(ctx: AppContext, job: JobRow) {
         .where(eq(agentRuns.id, runId))
         .run();
       recordActivity(ctx, {
-        workItemId: item.id,
+        workItemId,
         runId,
         actorId: agentId,
         type: "AGENT_FINISHED",
@@ -155,7 +166,7 @@ export async function runAgentJob(ctx: AppContext, job: JobRow) {
       .where(eq(agentRuns.id, runId))
       .run();
     recordActivity(ctx, {
-      workItemId: item.id,
+      workItemId,
       runId,
       actorId: agentId,
       type: "ERROR",
