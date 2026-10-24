@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Check, Layers, LoaderCircle, Receipt } from "lucide-react";
+import { Check, Layers, LoaderCircle, Receipt, ScrollText } from "lucide-react";
 import { agentSteps, AGENT_SHORT, BOARD_STAGES, boardStage, type BoardStage } from "@/lib/agent-steps";
 import { money } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -71,6 +71,25 @@ function Card({ item, stage, data, agent }: { item: Item; stage: BoardStage; dat
   );
 }
 
+function PolicyCard({ p }: { p: DashboardData["policyApprovals"][number] }) {
+  return (
+    <Link href="/autonomy" className="card-soft mx-auto block w-full max-w-[260px] p-3 transition-transform hover:-translate-y-px animate-enter">
+      <div className="flex items-start gap-2.5">
+        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-zinc-50 ring-1 ring-zinc-200">
+          <ScrollText className="size-4 text-zinc-600" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[13px] font-medium text-zinc-900">{p.title}</div>
+          <div className="mt-0.5 flex items-center justify-between gap-2">
+            <span className="truncate text-[11.5px] text-muted-foreground">Learned at onboarding</span>
+            <span className="inline-flex shrink-0 items-center rounded-md bg-accent px-1.5 py-0.5 text-[10.5px] font-medium text-brand-ink">Your turn</span>
+          </div>
+        </div>
+      </div>
+    </Link>
+  );
+}
+
 export function Board({ data }: { data: DashboardData }) {
   const agentFor = (id: string) => data.agents.find((a) => a.currentWorkItemId === id && a.status !== "idle");
   return (
@@ -79,25 +98,29 @@ export function Board({ data }: { data: DashboardData }) {
         {BOARD_STAGES.map(({ key, label }) => {
           const items = data.workItems.filter((i) => boardStage(i) === key);
           const shown = key === "done" ? items.slice(0, DONE_LIMIT) : items;
+          const policyCards = key === "needs_you" ? data.policyApprovals : [];
           return (
             <div key={key} className="flex w-[208px] flex-1 flex-col border-r border-dashed border-zinc-200 px-5 last:border-r-0">
               <div className="mb-3 flex h-6 items-center justify-between">
                 <span
                   className={cn(
                     "rounded-md bg-white px-2 py-0.5 font-mono text-[10.5px] tracking-wider uppercase ring-1",
-                    key === "needs_you" && items.length ? "text-brand-ink ring-primary/50" : "text-zinc-500 ring-zinc-200",
+                    key === "needs_you" && items.length + policyCards.length ? "text-brand-ink ring-primary/50" : "text-zinc-500 ring-zinc-200",
                   )}
                 >
                   {label}
                 </span>
-                <span className="font-mono text-[11px] text-zinc-400 tnum">{items.length}</span>
+                <span className="font-mono text-[11px] text-zinc-400 tnum">{items.length + policyCards.length}</span>
               </div>
               <div className="flex flex-1 flex-col justify-center gap-5 py-6">
+                {policyCards.map((p) => (
+                  <PolicyCard key={p.approvalId} p={p} />
+                ))}
                 {shown.map((item) => (
                   <Card key={item.id} item={item} stage={key} data={data} agent={agentFor(item.id)} />
                 ))}
                 {items.length > shown.length ? <div className="px-1 text-[11.5px] text-zinc-400">+{items.length - shown.length} more</div> : null}
-                {items.length === 0 ? <div className="h-16 rounded-xl border border-dashed border-zinc-200" /> : null}
+                {items.length + policyCards.length === 0 ? <div className="h-16 rounded-xl border border-dashed border-zinc-200" /> : null}
               </div>
             </div>
           );

@@ -33,6 +33,11 @@ import { ACTOR } from "./security/actors";
 import { getExecutionMode } from "./settings";
 import { contractForProvider, reservationUsage } from "./workflow/checks";
 import { policyFitForWorkItem, POLICY_KEYS } from "./workflow/policies";
+import { businessNowIso, clockOffsetMs } from "./clock";
+import { followUps } from "./db/schema";
+import { feedStatus } from "./sync/feeds";
+import { FOLLOW_UP_RULES } from "./workflow/follow-ups";
+import { ONBOARDING_ID } from "./workflow/onboarding";
 
 function lookups(ctx: AppContext) {
   const projectRows = ctx.db.select().from(projects).all();
@@ -204,6 +209,35 @@ export function getDashboard(ctx: AppContext, requestedPeriod?: string | null) {
     activity: ctx.db.select().from(activityEvents).orderBy(desc(activityEvents.id)).limit(30).all(),
     agents: getAgentStatuses(ctx),
     settings: getSettingsView(ctx),
+    /** Policy proposals that are not tied to a work item (learned at onboarding). */
+    policyApprovals: pending
+      .filter((a) => a.subjectType === "POLICY" && a.workItemId === ONBOARDING_ID)
+      .map((a) => {
+        const policy = ctx.db.select().from(policies).where(eq(policies.id, a.subjectId)).get();
+        return { approvalId: a.id, policyId: a.subjectId, title: policy?.title ?? a.subjectId, summary: a.summary, createdAt: a.createdAt };
+      }),
+    clock: { now: businessNowIso(ctx), offsetMs: clockOffsetMs(ctx) },
+    ...lookups(ctx),
+  };
+}
+
+/** What the system does on its own: feeds, the business clock, follow-ups, onboarding. */
+export function getAutonomy(ctx: AppContext) {
+  const onboardingRuns = ctx.db.select().from(agentRuns).where(eq(agentRuns.workItemId, ONBOARDING_ID)).orderBy(asc(agentRuns.startedAt)).all();
+  const onboardingApprovals = ctx.db.select().from(approvalRequests).where(eq(approvalRequests.workItemId, ONBOARDING_ID)).all();
+  const learned = ctx.db.select().from(policies).where(eq(policies.policyKey, POLICY_KEYS.materiality)).orderBy(asc(policies.version)).all();
+  return {
+    clock: { now: businessNowIso(ctx), offsetMs: clockOffsetMs(ctx) },
+    scheduler: { intervalMs: ctx.config.schedulerIntervalMs, externalFeed: Boolean(ctx.config.feedUrl) },
+    feeds: feedStatus(ctx),
+    rules: FOLLOW_UP_RULES,
+    followUps: ctx.db.select().from(followUps).orderBy(desc(followUps.id)).limit(40).all(),
+    onboarding: {
+      runs: onboardingRuns,
+      approvals: onboardingApprovals,
+      policies: learned,
+      activity: ctx.db.select().from(activityEvents).where(eq(activityEvents.workItemId, ONBOARDING_ID)).orderBy(asc(activityEvents.id)).all(),
+    },
     ...lookups(ctx),
   };
 }
@@ -324,5 +358,6 @@ export type DashboardData = ReturnType<typeof getDashboard>;
 export type WorkspaceData = NonNullable<ReturnType<typeof getWorkspace>>;
 export type AuditData = ReturnType<typeof getAuditView>;
 export type StatusData = ReturnType<typeof getStatus>;
+export type AutonomyData = ReturnType<typeof getAutonomy>;
 export type AgentStatus = ReturnType<typeof getAgentStatuses>[number];
 export type ActivityRow = typeof activityEvents.$inferSelect;

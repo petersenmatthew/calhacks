@@ -113,6 +113,8 @@ export interface PolicyRule {
   autoPostLimitCents: number;
   appliesTo: string;
   conditions: string[];
+  /** Materiality policies: largest per-line variance accepted without a dispute. */
+  thresholdCents?: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -581,3 +583,66 @@ export const auditEvents = sqliteTable(
   },
   (t) => [index("audit_work_item_idx").on(t.workItemId)],
 );
+
+/* ------------------------------------------------------------------ */
+/* Autonomy: feed sync, follow-ups, and ERP history                    */
+/* ------------------------------------------------------------------ */
+
+/** Simulated provider billing outbox. Rows become visible to sync at publish_at (business time). */
+export const feedEvents = sqliteTable(
+  "feed_events",
+  {
+    seq: integer("seq").primaryKey({ autoIncrement: true }),
+    source: text("source").notNull(),
+    externalEventId: text("external_event_id").notNull(),
+    publishAt: text("publish_at").notNull(),
+    label: text("label").notNull(),
+    payload: text("payload", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [uniqueIndex("feed_events_external_idx").on(t.externalEventId), index("feed_events_source_idx").on(t.source, t.seq)],
+);
+
+/** Last position read from each source, so a re-sync never re-reads or duplicates. */
+export const syncCursors = sqliteTable("sync_cursors", {
+  source: text("source").primaryKey(),
+  cursor: text("cursor"),
+  syncedAt: text("synced_at").notNull(),
+  lastCount: integer("last_count").notNull().default(0),
+  totalCount: integer("total_count").notNull().default(0),
+  lastError: text("last_error"),
+});
+
+/** Time-based actions the system took on its own (reminders, escalations, vendor chases). One row per key. */
+export const followUps = sqliteTable(
+  "follow_ups",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    key: text("key").notNull(),
+    kind: text("kind").notNull(), // APPROVAL_REMINDER | APPROVAL_ESCALATION | DISPUTE_CHASE | DISPUTE_ESCALATION
+    workItemId: text("work_item_id"),
+    subjectId: text("subject_id").notNull(),
+    actorId: text("actor_id").notNull(),
+    businessAt: text("business_at").notNull(),
+    createdAt: text("created_at").notNull(),
+    details: text("details", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+  },
+  (t) => [uniqueIndex("follow_ups_key_idx").on(t.key)],
+);
+
+/** Past AP lines and how each variance was resolved (simulated ERP export the agents learn from). */
+export const erpApHistory = sqliteTable("erp_ap_history", {
+  id: text("id").primaryKey(),
+  providerId: text("provider_id").notNull(),
+  invoiceNumber: text("invoice_number").notNull(),
+  lineRef: text("line_ref").notNull(),
+  period: text("period").notNull(),
+  description: text("description").notNull(),
+  invoicedCents: integer("invoiced_cents").notNull(),
+  expectedCents: integer("expected_cents").notNull(),
+  varianceCents: integer("variance_cents").notNull(),
+  resolution: text("resolution").notNull(), // PAID_AS_BILLED | DISPUTED_CREDITED | DISPUTED_DENIED
+  resolvedBy: text("resolved_by").notNull(),
+  note: text("note").notNull(),
+  resolvedAt: text("resolved_at").notNull(),
+});

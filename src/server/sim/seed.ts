@@ -14,6 +14,9 @@ import {
 } from "../db/schema";
 import { ACTOR, ACTOR_SEED } from "../security/actors";
 import { buildInstanceCase, buildReservationCase, ingestCase } from "./scenarios";
+import { seedFeedSchedule } from "./feed-schedule";
+import { seedApHistory } from "./history";
+import { scheduleOnboarding } from "../workflow/onboarding";
 
 export const PROJECTS = [
   { id: "PRJ-FLM", name: "Frontier Language Models", lead: "Dr. Maya Chen", costCenter: "CC-410", monthlyBudgetCents: 52_000_000 },
@@ -319,7 +322,11 @@ export function isSeeded(ctx: AppContext) {
  * is visibly working when the app first opens.
  */
 export function seedEnvironment(ctx: AppContext) {
-  tx(ctx, () => seedReferenceData(ctx));
+  tx(ctx, () => {
+    seedReferenceData(ctx);
+    seedApHistory(ctx);
+    seedFeedSchedule(ctx);
+  });
   for (const data of backgroundCases()) ingestCase(ctx, data);
   ingestCase(
     ctx,
@@ -336,4 +343,20 @@ export function seedEnvironment(ctx: AppContext) {
     status: "info",
     title: "Atlas Research sandbox loaded for the October 2026 close",
   });
+  scheduleOnboarding(ctx);
+}
+
+/**
+ * Bring a database seeded by an older version up to date without wiping it:
+ * new actors, AP history, the feed schedule, and onboarding.
+ */
+export function upgradeEnvironment(ctx: AppContext) {
+  tx(ctx, () => {
+    ctx.db.insert(actors).values(ACTOR_SEED).onConflictDoNothing().run();
+    const history = ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM erp_ap_history").get() as { n: number };
+    if (history.n === 0) seedApHistory(ctx);
+    const feed = ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM feed_events").get() as { n: number };
+    if (feed.n === 0) seedFeedSchedule(ctx);
+  });
+  scheduleOnboarding(ctx);
 }

@@ -18,6 +18,8 @@ import {
   providerUsage,
   providers,
   approvalRequests,
+  erpApHistory,
+  vendorDisputes,
   workItems,
   type AllocationLine,
   type ProposalPayload,
@@ -46,6 +48,9 @@ import {
 } from "../workflow/policies";
 import { resolveReconciliation, setWorkItemOutcome } from "../workflow/reconciliation";
 import { assignAgent, transitionWorkItem, type WorkItemRow } from "../workflow/work-items";
+import { businessAgeMs, DAY_MS, formatDuration } from "../clock";
+import { followUpsFor, recordFollowUp } from "../workflow/follow-ups";
+import { MATERIALITY_POLICY_KEY, ONBOARDING_ID } from "../workflow/onboarding";
 
 export interface AgentRunContext {
   runId: string;
@@ -84,6 +89,8 @@ export interface ToolContext {
 export interface ToolDefinition {
   name: string;
   agent: "compute" | "finance" | "shared";
+  /** "onboarding" tools work on company history and run outside any work item. */
+  scope?: "work_item" | "onboarding";
   permission: Permission;
   category: AuditCategory;
   description: string;
@@ -746,6 +753,8 @@ const getAllocationPolicy = defineTool({
       };
     }
     const policy = getApprovedPolicy(ctx, POLICY_KEYS.explainedVariance);
+    const materiality = getApprovedPolicy(ctx, MATERIALITY_POLICY_KEY);
+    const threshold = materiality?.rule.thresholdCents ?? 0;
     return {
       result: {
         applicable_policy: policy
@@ -759,10 +768,20 @@ const getAllocationPolicy = defineTool({
             }
           : null,
         conditions: policy?.rule.conditions ?? [],
+        materiality_policy: materiality
+          ? {
+              id: materiality.id,
+              version: materiality.version,
+              statement: materiality.statement,
+              threshold: formatCents(threshold),
+              threshold_cents: threshold,
+              applies_to_this_item: item.discrepancyCents > 0 && item.discrepancyCents <= threshold,
+            }
+          : null,
       },
-      evidence: policy
-        ? [{ sourceType: "policy", sourceId: policy.id, label: "Policy " + policy.policyKey + " v" + policy.version, snapshot: policy }]
-        : [],
+      evidence: [policy, materiality]
+        .filter((p): p is NonNullable<typeof p> => Boolean(p))
+        .map((p) => ({ sourceType: "policy", sourceId: p.id, label: "Policy " + p.policyKey + " v" + p.version, snapshot: p })),
       title: "Retrieved policy " + (policy ? policy.policyKey + " v" + policy.version : "(none)"),
       summary: policy?.statement ?? "No standing policy for explained variances.",
     };
@@ -1213,7 +1232,12 @@ const submitForPosting = defineTool({
     });
     setProposalStatus(ctx, proposal.id, "EXECUTED");
     transitionWorkItem(ctx, item.id, "POSTED", ACTOR.ledger, "Posted " + entryId);
-    const outcome = item.type === "SHARED_ALLOCATION" ? "ALLOCATED_UNDER_POLICY" : "CHARGE_EXPLAINED";
+    const outcome =
+      item.type === "SHARED_ALLOCATION"
+        ? "ALLOCATED_UNDER_POLICY"
+        : standing.policyId.startsWith("POL-" + MATERIALITY_POLICY_KEY)
+          ? "ACCEPTED_BELOW_MATERIALITY"
+          : "CHARGE_EXPLAINED";
     resolveReconciliation(ctx, item.invoiceLineId, outcome);
     setWorkItemOutcome(ctx, item.id, outcome);
     transitionWorkItem(ctx, item.id, "RESOLVED", ACTOR.orchestrator, "Reconciliation complete under " + standing.policyId);
@@ -1252,6 +1276,356 @@ const requestMoreInfo = defineTool({
   },
 });
 
+/* ------------------------------------------------------------------ */
+/* Finance Agent: dispute follow-ups (started by the scheduler)        */
+/* ------------------------------------------------------------------ */
+
+function openDispute(ctx: AppContext, item: WorkItemRow) {
+  const dispute = ctx.db.select().from(vendorDisputes).where(eq(vendorDisputes.workItemId, item.id)).get();
+  if (!dispute) fail("There is no vendor dispute on " + item.id + ".", "NOT_FOUND");
+  return dispute;
+}
+
+function vendorMessages(ctx: AppContext, disputeId: string) {
+  return followUpsFor(ctx, disputeId)
+    .filter((f) => f.kind === "VENDOR_MESSAGE")
+    .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+}
+
+const getDisputeStatus = defineTool({
+  name: "get_dispute_status",
+  agent: "finance",
+  permission: "dispute:follow_up",
+  category: "read",
+  description:
+    "Status of the vendor dispute on your work item: amount, days open on the business clock, the contract's dispute clause, follow-ups already sent, and what is still owed.",
+  schema: z.object({ work_item_id: workItemId }),
+  handler: ({ ctx, item }) => {
+    const dispute = openDispute(ctx, item);
+    const age = businessAgeMs(ctx, dispute.submittedAt);
+    const daysOpen = Math.floor(age / DAY_MS);
+    const contract = contractForProvider(ctx, item.providerId);
+    const clauses = contract.clauses.filter((c) => /dispute/i.test(c.title));
+    const provider = ctx.db.select().from(providers).where(eq(providers.id, item.providerId)).get();
+    const prior = vendorMessages(ctx, dispute.id);
+    const ap = ctx.sqlite
+      .prepare("SELECT COALESCE(SUM(credit_cents - debit_cents), 0) AS bal FROM journal_lines l JOIN journal_entries e ON e.id = l.entry_id WHERE l.account_code = '2000' AND e.invoice_line_id = ?")
+      .get(item.invoiceLineId) as { bal: number };
+    const snapshot = { ...dispute, daysOpen, apOutstandingCents: ap.bal, priorFollowUps: prior.length };
+    return {
+      result: {
+        dispute: {
+          id: dispute.id,
+          status: dispute.status,
+          amount: formatCents(dispute.amountCents),
+          submitted_at: dispute.submittedAt,
+          days_open: daysOpen,
+          vendor_reference: dispute.vendorReference,
+          reason: dispute.reason,
+        },
+        provider: { id: item.providerId, name: provider?.name },
+        dispute_clauses: clauses.map((c) => ({ ref: c.ref, title: c.title, text: c.text })),
+        prior_follow_ups: prior.map((f) => ({ sent_at_business_time: f.businessAt, message: (f.details as { message?: string }).message ?? "" })),
+        accounts_payable_outstanding: formatCents(ap.bal),
+      },
+      evidence: [{ sourceType: "vendor_dispute", sourceId: dispute.id, label: "Dispute " + dispute.id + " status (day " + daysOpen + ")", snapshot }],
+      title: "Checked dispute " + dispute.id + ": " + dispute.status.toLowerCase() + ", " + formatDuration(age) + " open",
+      summary: prior.length ? prior.length + " follow-up(s) already sent." : "No follow-up sent yet.",
+    };
+  },
+});
+
+const sendVendorFollowUp = defineTool({
+  name: "send_vendor_follow_up",
+  agent: "finance",
+  permission: "dispute:follow_up",
+  category: "write",
+  terminal: true,
+  description:
+    "Send a follow-up message to the vendor about the open dispute through the vendor portal (simulated). At most one follow-up per 7 days. Ends your run.",
+  schema: z.object({
+    work_item_id: workItemId,
+    message: z.string().describe("The message to the vendor's billing team. Reference the dispute, amount, and contract clause."),
+    evidence_ids: z.array(z.string()),
+  }),
+  handler: ({ ctx, run, item }, args) => {
+    const dispute = openDispute(ctx, item);
+    if (dispute.status !== "SUBMITTED" || item.state !== "DISPUTED") fail("Dispute " + dispute.id + " is " + dispute.status + "; nothing to chase.", "STATE_MACHINE");
+    const prior = vendorMessages(ctx, dispute.id);
+    const last = prior[prior.length - 1];
+    if (last && businessAgeMs(ctx, last.createdAt) < 7 * DAY_MS) fail("A follow-up was already sent in the last 7 days.", "FOLLOW_UP_RATE");
+    const message = args.message.trim().slice(0, 1500);
+    if (message.length < 40) fail("The follow-up message is too short to be useful to the vendor.");
+    const cited = requireEvidence(ctx, item, args.evidence_ids, 1);
+    const provider = ctx.db.select().from(providers).where(eq(providers.id, item.providerId)).get();
+    const n = prior.length + 1;
+    const daysOpen = Math.floor(businessAgeMs(ctx, dispute.submittedAt) / DAY_MS);
+    recordFollowUp(ctx, {
+      key: "vendor-message:" + dispute.id + ":" + n,
+      kind: "VENDOR_MESSAGE",
+      workItemId: item.id,
+      subjectId: dispute.id,
+      actorId: run.agentId,
+      details: { message, to: dispute.vendorReference, channel: "vendor portal (simulated)", number: n, daysOpen, evidenceIds: cited },
+    });
+    return {
+      result: { sent: true, follow_up_number: n, channel: "vendor portal (simulated)", days_open: daysOpen },
+      title: "Finance Agent followed up with " + (provider?.name ?? "the vendor") + " on " + dispute.id + " (day " + daysOpen + ", no response)",
+      summary: message,
+      activityType: "DISPUTE",
+      changes: ["Follow-up #" + n + " sent on " + dispute.id],
+      terminal: { summary: "sent follow-up #" + n + " on " + dispute.id },
+    };
+  },
+});
+
+const escalateDispute = defineTool({
+  name: "escalate_dispute",
+  agent: "finance",
+  permission: "dispute:follow_up",
+  category: "decision",
+  terminal: true,
+  description:
+    "Escalate an unanswered vendor dispute to the controller with a recommended next step. Only after at least one follow-up went unanswered. Ends your run.",
+  schema: z.object({
+    work_item_id: workItemId,
+    summary: z.string(),
+    recommended_action: z.string(),
+    evidence_ids: z.array(z.string()),
+  }),
+  handler: ({ ctx, run, item }, args) => {
+    const dispute = openDispute(ctx, item);
+    if (dispute.status !== "SUBMITTED") fail("Dispute " + dispute.id + " is " + dispute.status + ".", "STATE_MACHINE");
+    if (vendorMessages(ctx, dispute.id).length === 0) fail("Follow up with the vendor before escalating.", "FOLLOW_UP_FIRST");
+    const cited = requireEvidence(ctx, item, args.evidence_ids, 1);
+    const daysOpen = Math.floor(businessAgeMs(ctx, dispute.submittedAt) / DAY_MS);
+    const controller = getActor(ctx, ACTOR.controller)?.name ?? "the controller";
+    recordFollowUp(ctx, {
+      key: "dispute-escalation-note:" + dispute.id,
+      kind: "ESCALATION_NOTE",
+      workItemId: item.id,
+      subjectId: dispute.id,
+      actorId: run.agentId,
+      details: { summary: args.summary.slice(0, 800), recommendedAction: args.recommended_action.slice(0, 800), daysOpen, evidenceIds: cited },
+    });
+    return {
+      result: { escalated_to: controller, days_open: daysOpen },
+      title: "Finance Agent escalated " + dispute.id + " to " + controller + " after " + daysOpen + " days without a vendor response",
+      summary: args.summary.trim().slice(0, 600) + " Recommended: " + args.recommended_action.trim().slice(0, 400),
+      activityType: "APPROVAL_REQUEST",
+      changes: ["Escalation note on " + dispute.id],
+      terminal: { summary: "escalated " + dispute.id + " to the controller" },
+    };
+  },
+});
+
+/* ------------------------------------------------------------------ */
+/* Finance Agent: onboarding (learn from AP history)                   */
+/* ------------------------------------------------------------------ */
+
+const BANDS: { label: string; min: number; max: number }[] = [
+  { label: "$0 (exact)", min: 0, max: 0 },
+  { label: "$0.01 to $25", min: 1, max: 2_500 },
+  { label: "$25.01 to $50", min: 2_501, max: 5_000 },
+  { label: "$50.01 to $100", min: 5_001, max: 10_000 },
+  { label: "$100.01 to $500", min: 10_001, max: 50_000 },
+  { label: "over $500", min: 50_001, max: Number.MAX_SAFE_INTEGER },
+];
+
+const queryApHistory = defineTool({
+  name: "query_ap_history",
+  agent: "finance",
+  scope: "onboarding",
+  permission: "history:read",
+  category: "read",
+  description:
+    "Mine the ERP's AP history: every past GPU invoice line, what the contract supported, the variance, and how the controller resolved it (paid as billed, disputed and credited, disputed and denied). Returns counts by variance band and resolution, computed by the application.",
+  schema: z.object({
+    provider_id: z.string().nullable().describe("Limit to one provider, or null for all."),
+    months: z.number().int().min(1).max(12).describe("How many months back to read."),
+  }),
+  handler: ({ ctx }, args) => {
+    const all = ctx.db.select().from(erpApHistory).all();
+    const periods = [...new Set(all.map((r) => r.period))].sort().slice(-args.months);
+    const rows = all.filter((r) => periods.includes(r.period) && (!args.provider_id || r.providerId === args.provider_id));
+    if (!rows.length) fail("No AP history matches.", "NOT_FOUND");
+    const paid = rows.filter((r) => r.resolution === "PAID_AS_BILLED");
+    const credited = rows.filter((r) => r.resolution === "DISPUTED_CREDITED");
+    const denied = rows.filter((r) => r.resolution === "DISPUTED_DENIED");
+    const disputed = [...credited, ...denied];
+    const paidVar = paid.filter((r) => r.varianceCents > 0).map((r) => r.varianceCents);
+    const largestPaid = paidVar.length ? Math.max(...paidVar) : 0;
+    const smallestDisputed = disputed.length ? Math.min(...disputed.map((r) => r.varianceCents)) : null;
+    const smallestCredited = credited.length ? Math.min(...credited.map((r) => r.varianceCents)) : null;
+    const bands = BANDS.map((b) => {
+      const inBand = rows.filter((r) => r.varianceCents >= b.min && r.varianceCents <= b.max);
+      return {
+        band: b.label,
+        lines: inBand.length,
+        paid_as_billed: inBand.filter((r) => r.resolution === "PAID_AS_BILLED").length,
+        disputed_credited: inBand.filter((r) => r.resolution === "DISPUTED_CREDITED").length,
+        disputed_denied: inBand.filter((r) => r.resolution === "DISPUTED_DENIED").length,
+      };
+    });
+    const stats = {
+      periods: periods[0] + " to " + periods[periods.length - 1],
+      lines: rows.length,
+      lines_with_variance: rows.filter((r) => r.varianceCents > 0).length,
+      paid_as_billed_with_variance: paidVar.length,
+      disputed: disputed.length,
+      disputes_credited: credited.length,
+      largest_variance_paid_as_billed: formatCents(largestPaid),
+      largest_variance_paid_as_billed_cents: largestPaid,
+      smallest_variance_disputed: smallestDisputed === null ? null : formatCents(smallestDisputed),
+      smallest_variance_disputed_cents: smallestDisputed,
+      smallest_variance_credited_cents: smallestCredited,
+      consistent_threshold_range_cents:
+        smallestCredited !== null && largestPaid < smallestCredited ? { from: largestPaid, to: smallestCredited - 1 } : null,
+    };
+    const examples = [...paid.filter((r) => r.varianceCents > 0).slice(-3), ...disputed.slice(0, 3)].map((r) => ({
+      id: r.id,
+      line: r.lineRef,
+      variance: formatCents(r.varianceCents),
+      resolution: r.resolution,
+      note: r.note,
+    }));
+    return {
+      result: { stats, bands, examples },
+      evidence: [
+        {
+          sourceType: "erp_history",
+          sourceId: "AP:" + (args.provider_id ?? "ALL") + ":" + stats.periods,
+          label: "ERP AP history " + stats.periods + " (" + rows.length + " lines)",
+          snapshot: { stats, bands, lineIds: rows.map((r) => r.id) },
+        },
+      ],
+      title: "Mined " + rows.length + " historical AP lines (" + stats.periods + ")",
+      summary:
+        paidVar.length + " variances up to " + formatCents(largestPaid) + " were paid as billed; " + disputed.length +
+        " disputes started at " + (smallestDisputed === null ? "n/a" : formatCents(smallestDisputed)) + " (" + credited.length + " credited).",
+    };
+  },
+});
+
+const proposeMaterialityPolicy = defineTool({
+  name: "propose_materiality_policy",
+  agent: "finance",
+  scope: "onboarding",
+  permission: "policy:propose",
+  category: "write",
+  terminal: true,
+  description:
+    "Propose a written materiality policy that matches how the controller has actually resolved variances: invoice variances at or below the threshold are accepted and charged to the owning project; larger ones are disputed. The application checks the threshold against history. Creates a controller approval request. Ends your run.",
+  schema: z.object({
+    threshold_cents: z.number().int().positive(),
+    statement: z.string(),
+    rationale: z.string(),
+    evidence_ids: z.array(z.string()),
+  }),
+  handler: ({ ctx, run }, args) => {
+    const cited = [...new Set(args.evidence_ids)];
+    const historyEvidence = cited.length
+      ? ctx.db
+          .select()
+          .from(evidence)
+          .where(and(eq(evidence.workItemId, ONBOARDING_ID), eq(evidence.sourceType, "erp_history"), inArray(evidence.id, cited)))
+          .all()
+      : [];
+    if (!historyEvidence.length) fail("Cite the AP history evidence returned by query_ap_history.", "EVIDENCE_REQUIRED");
+    if (args.threshold_cents > 50_000) fail("A materiality threshold above $500 per line needs a controller-authored policy.", "POLICY");
+    const rows = ctx.db.select().from(erpApHistory).all();
+    const contradicts = rows.filter((r) => r.resolution === "DISPUTED_CREDITED" && r.varianceCents <= args.threshold_cents);
+    if (contradicts.length) {
+      fail(
+        "The threshold would have accepted " + contradicts.length + " variance(s) the vendor later credited (" +
+          contradicts.map((r) => r.lineRef + " " + formatCents(r.varianceCents)).join(", ") + "). Choose a lower threshold.",
+        "HISTORY_CONFLICT",
+      );
+    }
+    const existing = ctx.db
+      .select()
+      .from(policies)
+      .where(and(eq(policies.policyKey, MATERIALITY_POLICY_KEY), inArray(policies.status, ["PROPOSED", "APPROVED"])))
+      .get();
+    if (existing) fail("Policy " + existing.id + " is already " + existing.status.toLowerCase() + ".", "POLICY_EXISTS");
+    const statement = args.statement.trim().slice(0, 800);
+    if (statement.length < 20) fail("Policy statement is too short.");
+    const paidCovered = rows.filter((r) => r.resolution === "PAID_AS_BILLED" && r.varianceCents > 0 && r.varianceCents <= args.threshold_cents).length;
+    const paidAbove = rows.filter((r) => r.resolution === "PAID_AS_BILLED" && r.varianceCents > args.threshold_cents).length;
+    const versions = ctx.db.select().from(policies).where(eq(policies.policyKey, MATERIALITY_POLICY_KEY)).all();
+    const version = Math.max(0, ...versions.map((p) => p.version)) + 1;
+    const id = "POL-" + MATERIALITY_POLICY_KEY + "-v" + version;
+    ctx.db
+      .insert(policies)
+      .values({
+        id,
+        policyKey: MATERIALITY_POLICY_KEY,
+        version,
+        title: "Billing variance materiality",
+        status: "PROPOSED",
+        statement,
+        rule: {
+          method: "accept_below_threshold",
+          thresholdCents: args.threshold_cents,
+          autoPostLimitCents: 1_000_000,
+          appliesTo: "Instance invoice lines that exceed the contract-supported charge",
+          conditions: [
+            "Variance above $0 and at or below " + formatCents(args.threshold_cents) + " per line",
+            "A single owning project is established",
+            "Invoice line at or below $10,000",
+            "Larger variances are disputed with the vendor",
+          ],
+        },
+        rationale: args.rationale.trim().slice(0, 1200),
+        evidenceIds: cited,
+        precedentIds: [],
+        learnedFromWorkItemId: null,
+        proposedBy: run.agentId,
+        supersedesId: null,
+        createdAt: nowIso(),
+      })
+      .run();
+    const approvalId = createApprovalRequest(ctx, {
+      workItemId: ONBOARDING_ID,
+      subjectType: "POLICY",
+      subjectId: id,
+      requestedBy: run.agentId,
+      summary:
+        "Adopt " + MATERIALITY_POLICY_KEY + " v" + version + ": accept variances up to " + formatCents(args.threshold_cents) +
+        " per line. Matches " + paidCovered + " historical lines paid as billed; no credited dispute falls under it.",
+    });
+    return {
+      result: {
+        policy_id: id,
+        approval_id: approvalId,
+        history_check: { paid_lines_covered: paidCovered, paid_lines_above_threshold: paidAbove, credited_disputes_below_threshold: 0 },
+      },
+      title: "Finance Agent proposed " + MATERIALITY_POLICY_KEY + " v" + version + " from AP history",
+      summary: statement,
+      activityType: "POLICY",
+      changes: ["Policy " + id + " proposed", "Approval " + approvalId + " pending"],
+      terminal: { summary: "proposed " + id + " for controller approval" },
+    };
+  },
+});
+
+const finishOnboarding = defineTool({
+  name: "finish_onboarding",
+  agent: "finance",
+  scope: "onboarding",
+  permission: "history:read",
+  category: "read",
+  terminal: true,
+  description: "End onboarding without proposing a policy, with a short note on what you found. Ends your run.",
+  schema: z.object({ summary: z.string() }),
+  handler: (_tc, args) => ({
+    result: { done: true },
+    title: "Finance Agent finished onboarding",
+    summary: args.summary.slice(0, 600),
+    terminal: { summary: "finished onboarding" },
+  }),
+});
+
 export const TOOLS: ToolDefinition[] = [
   getWorkItemTool,
   getInstanceLifecycle,
@@ -1273,11 +1647,21 @@ export const TOOLS: ToolDefinition[] = [
   requestHumanApproval,
   submitForPosting,
   requestMoreInfo,
+  getDisputeStatus,
+  sendVendorFollowUp,
+  escalateDispute,
+  queryApHistory,
+  proposeMaterialityPolicy,
+  finishOnboarding,
 ];
 
 export const TOOL_INDEX = new Map(TOOLS.map((t) => [t.name, t]));
 
-export function toolsForAgent(agentId: string) {
+export function runScope(run: Pick<AgentRunContext, "workItemId">): "work_item" | "onboarding" {
+  return run.workItemId === ONBOARDING_ID ? "onboarding" : "work_item";
+}
+
+export function toolsForAgent(agentId: string, scope: "work_item" | "onboarding" = "work_item") {
   const role = agentId === ACTOR.compute ? "compute" : agentId === ACTOR.finance ? "finance" : null;
-  return TOOLS.filter((t) => t.agent === "shared" || t.agent === role);
+  return TOOLS.filter((t) => (t.scope ?? "work_item") === scope && (t.agent === "shared" || t.agent === role));
 }

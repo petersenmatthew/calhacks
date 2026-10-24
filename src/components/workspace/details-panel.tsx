@@ -16,6 +16,7 @@ import { SIMULATED_SOURCES, useWorkspace } from "./workspace-context";
 
 const OUTCOME_LABEL: Record<string, string> = {
   CHARGE_EXPLAINED: "Charge explained and allocated under standing policy",
+  ACCEPTED_BELOW_MATERIALITY: "Variance below the learned materiality threshold; accepted and allocated",
   ALLOCATED_UNDER_POLICY: "Allocated automatically under an approved policy",
   ALLOCATED_WITH_APPROVAL: "Allocated with controller approval",
   CHARGE_ALLOCATED: "Allocated with controller approval",

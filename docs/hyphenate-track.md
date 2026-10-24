@@ -60,10 +60,14 @@ Already covered:
 - Corrections become a reusable policy (ALLOC-SHARED v2) that later posts without approval
 - Idempotent ingestion
 
-Gaps to consider:
+Added for autonomy (see README, "What runs on its own"):
 
-- **Answer key and score:** no labeled set of invoices with expected outcomes, and no accuracy number to show on stage.
-- **Self-learning at onboarding:** precedents and policies are seeded by hand; agents do not mine history to draft them.
-- **Continuous sync:** events arrive only when someone clicks Simulate; there is no feed or cursor.
-- **Live LLM:** LLM mode has only been tested with the SDK's scripted model.
+- **Continuous sync:** a scheduler inside the worker pulls provider billing feeds every few seconds with a cursor per source (`sync_cursors`), so work starts without clicks. An HTTP feed adapter (`BILLING_FEED_URL`) is the hook for a real provider.
+- **Time:** a business clock drives follow-ups. Approvals are reminded after 1 day and escalated to the CFO after 3; unanswered vendor disputes are chased by the Finance Agent at 14 days and escalated at 30.
+- **Self-learning at onboarding:** the Finance Agent mines six months of AP history and proposes a materiality policy ($50) that the history supports; once approved, small variances post without a dispute.
+- **Answer key and score:** 14 planted cases with hand-computed outcomes (`npm run eval`, or the Autonomy page).
 
+Remaining gaps:
+
+- **Live LLM:** LLM mode has only been tested with the SDK's scripted model. Run `npm run eval -- --llm` once a key is available; the deterministic score is a check of the plumbing, not of model judgment.
+- **Simulated systems of record:** provider feeds, scheduler, meters, ERP and the vendor portal are simulated.

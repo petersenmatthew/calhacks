@@ -2,7 +2,11 @@
 
 Autonomous finance operations for AI research labs. A Compute Agent and a Finance Agent reconcile GPU invoices against what actually ran, dispute overcharges, allocate shared cluster costs, and ask the controller when a decision needs a human. Every action is a typed tool call through an application gateway, written to an append-only audit log.
 
+**Seats it fills:** the GPU accounts-payable accountant who reconciles compute invoices against what actually ran, and the cost accountant who allocates shared cluster spend to research teams.
+
 The fictional lab is **Atlas Research**. All source systems (scheduler, infrastructure controller, provider meters, invoices, ERP) are simulated in SQLite. The agent decisions, approvals, postings, and audit trail are real application state.
+
+Work starts on its own: a scheduler syncs provider billing feeds on a cursor, follows up on approvals and vendor disputes as business days pass, and the Finance Agent learned its first policy by mining six months of AP history. See [What runs on its own](#what-runs-on-its-own) and [Proof it works](#proof-it-works).
 
 ## Quick start
 
@@ -30,10 +34,31 @@ Copy `.env.example` to `.env.local`. All are optional.
 | --- | --- | --- |
 | `OPENAI_API_KEY` | unset | Enables LLM agents through the OpenAI Agents SDK. Without it the app runs in **Deterministic replay**. Server-side only. |
 | `OPENAI_MODEL` | Agents SDK default | Model for LLM agents. |
-| `AGENT_MODE` | `llm` if a key is set, else `deterministic` | Starting execution mode. You can also switch modes in the sidebar. |
+| `AGENT_MODE` | `llm` if a key is set, else `deterministic` | Starting execution mode. Switch at runtime with `POST /api/settings {"mode": "llm"}`. |
 | `DETERMINISTIC_STEP_DELAY_MS` | `700` | Pause between deterministic agent steps so the live timeline is watchable. |
 | `DATABASE_PATH` | `./data/experiment-ledger.db` | SQLite file. |
 | `OPENAI_AGENTS_DISABLE_TRACING` | unset | Set to `1` to stop the SDK exporting traces to OpenAI. |
+| `SCHEDULER_INTERVAL_MS` | `5000` | How often the scheduler syncs billing feeds and runs follow-up rules. |
+| `AUTONOMY` | on | Set to `off` to disable the scheduler (agents still run when work is queued). |
+| `BILLING_FEED_URL` | unset | Optional external billing feed polled on a cursor: `GET <url>?after=<cursor>` returns `{ events, next_cursor }`. |
+
+## Deploy (Railway)
+
+The app is one long-running Node process: the Next.js server, the agent worker, and the scheduler share a SQLite database. That needs an always-on container with a persistent disk, not serverless functions, so Vercel is not a fit. The repo includes a `Dockerfile` and `railway.json` (health check on `/api/health`, one replica).
+
+1. In Railway, **New Project → Deploy from GitHub repo** and pick this repo. Railway builds the `Dockerfile`.
+2. On the service, **Add Volume** and mount it at `/data`. The image stores the database at `/data/experiment-ledger.db`, so it survives redeploys.
+3. Add variables if you want them (`OPENAI_API_KEY`, `OPENAI_AGENTS_DISABLE_TRACING=1`, `DETERMINISTIC_STEP_DELAY_MS`).
+4. **Settings → Networking → Generate Domain**. The first request seeds the sandbox and starts the worker and scheduler.
+
+Keep the service at one replica: SQLite is a single-node database. Moving to Postgres is the step that would allow more replicas and a separate worker process.
+
+Run the same image anywhere with Docker:
+
+```bash
+docker build -t experiment-ledger .
+docker run -p 3000:3000 -v experiment-ledger-data:/data experiment-ledger
+```
 
 ### Execution modes
 
@@ -52,6 +77,14 @@ Copy `.env.example` to `.env.local`. All are optional.
 8. Open **Audit trail**: every tool call, decision, posting, and denied action, hash-chained, plus policy versions, journal entries, and a trial balance.
 
 **Custom invoice line** lets you type any hours and rate to create a discrepancy that is not scripted. **Resend last billing event** proves idempotency. **Reset demo** reloads the sandbox.
+
+### Autonomy demo (no clicks needed for the work itself)
+
+1. Open **Autonomy**. On boot the Finance Agent read six months of AP history and proposed **VARIANCE-MATERIALITY v1**: variances up to $50 were always paid as billed, every dispute was $96 or more. Approve it. (It also appears in **Needs you** on the board.)
+2. Wait two minutes, or use the clock in the top bar (**+1 hour**). The Helios and Meridian feeds publish new lines; the scheduler syncs them on a cursor and the agents work them: an exact match auto-posts, and a Helios A100 line billed $0.40/h over contract ($12) is accepted under the learned policy instead of disputed.
+3. **+3 days**: a Helios line billed 6 h after termination arrives and becomes a $600 dispute waiting for you. Approve it.
+4. **+15 days**: Helios has not answered. The scheduler assigns the Finance Agent, which checks the dispute and sends a follow-up citing contract §7.2. **+16 days**: still nothing, so it escalates to the controller with a recommended next step. Leave an approval waiting and it is reminded after a day and escalated to the CFO after three.
+5. At the bottom of **Autonomy**, **Run** the evaluation: 14 planted cases scored against the answer key.
 
 ## How it works
 
@@ -77,12 +110,21 @@ flowchart LR
 - **Durability.** Jobs live in SQLite. Interrupted jobs are re-queued on restart, and approvals pause a workflow until a human decides.
 - **Live updates.** Activity rows are streamed over server-sent events; a reconnect replays missed rows.
 
+## What runs on its own
+
+- **Scheduler.** Inside the worker, every `SCHEDULER_INTERVAL_MS`. It does not decide anything itself: it pulls work in and puts agent jobs on the same durable queue, so a crash or redeploy never loses work.
+- **Feed sync.** Each provider feed is read from a cursor stored in `sync_cursors`, so a re-sync never re-reads a line; ingestion is also idempotent on event and line ids. A line that fails is recorded and set aside so the feed keeps flowing. The demo feeds publish over business time (`sim/feed-schedule.ts`); `BILLING_FEED_URL` points the same code at a real HTTP feed.
+- **Business clock.** Finance runs over weeks. Reminders and chases measure age on a business clock that equals wall-clock time in production; the demo can move it forward, and every move is audited.
+- **Follow-ups** (`workflow/follow-ups.ts`). Approval waiting 1 day: remind the controller. 3 days: escalate to the CFO (backup approver). Vendor dispute unanswered 14 days: the Finance Agent runs `get_dispute_status` and `send_vendor_follow_up`. 30 days: it runs `escalate_dispute` with a recommendation. Each action is keyed so it happens once, and every one is in the audit trail.
+- **Onboarding** (`workflow/onboarding.ts`). Before its first close the Finance Agent runs `query_ap_history` over the ERP's AP export and `propose_materiality_policy`. The application rejects a threshold that would have accepted any variance the vendor later credited. Once the controller approves, the ledger gateway lets variances at or below the threshold post without a dispute.
+
 ### Agents and tools
 
 | Agent | Tools |
 | --- | --- |
 | Compute Agent | `get_work_item`, `get_instance_lifecycle`, `get_gpu_job_logs`, `get_experiment`, `get_provider_usage`, `get_billing_terms`, `find_related_experiments`, `submit_compute_findings`, `handoff_to_finance`, `request_human_info` |
-| Finance Agent | `get_work_item`, `get_project_budget`, `get_allocation_policy`, `search_precedents`, `calculate_cost_allocation`, `propose_adjustment`, `propose_vendor_dispute`, `propose_policy`, `request_human_approval`, `submit_for_posting`, `request_more_info` |
+| Finance Agent | `get_work_item`, `get_project_budget`, `get_allocation_policy`, `search_precedents`, `calculate_cost_allocation`, `propose_adjustment`, `propose_vendor_dispute`, `propose_policy`, `request_human_approval`, `submit_for_posting`, `request_more_info`, `get_dispute_status`, `send_vendor_follow_up`, `escalate_dispute` |
+| Finance Agent (onboarding) | `query_ap_history`, `propose_materiality_policy`, `finish_onboarding` |
 
 All arithmetic is application code: billable hours, expected charges, allocations (largest-remainder rounding, always summing exactly), and dispute amounts. Agents choose actions and cite evidence; they cannot type amounts.
 
@@ -97,12 +139,27 @@ All arithmetic is application code: billable hours, expected charges, allocation
 - Repeated billing events are ignored without new work or postings.
 - A dispute never reduces accounts payable. Only a vendor credit does.
 
+## Proof it works
+
+**What is real:** every agent decision, tool call, approval, policy, journal entry, follow-up, and audit event is application state, enforced by the same gateway in both execution modes. **What is simulated:** the provider feeds, scheduler, infrastructure controller, meters, experiment tracker, ERP, AP history, and vendor portal.
+
+**Answer key.** `src/server/eval/answer-key.ts` plants 14 situations in invoice lines and states the correct outcome in hand-computed numbers: four real overcharges (billed after termination, rate above contract, wrong rate card, one extra hour), four correct invoices that look wrong (idle time after a job, an 8-hour contract minimum, per-started-hour metering, an exact match), and judgment calls (a $10 variance below materiality, an under-billing, a missing owner, a duplicate webhook, a shared reservation that fits policy, and one whose terms contradict policy). Each case runs in its own sandbox.
+
+```bash
+npm run eval            # deterministic replay, writes docs/eval-report.md
+npm run eval -- --llm   # LLM agents, writes docs/eval-report-llm.md (needs OPENAI_API_KEY)
+```
+
+Deterministic replay scores 14/14 ([report](docs/eval-report.md)): 4/4 overcharges caught, no correct invoice disputed. That run checks the controls, arithmetic, and plumbing end to end; it is a scripted policy, so it is not evidence of model judgment. The LLM run is the meaningful score. The **Autonomy** page can also run both.
+
 ## Tests
 
 ```bash
 npm test
 ```
 
+- **Autonomy:** feed sync on a cursor with no duplicates, onboarding proposes the $50 threshold the history supports, the learned policy changes the outcome of a $12 variance, approval reminders and escalations fire once, waiting time is measured from the request, and an unanswered dispute is chased at 14 days and escalated at 30.
+- **Answer key:** deterministic replay matches all 14 hand-computed outcomes.
 - **Arithmetic:** exact allocation sums and contract billable hours.
 - **Correct billing:** an instance whose job ended early is explained with no dispute.
 - **Scenario 1:** the $1,200 dispute leaves the liability unchanged until the vendor credits it.
@@ -118,9 +175,13 @@ src/server/agents      tools, gateway, LLM runner (Agents SDK), deterministic po
 src/server/workflow    ingestion, checks, approvals, decisions, ledger gateway, policies, jobs
 src/server/domain      money, billing, allocation, state machine
 src/server/security    actors, permissions, guard
-src/server/sim         seed data and demo scenarios (simulated source systems)
+src/server/sim         seed data, demo scenarios, feed schedule, AP history (simulated source systems)
+src/server/sync        billing feed sync with cursors (simulated outbox and HTTP adapter)
+src/server/eval        answer key and evaluation runner
+src/server/scheduler.ts, clock.ts   what starts work on its own, and the business clock
 src/app                pages and API routes (SSE at /api/stream)
-src/components         dashboard, investigation workspace, audit trail
+src/components         dashboard, investigation workspace, autonomy page, audit trail
+scripts/eval.ts        npm run eval
 drizzle/               SQL migrations
 tests/                 Vitest suite
 ```
@@ -129,7 +190,8 @@ tests/                 Vitest suite
 
 - **LLM mode:** no OpenAI key was available while building, so LLM mode was verified through the SDK's scripted model, not live model calls. Deterministic replay is the default when no key is set.
 - **One demo user:** there is no login. Every human action is taken as the controller, Priya Natarajan.
-- **Simulated systems:** source systems, the ERP, and the vendor portal are simulated, and vendor responses are triggered from the UI.
+- **Simulated systems:** source systems, the ERP, AP history, the billing feeds, and the vendor portal are simulated, and vendor responses are triggered from the UI. Reminders and vendor messages are recorded, not actually emailed.
 - **Two agents:** contract review is part of the Compute Agent; there is no separate Contract Agent.
-- **Single-node storage:** SQLite runs on one node. The worker runs inside the Next.js server process; restart the dev server after changing server code.
+- **Single-node storage:** SQLite runs on one node, so deploy one replica. The worker and scheduler run inside the Next.js server process; restart the dev server after changing server code.
+- **No mode switch in the UI:** switch between LLM and deterministic replay with `AGENT_MODE` or `POST /api/settings`.
 - **Reset wipes everything:** Reset demo deletes the sandbox, including its audit log. It is a demo control, not a production feature.

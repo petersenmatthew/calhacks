@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
-    "db:reset": "node -e \"require('fs').rmSync('data',{recursive:true,force:true})\""
+    "db:reset": "node -e \"require('fs').rmSync('data',{recursive:true,force:true})\"",
+    "eval": "tsx scripts/eval.ts"
   },
   "dependencies": {
     "@openai/agents": "^0.21.0",

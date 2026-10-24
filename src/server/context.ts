@@ -11,6 +11,10 @@ export interface AppConfig {
   model: string;
   /** Default execution mode when nothing is stored in settings. */
   defaultMode: "llm" | "deterministic";
+  /** How often the scheduler syncs feeds and runs follow-ups. 0 disables it. */
+  schedulerIntervalMs: number;
+  /** Optional external billing feed polled by the scheduler. */
+  feedUrl: string | null;
 }
 
 export interface AppContext {
@@ -40,6 +44,8 @@ export function createAppContext(options: { file: string; config?: Partial<AppCo
       llmAvailable,
       model: options.config?.model ?? "gpt-5.6-luna",
       defaultMode: options.config?.defaultMode ?? (llmAvailable ? "llm" : "deterministic"),
+      schedulerIntervalMs: options.config?.schedulerIntervalMs ?? 0,
+      feedUrl: options.config?.feedUrl ?? null,
     },
   };
 }

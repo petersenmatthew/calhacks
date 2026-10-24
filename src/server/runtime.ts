@@ -4,7 +4,7 @@ import { createAppContext, type AppContext } from "./context";
 import { ALL_TABLES, dropGuards, installGuards } from "./db/client";
 import { Orchestrator } from "./orchestrator";
 import { authorize, guard } from "./security/authorize";
-import { isSeeded, seedEnvironment } from "./sim/seed";
+import { isSeeded, seedEnvironment, upgradeEnvironment } from "./sim/seed";
 
 interface Runtime {
   ctx: AppContext;
@@ -29,9 +29,12 @@ export function getRuntime(): Runtime {
         llmAvailable,
         model: process.env.OPENAI_MODEL || getDefaultModel(),
         defaultMode: envMode() ?? (llmAvailable ? "llm" : "deterministic"),
+        schedulerIntervalMs: process.env.AUTONOMY === "off" ? 0 : Number(process.env.SCHEDULER_INTERVAL_MS ?? 5000),
+        feedUrl: process.env.BILLING_FEED_URL || null,
       },
     });
     if (!isSeeded(ctx)) seedEnvironment(ctx);
+    else upgradeEnvironment(ctx);
     const orchestrator = new Orchestrator(ctx);
     globalRef.__experimentLedger = { ctx, orchestrator };
     if (process.env.NEXT_PHASE !== "phase-production-build") orchestrator.start();

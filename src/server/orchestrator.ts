@@ -2,6 +2,7 @@ import { recordActivity } from "./activity";
 import type { AppContext } from "./context";
 import { RunAbortedError } from "./agents/gateway";
 import { runAgentJob } from "./agents/runner";
+import { runScheduledWork } from "./scheduler";
 import { ACTOR, getActor } from "./security/actors";
 import { guard } from "./security/authorize";
 import { executeDecision } from "./workflow/decisions";
@@ -51,6 +52,8 @@ function escalate(ctx: AppContext, job: JobRow, message: string) {
  */
 export class Orchestrator {
   private timer: NodeJS.Timeout | null = null;
+  private scheduleTimer: NodeJS.Timeout | null = null;
+  private scheduling = false;
   private active = new Set<Promise<void>>();
   private paused = false;
   private readonly onChange = (topic: string) => {
@@ -71,12 +74,30 @@ export class Orchestrator {
       });
     }
     this.timer = setInterval(() => this.tick(), 400);
+    if (this.ctx.config.schedulerIntervalMs > 0) {
+      this.scheduleTimer = setInterval(() => void this.runSchedule(), this.ctx.config.schedulerIntervalMs);
+      setTimeout(() => void this.runSchedule(), 1500);
+    }
     this.ctx.bus.on("change", this.onChange);
     this.tick();
   }
 
+  /** Feed sync and time-based follow-ups. Skipped while paused (demo reset) or already running. */
+  async runSchedule() {
+    if (this.paused || this.scheduling) return;
+    this.scheduling = true;
+    try {
+      await runScheduledWork(this.ctx, { feedUrl: this.ctx.config.feedUrl });
+      this.tick();
+    } finally {
+      this.scheduling = false;
+    }
+  }
+
   stop() {
     if (this.timer) clearInterval(this.timer);
+    if (this.scheduleTimer) clearInterval(this.scheduleTimer);
+    this.scheduleTimer = null;
     this.timer = null;
     this.ctx.bus.off("change", this.onChange);
   }

@@ -71,6 +71,18 @@ async function computePolicy(c: Caller) {
       ? pickClauses(terms.clauses, ["termination", "minimum", "metering"])
       : pickClauses(terms.clauses, ["idle", "minimum", "metering"]);
     const owner = checks.ownerProjectIds.length === 1 ? checks.ownerProjectIds[0] : null;
+    if (!owner) {
+      // Nobody can be charged without an owner, and guessing would misstate a project's costs.
+      await c.call("request_human_info", {
+        question:
+          "Which research project owns " + checks.instanceId + "? " +
+          (checks.ownerProjectIds.length
+            ? "Its jobs belong to " + checks.ownerProjectIds.length + " projects (" + checks.ownerProjectIds.join(", ") + ")."
+            : "None of its experiments (" + (checks.experimentIds.join(", ") || "none recorded") + ") has an owning project in the tracker.") +
+          " The " + wi.amounts.invoiced + " charge cannot be allocated until an owner is confirmed.",
+      });
+      return;
+    }
     const summary = unexplained
       ? "Instance " + checks.instanceId + " ran " + checks.lifecycleHours + " h from provisioning to termination, supporting " +
         checks.billableHours + " billable h (" + wi.amounts.contract_supported + "). The invoice bills " + checks.billedHours + " h (" +
@@ -139,6 +151,25 @@ async function financePolicy(c: Caller, run: AgentRunContext) {
 
   if (wi.work_item.type === "BILLING_VARIANCE") {
     const policy = await c.call("get_allocation_policy", {});
+    const materiality = policy.materiality_policy as Json | null;
+    if (compute?.assessment === "not_explained" && materiality?.applies_to_this_item) {
+      const calc = await c.call("calculate_cost_allocation", { method: "single_owner" });
+      const proposal = await c.call("propose_adjustment", {
+        calculation_id: calc.calculation_id,
+        rationale:
+          "The " + wi.amounts.discrepancy + " variance is at or below the " + materiality.threshold + " materiality threshold in " +
+          materiality.id + ", learned from how the controller resolved past variances. Accept it and charge the full " +
+          wi.amounts.invoiced + " to the owning project instead of opening a dispute.",
+        policy_id: materiality.id,
+        evidence_ids: c.ids,
+      });
+      if (proposal.standing_authorization.authorized) {
+        const posted = await c.try("submit_for_posting", { proposal_id: proposal.proposal_id });
+        if (posted.ok) return;
+      }
+      await c.call("request_human_approval", { proposal_id: proposal.proposal_id, summary: "Accept a " + wi.amounts.discrepancy + " variance below materiality." });
+      return;
+    }
     if (compute?.assessment === "not_explained") {
       await c.call("search_precedents", { query: wi.provider.name + " billing after termination dispute credit" });
       const dispute = await c.call("propose_vendor_dispute", {
@@ -228,9 +259,64 @@ async function financePolicy(c: Caller, run: AgentRunContext) {
   });
 }
 
+async function onboardingPolicy(c: Caller) {
+  const all = await c.call("query_ap_history", { provider_id: null, months: 6 });
+  const stats = all.stats as Json;
+  const range = stats.consistent_threshold_range_cents as { from: number; to: number } | null;
+  if (!range) {
+    await c.call("finish_onboarding", { summary: "History shows no consistent cut-off between variances paid as billed and variances disputed." });
+    return;
+  }
+  // A round number inside the range the history supports, never below what was routinely paid.
+  const candidates = [2_500, 5_000, 7_500, 10_000, 25_000, 50_000];
+  const threshold = candidates.find((t) => t >= range.from && t <= range.to) ?? range.from;
+  const dollars = "$" + (threshold / 100).toFixed(2);
+  await c.call("propose_materiality_policy", {
+    threshold_cents: threshold,
+    statement:
+      "GPU invoice lines that exceed the contract-supported charge by " + dollars + " or less are accepted as billed and charged to the owning project. " +
+      "Larger variances are investigated and disputed with the vendor.",
+    rationale:
+      "Across " + stats.lines + " AP lines (" + stats.periods + "), " + stats.paid_as_billed_with_variance + " variances up to " +
+      stats.largest_variance_paid_as_billed + " were paid as billed, while all " + stats.disputed + " disputes were for " +
+      stats.smallest_variance_disputed + " or more (" + stats.disputes_credited + " credited). Writing the practice down lets small variances post without a dispute that costs more than it recovers.",
+    evidence_ids: c.ids,
+  });
+}
+
+async function followUpPolicy(c: Caller, run: AgentRunContext) {
+  const wi = await c.call("get_work_item", {});
+  const status = await c.call("get_dispute_status", {});
+  const d = status.dispute as Json;
+  const clause = (status.dispute_clauses as Json[])[0];
+  if (run.trigger.trigger === "dispute_escalation") {
+    await c.call("escalate_dispute", {
+      summary:
+        (status.provider as Json).name + " has not responded to " + d.id + " (" + d.amount + ") after " + d.days_open + " days and " +
+        (status.prior_follow_ups as Json[]).length + " follow-up(s). Accounts payable still shows " + status.accounts_payable_outstanding + ".",
+      recommended_action:
+        "Short-pay the next " + (status.provider as Json).name + " invoice by " + d.amount + " citing " + d.vendor_reference +
+        (clause ? ", and confirm with the account manager before the §" + clause.ref + " window closes." : "."),
+      evidence_ids: c.ids,
+    });
+    return;
+  }
+  await c.call("send_vendor_follow_up", {
+    message:
+      "Following up on dispute " + d.id + " (your reference " + d.vendor_reference + ") for " + d.amount + " on invoice line " +
+      wi.invoice_line.external_line_id + ", submitted " + d.days_open + " days ago with no response. " +
+      (clause ? "Under §" + clause.ref + " (" + clause.title + "): \"" + clause.text + "\" " : "") +
+      "Please confirm the credit memo or tell us what you need to resolve it.",
+    evidence_ids: c.ids,
+  });
+}
+
 export async function runDeterministicAgent(ctx: AppContext, run: AgentRunContext) {
   const caller = new Caller(ctx, run);
-  if (run.agentId === ACTOR.compute) await computePolicy(caller);
+  const trigger = String(run.trigger.trigger ?? "");
+  if (run.agentId === ACTOR.finance && trigger === "onboarding") await onboardingPolicy(caller);
+  else if (run.agentId === ACTOR.finance && (trigger === "dispute_follow_up" || trigger === "dispute_escalation")) await followUpPolicy(caller, run);
+  else if (run.agentId === ACTOR.compute) await computePolicy(caller);
   else if (run.agentId === ACTOR.finance) await financePolicy(caller, run);
   else throw new Error("No deterministic policy for " + run.agentId);
 }

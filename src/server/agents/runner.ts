@@ -5,6 +5,8 @@ import { agentRuns, workItems } from "../db/schema";
 import { ACTOR, getActor } from "../security/actors";
 import { getExecutionMode } from "../settings";
 import type { JobRow } from "../workflow/jobs";
+import { FOLLOW_UP_TRIGGERS } from "../workflow/follow-ups";
+import { isOnboarding } from "../workflow/onboarding";
 import { getWorkItem, transitionWorkItem } from "../workflow/work-items";
 import { runDeterministicAgent } from "./deterministic";
 import { RunAbortedError } from "./gateway";
@@ -22,6 +24,9 @@ function taskFor(agentId: string, trigger: Record<string, unknown>, workItemId: 
     if (t === "human_info") return "Continue the investigation of " + workItemId + " with controller input";
     return "Investigate compute evidence for " + workItemId;
   }
+  if (t === "onboarding") return "Learn how Atlas resolves invoice variances from six months of AP history";
+  if (t === "dispute_follow_up") return "Follow up with the vendor on the open dispute for " + workItemId;
+  if (t === "dispute_escalation") return "Escalate the unanswered vendor dispute on " + workItemId;
   if (t === "controller_feedback") return "Rework the proposal on " + workItemId + " after controller feedback";
   if (t === "human_info") return "Continue " + workItemId + " with controller input";
   return "Resolve " + workItemId + " from the compute findings";
@@ -31,9 +36,12 @@ function taskFor(agentId: string, trigger: Record<string, unknown>, workItemId: 
 export async function runAgentJob(ctx: AppContext, job: JobRow) {
   const agentId = job.agentId;
   if (!agentId) throw new Error("Agent job without agent");
-  const item = getWorkItem(ctx, job.workItemId);
+  const onboarding = isOnboarding(job.workItemId);
+  const item = onboarding ? null : getWorkItem(ctx, job.workItemId);
+  const workItemId = job.workItemId;
   const agentName = getActor(ctx, agentId)?.name ?? agentId;
-  if (!ACTIVE_STATES.has(item.state)) {
+  const followUp = FOLLOW_UP_TRIGGERS.has(String(job.payload.trigger ?? ""));
+  if (item && !ACTIVE_STATES.has(item.state) && !(followUp && item.state === "DISPUTED")) {
     recordActivity(ctx, {
       workItemId: item.id,
       actorId: ACTOR.orchestrator,
@@ -43,18 +51,18 @@ export async function runAgentJob(ctx: AppContext, job: JobRow) {
     });
     return;
   }
-  if (item.agentRunCount >= MAX_AGENT_RUNS_PER_ITEM) {
+  if (item && item.agentRunCount >= MAX_AGENT_RUNS_PER_ITEM) {
     throw new Error("Agent run limit reached for " + item.id);
   }
   const mode = getExecutionMode(ctx);
   const runId = nextId(ctx, "RUN", 8001);
-  const task = taskFor(agentId, job.payload, item.id);
+  const task = taskFor(agentId, job.payload, workItemId);
   tx(ctx, () => {
     ctx.db
       .insert(agentRuns)
       .values({
         id: runId,
-        workItemId: item.id,
+        workItemId,
         agentId,
         mode,
         model: mode === "llm" ? ctx.config.model : null,
@@ -63,14 +71,16 @@ export async function runAgentJob(ctx: AppContext, job: JobRow) {
         startedAt: nowIso(),
       })
       .run();
-    ctx.db
-      .update(workItems)
-      .set({ agentRunCount: sql`${workItems.agentRunCount} + 1`, assignedAgentId: agentId })
-      .where(eq(workItems.id, item.id))
-      .run();
-    if (item.state === "NEW") transitionWorkItem(ctx, item.id, "INVESTIGATING", ACTOR.orchestrator, "Assigned to " + agentName);
+    if (item) {
+      ctx.db
+        .update(workItems)
+        .set({ agentRunCount: sql`${workItems.agentRunCount} + 1`, assignedAgentId: agentId })
+        .where(eq(workItems.id, item.id))
+        .run();
+      if (item.state === "NEW") transitionWorkItem(ctx, item.id, "INVESTIGATING", ACTOR.orchestrator, "Assigned to " + agentName);
+    }
     recordActivity(ctx, {
-      workItemId: item.id,
+      workItemId,
       runId,
       actorId: agentId,
       type: "AGENT_STARTED",
@@ -87,7 +97,7 @@ export async function runAgentJob(ctx: AppContext, job: JobRow) {
   const run: AgentRunContext = {
     runId,
     agentId,
-    workItemId: item.id,
+    workItemId,
     mode,
     epoch: ctx.epoch,
     terminal: null,
@@ -108,7 +118,7 @@ export async function runAgentJob(ctx: AppContext, job: JobRow) {
         .where(eq(agentRuns.id, runId))
         .run();
       recordActivity(ctx, {
-        workItemId: item.id,
+        workItemId,
         runId,
         actorId: agentId,
         type: "AGENT_FINISHED",
@@ -135,7 +145,7 @@ export async function runAgentJob(ctx: AppContext, job: JobRow) {
       .where(eq(agentRuns.id, runId))
       .run();
     recordActivity(ctx, {
-      workItemId: item.id,
+      workItemId,
       runId,
       actorId: agentId,
       type: "ERROR",
