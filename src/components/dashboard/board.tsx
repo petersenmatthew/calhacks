@@ -38,7 +38,7 @@ function Card({ item, stage, data, agent }: { item: Item; stage: BoardStage; dat
   const steps = working ? agentSteps(agent.agentId, agent.runTools, "running").steps : null;
   return (
     <Link
-      href={"/investigations/" + item.id}
+      href={"/canvas?task=" + item.id}
       className={cn("card-soft mx-auto block w-full max-w-[260px] p-3 transition-transform hover:-translate-y-px animate-enter", working && "outline-2! outline-primary!", stage === "done" && "opacity-60 hover:opacity-100")}
     >
       <div className="flex items-start gap-2.5">

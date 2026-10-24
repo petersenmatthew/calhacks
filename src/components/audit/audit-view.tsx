@@ -114,7 +114,7 @@ function EventsTable({ data }: { data: AuditData }) {
                   </td>
                   <td className="px-2 py-2 font-mono text-[11px] whitespace-nowrap">
                     {e.workItemId ? (
-                      <Link onClick={(ev) => ev.stopPropagation()} className="text-brand-ink hover:underline" href={"/investigations/" + e.workItemId}>
+                      <Link onClick={(ev) => ev.stopPropagation()} className="text-brand-ink hover:underline" href={"/canvas?task=" + e.workItemId}>
                         {e.workItemId}
                       </Link>
                     ) : (
@@ -182,7 +182,7 @@ function PoliciesList({ data }: { data: AuditData }) {
                   {p.learnedFromWorkItemId ? (
                     <div className="text-[11px] text-muted-foreground">
                       Learned from{" "}
-                      <Link className="text-brand-ink hover:underline" href={"/investigations/" + p.learnedFromWorkItemId}>
+                      <Link className="text-brand-ink hover:underline" href={"/canvas?task=" + p.learnedFromWorkItemId}>
                         {p.learnedFromWorkItemId}
                       </Link>{" "}
                       · precedents {p.precedentIds.join(", ") || "none"} · {p.evidenceIds.length} evidence references
@@ -253,7 +253,7 @@ function Ledger({ data }: { data: AuditData }) {
                     {entry.workItemId ? (
                       <>
                         {" · "}
-                        <Link className="text-brand-ink hover:underline" href={"/investigations/" + entry.workItemId}>
+                        <Link className="text-brand-ink hover:underline" href={"/canvas?task=" + entry.workItemId}>
                           {entry.workItemId}
                         </Link>
                       </>

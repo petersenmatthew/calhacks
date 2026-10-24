@@ -279,7 +279,7 @@ export function DetailsPanel() {
                     <>
                       {" "}
                       · learned from{" "}
-                      <Link className="text-brand-ink hover:underline" href={"/investigations/" + p.learnedFromWorkItemId}>
+                      <Link className="text-brand-ink hover:underline" href={"/canvas?task=" + p.learnedFromWorkItemId}>
                         {p.learnedFromWorkItemId}
                       </Link>
                     </>

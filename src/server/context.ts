@@ -17,6 +17,8 @@ export interface AppConfig {
   feedUrl: string | null;
   /** Email and Slack delivery. Empty values mean messages stay in the outbox as "simulated". */
   comms: CommsConfig;
+  /** "one": the team works one case at a time. "all": cases run in parallel. */
+  defaultRunMode: "one" | "all";
 }
 
 export interface CommsConfig {
@@ -81,6 +83,7 @@ export function createAppContext(options: { file: string; config?: Partial<AppCo
       schedulerIntervalMs: options.config?.schedulerIntervalMs ?? 0,
       feedUrl: options.config?.feedUrl ?? null,
       comms: { ...DEFAULT_COMMS, ...(options.config?.comms ?? {}) },
+      defaultRunMode: options.config?.defaultRunMode ?? "all",
     },
   };
 }

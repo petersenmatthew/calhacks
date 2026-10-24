@@ -28,9 +28,9 @@ export const PROJECTS = [
 ];
 
 const PROVIDERS = [
-  { id: "PRV-HELIOS", name: "Helios Cloud", shortName: "Helios", billingEmail: "billing@helios-cloud.example" },
-  { id: "PRV-STRATUS", name: "Stratus GPU", shortName: "Stratus", billingEmail: "ar@stratusgpu.example" },
-  { id: "PRV-MERIDIAN", name: "Meridian Compute", shortName: "Meridian", billingEmail: "billing@meridian-compute.example" },
+  { id: "PRV-HELIOS", name: "Lambda", shortName: "Lambda", billingEmail: "billing@lambda.example" },
+  { id: "PRV-STRATUS", name: "CoreWeave", shortName: "CoreWeave", billingEmail: "ar@coreweave.example" },
+  { id: "PRV-MERIDIAN", name: "Nebius", shortName: "Nebius", billingEmail: "billing@nebius.example" },
 ];
 
 const HELIOS_CLAUSES: ContractClause[] = [
@@ -45,7 +45,7 @@ const HELIOS_CLAUSES: ContractClause[] = [
 const STRATUS_CLAUSES: ContractClause[] = [
   { ref: "2.1", title: "Reserved capacity rates", text: "Reserved H100 capacity is priced per GPU-hour as stated on each reservation order." },
   { ref: "2.4", title: "Reserved capacity billed in full", text: "Reserved capacity is billed in full for the reservation term whether or not it is used." },
-  { ref: "2.6", title: "Internal sharing of reservations", text: "The customer may share reserved capacity across internal teams. Stratus invoices each reservation as a single line." },
+  { ref: "2.6", title: "Internal sharing of reservations", text: "The customer may share reserved capacity across internal teams. CoreWeave invoices each reservation as a single line." },
   { ref: "6.1", title: "Billing disputes", text: "Disputes must be raised within 30 days of the invoice date." },
 ];
 
@@ -67,7 +67,7 @@ function seedReferenceData(ctx: AppContext) {
       {
         id: "HC-2025-114",
         providerId: "PRV-HELIOS",
-        name: "Helios Cloud Master Services Agreement",
+        name: "Lambda Master Services Agreement",
         effectiveFrom: "2025-07-01",
         rateCard: { "h100.8x": 10_000, "a100.8x": 6_400 },
         billingIncrementHours: 1,
@@ -79,7 +79,7 @@ function seedReferenceData(ctx: AppContext) {
       {
         id: "SG-2026-007",
         providerId: "PRV-STRATUS",
-        name: "Stratus GPU Reserved Capacity Agreement",
+        name: "CoreWeave Reserved Capacity Agreement",
         effectiveFrom: "2026-01-01",
         rateCard: { "h100.8x": 8_800 },
         billingIncrementHours: 1,
@@ -91,7 +91,7 @@ function seedReferenceData(ctx: AppContext) {
       {
         id: "MC-2026-031",
         providerId: "PRV-MERIDIAN",
-        name: "Meridian Compute Order Form",
+        name: "Nebius Order Form",
         effectiveFrom: "2026-02-15",
         rateCard: { "h200.8x": 12_000 },
         billingIncrementHours: 1,
@@ -212,8 +212,8 @@ function seedReferenceData(ctx: AppContext) {
         kind: "vendor_dispute",
         decidedAt: "2026-09-12T20:00:00.000Z",
         decidedBy: ACTOR.controller,
-        title: "Helios credited 10 h billed after termination on i-hel-3920",
-        summary: "Helios metered an instance 10 hours past its TERMINATED event. The controller approved dispute DSP-0412 and Helios issued a full $1,000 credit.",
+        title: "Lambda credited 10 h billed after termination on i-hel-3920",
+        summary: "Lambda metered an instance 10 hours past its TERMINATED event. The controller approved dispute DSP-0412 and Lambda issued a full $1,000 credit.",
         tags: ["vendor_dispute", "helios", "termination", "billing", "credit"],
         details: { creditCents: 100_000, disputeId: "DSP-0412" },
         source: "seed",
@@ -240,18 +240,19 @@ export function ensureActors(ctx: AppContext) {
 }
 
 /**
- * Load the simulated environment. Every seeded case (see cases.ts) goes through
- * the real ingestion pipeline: clean lines auto-match, and the rest open work
- * items for the agents. WI-1001 is the early-job-end case, so the team is
- * visibly working when the app first opens.
+ * Load the simulated environment through the real ingestion pipeline. "demo"
+ * loads only the clean lines, which auto-match and open no tasks, so the app
+ * starts quiet and the presenter triggers the one case to watch live. "all"
+ * loads every case in cases.ts for the eval and tests.
  */
-export function seedEnvironment(ctx: AppContext) {
+export function seedEnvironment(ctx: AppContext, cases: "demo" | "all" = "all") {
   tx(ctx, () => {
     seedReferenceData(ctx);
     seedApHistory(ctx);
     seedFeedSchedule(ctx);
   });
-  for (const c of SEED_CASES) ingestCase(ctx, c.data);
+  const seeded = cases === "all" ? SEED_CASES : SEED_CASES.filter((c) => c.category === "clean");
+  for (const c of seeded) ingestCase(ctx, c.data);
   recordActivity(ctx, {
     actorId: ACTOR.simulator,
     type: "SYSTEM",
@@ -267,12 +268,14 @@ export function seedEnvironment(ctx: AppContext) {
  */
 export function upgradeEnvironment(ctx: AppContext) {
   tx(ctx, () => {
-    ctx.db.insert(actors).values(ACTOR_SEED).onConflictDoNothing().run();
+    ensureActors(ctx);
     const history = ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM erp_ap_history").get() as { n: number };
     if (history.n === 0) seedApHistory(ctx);
     const feed = ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM feed_events").get() as { n: number };
     if (feed.n === 0) seedFeedSchedule(ctx);
     for (const p of PROVIDERS) {
+      // Databases created before the providers were renamed to real GPU clouds pick up the new names.
+      ctx.db.update(providers).set({ name: p.name, shortName: p.shortName }).where(eq(providers.id, p.id)).run();
       ctx.db.update(providers).set({ billingEmail: p.billingEmail }).where(and(eq(providers.id, p.id), isNull(providers.billingEmail))).run();
     }
   });

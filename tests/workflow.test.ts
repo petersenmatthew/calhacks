@@ -26,16 +26,33 @@ describe("seeded month", () => {
   it("auto-matches clean lines and explains a correctly billed instance whose job ended early", async () => {
     const { ctx, orchestrator } = setup();
     await orchestrator.drain();
-    const item = workItem(ctx, "WI-1001");
+    const id = ctx.db.select().from(workItems).where(eq(workItems.invoiceLineId, "HEL-2026-10-121-L1")).get()!.id;
+    const item = workItem(ctx, id);
     expect(item.state).toBe("RESOLVED");
     expect(item.outcome).toBe("CHARGE_EXPLAINED");
-    expect(ctx.db.select().from(vendorDisputes).all()).toHaveLength(0);
-    expect(proposalsFor(ctx, "WI-1001").every((p) => p.kind === "ALLOCATION")).toBe(true);
+    expect(ctx.db.select().from(vendorDisputes).where(eq(vendorDisputes.workItemId, id)).all()).toHaveLength(0);
+    expect(proposalsFor(ctx, id).every((p) => p.kind === "ALLOCATION")).toBe(true);
     expect(unbalancedEntries(ctx)).toHaveLength(0);
   });
 });
 
 describe("Scenario 1: suspected GPU overbilling", () => {
+  it("in one-at-a-time mode, holds every later case until the current one leaves the team", async () => {
+    const { ctx, orchestrator } = setup(":memory:", { defaultRunMode: "one" });
+    await orchestrator.drain();
+    const items = () => ctx.db.select().from(workItems).all().sort((a, b) => a.id.localeCompare(b.id));
+    const current = items().find((i) => !["RESOLVED", "DISPUTED"].includes(i.state))!;
+    expect(current.state).toBe("NEEDS_APPROVAL");
+    expect(items().filter((i) => i.id > current.id).every((i) => i.state === "NEW")).toBe(true);
+
+    const [approval] = pendingApprovals(ctx, current.id);
+    decideApproval(ctx, { approvalId: approval.id, actorId: ACTOR.controller, decision: "APPROVED" });
+    await orchestrator.drain();
+    const later = items().filter((i) => i.id > current.id);
+    expect(later[0].state).not.toBe("NEW");
+    expect(later.at(-1)!.state).toBe("NEW");
+  });
+
   it("disputes $1,200, waits for approval, and keeps the liability until the vendor credits", async () => {
     const { ctx, orchestrator } = setup();
     await orchestrator.drain();

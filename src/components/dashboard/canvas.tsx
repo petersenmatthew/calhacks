@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import useSWR from "swr";
 import { toast } from "sonner";
 import { fetcher } from "@/lib/api";
@@ -11,7 +11,6 @@ import { groupOf, Sidebar } from "../canvas/sidebar";
 import { useLiveRefresh } from "../live-events";
 import { AgentPanel } from "../orbit/agent-panel";
 import { EMPLOYEES, Orbit, type Focus } from "../orbit/orbit";
-import { ReviewSwitcher } from "../review/switcher";
 import { Caption } from "./caption";
 
 /** How many recently active tasks feed the canvas when no task is focused. */
@@ -32,14 +31,25 @@ async function fetchMany([, ...ids]: string[]) {
  */
 export function SystemCanvas({ data, initialTask = null, onChanged }: { data: DashboardData; initialTask?: string | null; onChanged: () => void }) {
   const items = useMemo(() => data.workItems.filter((i) => i.period === data.period), [data]);
-  const [task, setTaskState] = useState<string | null>(initialTask);
+  const [picked, setPicked] = useState<string | null>(initialTask);
+  // The canvas opens the case the team is on, including one that arrives while
+  // the page is open, and stays on it. The person chooses when to look elsewhere.
+  const [autoOpen, setAutoOpen] = useState(initialTask === null);
+  const live = data.activeWorkItemId && items.some((i) => i.id === data.activeWorkItemId) ? data.activeWorkItemId : null;
+  if (autoOpen && live) {
+    setAutoOpen(false);
+    setPicked(live);
+  }
+  const task = picked;
+  const oneAtATime = data.settings.runMode === "one";
   const [focus, setFocus] = useState<Focus>(null);
 
-  const setTask = useCallback((id: string | null) => {
-    setTaskState(id);
+  const setTask = (id: string | null) => {
+    setPicked(id);
+    setAutoOpen(false);
     setFocus(null);
     window.history.replaceState(null, "", id ? "/canvas?task=" + id : "/canvas");
-  }, []);
+  };
 
   const recentIds = items.slice(0, RECENT).map((i) => i.id);
   const recent = useSWR<WorkspaceData[]>(task ? null : ["canvas-frames", ...recentIds], fetchMany, { keepPreviousData: true });
@@ -84,7 +94,6 @@ export function SystemCanvas({ data, initialTask = null, onChanged }: { data: Da
           }}
         />
         <Caption data={data} />
-        {task ? <ReviewSwitcher taskId={task} current="sidebar" className="absolute right-4 bottom-4 z-40" /> : null}
       </div>
       <Sidebar
         data={data}
@@ -94,6 +103,8 @@ export function SystemCanvas({ data, initialTask = null, onChanged }: { data: Da
         onTask={setTask}
         onDecided={async () => {
           onChanged();
+          // One at a time: stay on this case to watch it finish.
+          if (oneAtATime) return;
           // Let the confirmation read for a beat. Stay when the same task still has
           // something waiting, such as a new rule plus the redone split.
           await new Promise((r) => window.setTimeout(r, 900));

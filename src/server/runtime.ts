@@ -84,6 +84,9 @@ function envMode(): "llm" | "deterministic" | undefined {
   return v === "llm" || v === "deterministic" ? v : undefined;
 }
 
+/** The app seeds one demo case; SEED=all loads every case, as the eval does. */
+const appSeed = () => (process.env.SEED === "all" ? "all" : "demo");
+
 /** Process-wide singleton: database, event bus, and durable worker. */
 export function getRuntime(): Runtime {
   if (!globalRef.__experimentLedger) {
@@ -98,9 +101,10 @@ export function getRuntime(): Runtime {
         schedulerIntervalMs: process.env.AUTONOMY === "off" ? 0 : Number(process.env.SCHEDULER_INTERVAL_MS ?? 5000),
         feedUrl: process.env.BILLING_FEED_URL || null,
         comms: commsFromEnv(),
+        defaultRunMode: process.env.RUN_MODE === "all" ? "all" : "one",
       },
     });
-    if (!isSeeded(ctx)) seedEnvironment(ctx);
+    if (!isSeeded(ctx)) seedEnvironment(ctx, appSeed());
     else upgradeEnvironment(ctx);
     const orchestrator = new Orchestrator(ctx);
     globalRef.__experimentLedger = { ctx, orchestrator };
@@ -128,7 +132,7 @@ export async function resetEnvironment(actorId: string) {
   })();
   installGuards(ctx.sqlite);
   resetInboxCursor();
-  seedEnvironment(ctx);
+  seedEnvironment(ctx, appSeed());
   orchestrator.resume();
   ctx.bus.emit("change", "reset");
 }

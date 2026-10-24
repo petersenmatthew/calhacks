@@ -31,7 +31,8 @@ import {
   workItemTransitions,
 } from "./db/schema";
 import { ACTOR } from "./security/actors";
-import { getAgentSettings, getExecutionMode } from "./settings";
+import { getAgentSettings, getExecutionMode, getRunMode } from "./settings";
+import { activeWorkItemId } from "./workflow/jobs";
 import { toolsForAgent } from "./agents/tools";
 import { contractForProvider, reservationUsage } from "./workflow/checks";
 import { policyFitForWorkItem, POLICY_KEYS } from "./workflow/policies";
@@ -55,6 +56,7 @@ function lookups(ctx: AppContext) {
 export function getSettingsView(ctx: AppContext) {
   return {
     mode: getExecutionMode(ctx),
+    runMode: getRunMode(ctx),
     llmAvailable: ctx.config.llmAvailable,
     model: ctx.config.model,
     stepDelayMs: ctx.config.stepDelayMs,
@@ -221,6 +223,8 @@ export function getDashboard(ctx: AppContext, requestedPeriod?: string | null) {
         return { approvalId: a.id, policyId: a.subjectId, title: policy?.title ?? a.subjectId, summary: a.summary, createdAt: a.createdAt };
       }),
     clock: { now: businessNowIso(ctx), offsetMs: clockOffsetMs(ctx) },
+    /** The case the team is on in one-at-a-time mode; null when cases run in parallel. */
+    activeWorkItemId: getRunMode(ctx) === "one" ? activeWorkItemId(ctx) : null,
     ...lookups(ctx),
   };
 }

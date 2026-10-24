@@ -85,16 +85,16 @@ export function buildInstanceCase(input: InstanceCaseInput): ScenarioData {
         projectId: input.projectId,
         name: input.experimentName,
         owner: input.owner,
-        description: input.experimentName + " (tracked in Atlas experiment tracker)",
-        tracker: "atlas-tracker",
+        description: input.experimentName + " (tracked in Weights & Biases)",
+        tracker: "wandb",
       },
     ],
     reservations: [],
     instances: [{ id: input.instanceId, providerId: input.providerId, instanceType: input.instanceType, gpuCount: 8, region: "us-west-2" }],
     lifecycle: [
-      { instanceId: input.instanceId, eventType: "REQUESTED", occurredAt: addHours(provisioned, -0.03), source: "atlas-infra-controller", reference: null },
-      { instanceId: input.instanceId, eventType: "PROVISIONED", occurredAt: provisioned, source: "atlas-infra-controller", reference: null },
-      { instanceId: input.instanceId, eventType: "STOP_REQUESTED", occurredAt: addHours(terminated, -0.07), source: "atlas-infra-controller", reference: null },
+      { instanceId: input.instanceId, eventType: "REQUESTED", occurredAt: addHours(provisioned, -0.03), source: "kubernetes", reference: null },
+      { instanceId: input.instanceId, eventType: "PROVISIONED", occurredAt: provisioned, source: "kubernetes", reference: null },
+      { instanceId: input.instanceId, eventType: "STOP_REQUESTED", occurredAt: addHours(terminated, -0.07), source: "kubernetes", reference: null },
       {
         instanceId: input.instanceId,
         eventType: "TERMINATED",
@@ -129,7 +129,7 @@ export function buildInstanceCase(input: InstanceCaseInput): ScenarioData {
     ],
     event: {
       externalEventId: "evt-" + input.invoice.lineId,
-      source: input.providerId.toLowerCase() + "-billing-feed",
+      source: ({ "PRV-HELIOS": "lambda", "PRV-STRATUS": "coreweave", "PRV-MERIDIAN": "nebius" }[input.providerId] ?? input.providerId.toLowerCase()) + "-billing-feed",
       invoice: {
         id: input.invoice.id,
         providerId: input.providerId,
@@ -190,8 +190,8 @@ export function buildReservationCase(input: ReservationCaseInput): ScenarioData 
       projectId: j.projectId,
       name: j.experimentName,
       owner: j.owner,
-      description: j.experimentName + " (tracked in Atlas experiment tracker)",
-      tracker: "atlas-tracker",
+      description: j.experimentName + " (tracked in Weights & Biases)",
+      tracker: "wandb",
     });
   }
   return {
@@ -235,7 +235,7 @@ export function buildReservationCase(input: ReservationCaseInput): ScenarioData 
     usage: [],
     event: {
       externalEventId: "evt-" + input.invoice.lineId,
-      source: "stratus-billing-feed",
+      source: "coreweave-billing-feed",
       invoice: { id: input.invoice.id, providerId: "PRV-STRATUS", invoiceNumber: input.invoice.number, period: input.period, issuedAt: addHours(endAt, 48) },
       line: {
         id: input.invoice.lineId,

@@ -13,10 +13,27 @@ Build the system a finance team would bring on board. Pick a company, pick a few
 
 ## How they judge
 
-1. Is it real enough?
-2. Would you hire it?
-3. Did we see something new?
-4. Did it have a "wow" moment?
+1. Is it real enough? Realistic data, a messy problem, and proof that it works.
+2. Would you hire it? For which seats, and would it earn them: limited access, a clean record of its work, and knowing when to ask?
+3. Did we see something new? A company, problem or approach not made autonomous before.
+4. The moment: it catches what others missed, recovers from something going wrong, or defends a decision when questioned.
+
+## What to submit
+
+- A demo video that opens with the moment.
+- A live demo at judging, running for real. Judges may ask us to try their own scenario.
+- One line on the seats the system fills.
+- Proof it works: what's real, what's simulated, and how we know (test set, planted errors with an answer key, or a benchmark score).
+
+## What makes it hard (from the brief)
+
+- **Sources that disagree:** bank, ledger and contract differ. Know which to trust and say why.
+- **Time:** what happened in March should change what the system does in June.
+- **Working with others:** busy approvers, half-finished handoffs, a controller who says no.
+- **Limits:** no one gets access to everything. Whoever requests a payment can't approve it.
+- **Explainable and accountable:** every call traces back to the data, rule or person behind it, however long ago.
+
+The company can be imaginative; how it works underneath must be strict.
 
 ## Strong vs. weak (from the deck)
 
@@ -65,9 +82,13 @@ Added for autonomy (see README, "What runs on its own"):
 - **Continuous sync:** a scheduler inside the worker pulls provider billing feeds every few seconds with a cursor per source (`sync_cursors`), so work starts without clicks. An HTTP feed adapter (`BILLING_FEED_URL`) is the hook for a real provider.
 - **Time:** a business clock drives follow-ups. Approvals are reminded after 1 day and escalated to the CFO after 3; unanswered vendor disputes are chased by the Finance Agent at 14 days and escalated at 30.
 - **Self-learning at onboarding:** the Finance Agent mines six months of AP history and proposes a materiality policy ($50) that the history supports; once approved, small variances post without a dispute.
-- **Answer key and score:** 14 planted cases with hand-computed outcomes (`npm run eval`, or the Autonomy page).
+- **Answer key and score:** 14 planted cases with hand-computed outcomes (`npm run eval`).
 
 Remaining gaps:
 
 - **Live LLM:** LLM mode has only been tested with the SDK's scripted model. Run `npm run eval -- --llm` once a key is available; the deterministic score is a check of the plumbing, not of model judgment.
-- **Simulated systems of record:** provider feeds, scheduler, meters, ERP and the vendor portal are simulated.
+- **Simulated systems of record:** provider feeds, meters, the ERP and the vendor portal are simulated. Email (with vendor replies read over IMAP) and Slack are real when configured.
+- **Time across periods:** cases run within one period. Show an earlier decision (for example, a March dispute or correction) changing a later period's outcome.
+- **Judge's own scenario:** no way to enter a new invoice or case live at judging.
+- **Real vs. simulated table:** not written up yet for the submission.
+- **Period close:** the ledger is double-entry and append-only, but closed periods are not locked.

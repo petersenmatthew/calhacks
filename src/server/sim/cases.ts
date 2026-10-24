@@ -7,9 +7,9 @@ import { buildInstanceCase, buildReservationCase } from "./scenarios";
  * then plays the controller and scores the agents against each key.
  *
  * Keys are derived from the contracts and source records, not from agent output:
- * - Helios: $100/h H100, $64/h A100, per started hour, no minimum beyond 1 h.
- * - Meridian: $120/h H200, per started hour, 8 h minimum per launch.
- * - Stratus reservations: committed GPU-hours x rate, billed in full.
+ * - Lambda: $100/h H100, $64/h A100, per started hour, no minimum beyond 1 h.
+ * - Nebius: $120/h H200, per started hour, 8 h minimum per launch.
+ * - CoreWeave reservations: committed GPU-hours x rate, billed in full.
  */
 
 export type CaseCategory =
@@ -147,7 +147,7 @@ export const SEED_CASES: SeedCase[] = [
     key: { outcome: "AUTO_MATCHED", disputeCents: 0, allocation: { "PRJ-RLA": 10_560_000 }, policyId: AUTO },
   },
   {
-    id: "C-04", category: "clean", title: "Helios A100, 72 h, billed exactly",
+    id: "C-04", category: "clean", title: "Lambda A100, 72 h, billed exactly",
     data: buildInstanceCase({
       key: "bg-1", providerId: "PRV-HELIOS", instanceId: "i-hel-4402", instanceType: "a100.8x", projectId: "PRJ-MMP",
       experimentId: "exp-mmp-clip-distill", experimentName: "CLIP distillation ablation", owner: "Ravi Shah",
@@ -157,7 +157,7 @@ export const SEED_CASES: SeedCase[] = [
     key: { outcome: "AUTO_MATCHED", disputeCents: 0, allocation: { "PRJ-MMP": 460_800 }, policyId: AUTO },
   },
   {
-    id: "C-05", category: "clean", title: "Helios H100, 48 h, billed exactly",
+    id: "C-05", category: "clean", title: "Lambda H100, 48 h, billed exactly",
     data: buildInstanceCase({
       key: "bg-2", providerId: "PRV-HELIOS", instanceId: "i-hel-4410", instanceType: "h100.8x", projectId: "PRJ-FLM",
       experimentId: "exp-flm-tokenizer-v9", experimentName: "Tokenizer v9 evaluation", owner: "Jonah Brooks",
@@ -167,7 +167,7 @@ export const SEED_CASES: SeedCase[] = [
     key: { outcome: "AUTO_MATCHED", disputeCents: 0, allocation: { "PRJ-FLM": 480_000 }, policyId: AUTO },
   },
   {
-    id: "C-06", category: "clean", title: "Meridian H200, 40 h, billed exactly",
+    id: "C-06", category: "clean", title: "Nebius H200, 40 h, billed exactly",
     data: buildInstanceCase({
       key: "bg-3", providerId: "PRV-MERIDIAN", instanceId: "i-mer-2207", instanceType: "h200.8x", projectId: "PRJ-RLA",
       experimentId: "exp-rla-reward-model", experimentName: "Reward model refresh", owner: "Elena Petrova",
@@ -177,7 +177,7 @@ export const SEED_CASES: SeedCase[] = [
     key: { outcome: "AUTO_MATCHED", disputeCents: 0, allocation: { "PRJ-RLA": 480_000 }, policyId: AUTO },
   },
   {
-    id: "C-07", category: "clean", title: "Helios H100, 96 h, billed exactly",
+    id: "C-07", category: "clean", title: "Lambda H100, 96 h, billed exactly",
     data: buildInstanceCase({
       key: "bg-4", providerId: "PRV-HELIOS", instanceId: "i-hel-4433", instanceType: "h100.8x", projectId: "PRJ-INF",
       experimentId: "exp-inf-spec-decoding", experimentName: "Speculative decoding benchmark", owner: "Diego Alvarez",
@@ -187,7 +187,7 @@ export const SEED_CASES: SeedCase[] = [
     key: { outcome: "AUTO_MATCHED", disputeCents: 0, allocation: { "PRJ-INF": 960_000 }, policyId: AUTO },
   },
   {
-    id: "C-08", category: "clean", title: "Meridian H200, 20 h, billed exactly",
+    id: "C-08", category: "clean", title: "Nebius H200, 20 h, billed exactly",
     data: buildInstanceCase({
       key: "bg-5", providerId: "PRV-MERIDIAN", instanceId: "i-mer-2215", instanceType: "h200.8x", projectId: "PRJ-MMP",
       experimentId: "exp-mmp-ocr-finetune", experimentName: "Document OCR finetune", owner: "Lena Ortiz",
@@ -197,9 +197,9 @@ export const SEED_CASES: SeedCase[] = [
     key: { outcome: "AUTO_MATCHED", disputeCents: 0, allocation: { "PRJ-MMP": 240_000 }, policyId: AUTO },
   },
 
-  /* ---------- The opening work item (WI-1001): job ended early, charge is correct ---------- */
+  /* ---------- Job ended early, charge is correct ---------- */
   {
-    id: "E-01", category: "idle_explained", title: "Helios H100 up 24 h, job ran 18 h",
+    id: "E-01", category: "idle_explained", title: "Lambda H100 up 24 h, job ran 18 h",
     data: buildInstanceCase({
       key: "live-1", providerId: "PRV-HELIOS", instanceId: "i-hel-4519", instanceType: "h100.8x", projectId: "PRJ-RLA",
       experimentId: "exp-rla-planner-rl", experimentName: "Planner RL fine-tune", owner: "Elena Petrova",
@@ -211,7 +211,7 @@ export const SEED_CASES: SeedCase[] = [
 
   /* ---------- More clean lines ---------- */
   {
-    id: "C-09", category: "clean", title: "Helios H100, 30 h, billed exactly",
+    id: "C-09", category: "clean", title: "Lambda H100, 30 h, billed exactly",
     data: buildInstanceCase({
       key: "c9", providerId: "PRV-HELIOS", instanceId: "i-hel-4601", instanceType: "h100.8x", projectId: "PRJ-INF",
       experimentId: "exp-inf-distill-7b", experimentName: "7B distillation for serving", owner: "Diego Alvarez",
@@ -221,7 +221,7 @@ export const SEED_CASES: SeedCase[] = [
     key: { outcome: "AUTO_MATCHED", disputeCents: 0, allocation: { "PRJ-INF": 300_000 }, policyId: AUTO },
   },
   {
-    id: "C-10", category: "clean", title: "Meridian H200, 16 h, billed exactly",
+    id: "C-10", category: "clean", title: "Nebius H200, 16 h, billed exactly",
     data: buildInstanceCase({
       key: "c10", providerId: "PRV-MERIDIAN", instanceId: "i-mer-2301", instanceType: "h200.8x", projectId: "PRJ-FLM",
       experimentId: "exp-flm-data-mix", experimentName: "Data mixture ablation", owner: "Jonah Brooks",
@@ -231,7 +231,7 @@ export const SEED_CASES: SeedCase[] = [
     key: { outcome: "AUTO_MATCHED", disputeCents: 0, allocation: { "PRJ-FLM": 192_000 }, policyId: AUTO },
   },
   {
-    id: "C-11", category: "clean", title: "Helios A100, 12 h, billed exactly",
+    id: "C-11", category: "clean", title: "Lambda A100, 12 h, billed exactly",
     data: buildInstanceCase({
       key: "c11", providerId: "PRV-HELIOS", instanceId: "i-hel-4602", instanceType: "a100.8x", projectId: "PRJ-RLA",
       experimentId: "exp-rla-sim-rollouts", experimentName: "Simulator rollout collection", owner: "Elena Petrova",
@@ -243,7 +243,7 @@ export const SEED_CASES: SeedCase[] = [
 
   /* ---------- Idle time on a running instance: billable, not a billing error ---------- */
   {
-    id: "E-02", category: "idle_explained", title: "Helios H100 up 40 h, job ran 30 h",
+    id: "E-02", category: "idle_explained", title: "Lambda H100 up 40 h, job ran 30 h",
     data: buildInstanceCase({
       key: "e2", providerId: "PRV-HELIOS", instanceId: "i-hel-4603", instanceType: "h100.8x", projectId: "PRJ-MMP",
       experimentId: "exp-mmp-audio-tokens", experimentName: "Audio tokenizer pretraining", owner: "Lena Ortiz",
@@ -253,7 +253,7 @@ export const SEED_CASES: SeedCase[] = [
     key: { outcome: "CHARGE_EXPLAINED", disputeCents: 0, allocation: { "PRJ-MMP": 400_000 }, policyId: EXPLAINED },
   },
   {
-    id: "E-03", category: "idle_explained", title: "Helios H100 up 120 h, job ran 90 h; above the $10,000 policy limit",
+    id: "E-03", category: "idle_explained", title: "Lambda H100 up 120 h, job ran 90 h; above the $10,000 policy limit",
     data: buildInstanceCase({
       key: "e3", providerId: "PRV-HELIOS", instanceId: "i-hel-4604", instanceType: "h100.8x", projectId: "PRJ-FLM",
       experimentId: "exp-flm-rlhf-sweep", experimentName: "RLHF reward sweep", owner: "Dr. Maya Chen",
@@ -265,7 +265,7 @@ export const SEED_CASES: SeedCase[] = [
 
   /* ---------- Minimum-duration charges ---------- */
   {
-    id: "M-01", category: "minimum_duration", title: "Meridian H200 up 3 h, billed the 8 h minimum",
+    id: "M-01", category: "minimum_duration", title: "Nebius H200 up 3 h, billed the 8 h minimum",
     data: buildInstanceCase({
       key: "m1", providerId: "PRV-MERIDIAN", instanceId: "i-mer-2302", instanceType: "h200.8x", projectId: "PRJ-INF",
       experimentId: "exp-inf-fp8-smoke", experimentName: "FP8 kernel smoke test", owner: "Diego Alvarez",
@@ -275,7 +275,7 @@ export const SEED_CASES: SeedCase[] = [
     key: { outcome: "CHARGE_EXPLAINED", disputeCents: 0, allocation: { "PRJ-INF": 96_000 }, policyId: EXPLAINED },
   },
   {
-    id: "M-02", category: "minimum_duration", title: "Meridian H200 up 5.5 h, billed the 8 h minimum",
+    id: "M-02", category: "minimum_duration", title: "Nebius H200 up 5.5 h, billed the 8 h minimum",
     data: buildInstanceCase({
       key: "m2", providerId: "PRV-MERIDIAN", instanceId: "i-mer-2303", instanceType: "h200.8x", projectId: "PRJ-MMP",
       experimentId: "exp-mmp-grounding-eval", experimentName: "Visual grounding eval", owner: "Ravi Shah",
@@ -285,7 +285,7 @@ export const SEED_CASES: SeedCase[] = [
     key: { outcome: "CHARGE_EXPLAINED", disputeCents: 0, allocation: { "PRJ-MMP": 96_000 }, policyId: EXPLAINED },
   },
   {
-    id: "M-03", category: "minimum_duration", title: "Meridian H200 up 3 h, billed 10 h (2 h past the minimum)",
+    id: "M-03", category: "minimum_duration", title: "Nebius H200 up 3 h, billed 10 h (2 h past the minimum)",
     data: buildInstanceCase({
       key: "m3", providerId: "PRV-MERIDIAN", instanceId: "i-mer-2304", instanceType: "h200.8x", projectId: "PRJ-RLA",
       experimentId: "exp-rla-critic-probe", experimentName: "Critic probe", owner: "Elena Petrova",
@@ -295,7 +295,7 @@ export const SEED_CASES: SeedCase[] = [
     key: { outcome: "VENDOR_CREDIT", disputeCents: 24_000, allocation: { "PRJ-RLA": 96_000 }, policyId: null, vendorReply: "accept" },
   },
   {
-    id: "M-04", category: "minimum_duration", title: "Helios H100 up 2 h, billed an 8 h minimum the contract does not have",
+    id: "M-04", category: "minimum_duration", title: "Lambda H100 up 2 h, billed an 8 h minimum the contract does not have",
     data: buildInstanceCase({
       key: "m4", providerId: "PRV-HELIOS", instanceId: "i-hel-4611", instanceType: "h100.8x", projectId: "PRJ-INF",
       experimentId: "exp-inf-profiler", experimentName: "Serving profiler run", owner: "Diego Alvarez",
@@ -309,7 +309,7 @@ export const SEED_CASES: SeedCase[] = [
 
   /* ---------- Billed past termination ---------- */
   {
-    id: "O-01", category: "overbilling", title: "Helios H100 terminated at 30 h, billed 38 h",
+    id: "O-01", category: "overbilling", title: "Lambda H100 terminated at 30 h, billed 38 h",
     data: buildInstanceCase({
       key: "o1", providerId: "PRV-HELIOS", instanceId: "i-hel-4612", instanceType: "h100.8x", projectId: "PRJ-MMP",
       experimentId: "exp-mmp-diffusion-ft", experimentName: "Diffusion decoder finetune", owner: "Lena Ortiz",
@@ -320,7 +320,7 @@ export const SEED_CASES: SeedCase[] = [
   },
 
   {
-    id: "O-02", category: "overbilling", title: "Helios billed 6 h past termination that the team asked Helios to keep",
+    id: "O-02", category: "overbilling", title: "Lambda billed 6 h past termination that the team asked Lambda to keep",
     data: buildInstanceCase({
       key: "o2", providerId: "PRV-HELIOS", instanceId: "i-hel-4613", instanceType: "h100.8x", projectId: "PRJ-RLA",
       experimentId: "exp-rla-debug-hold", experimentName: "Planner crash investigation", owner: "Elena Petrova",
@@ -329,13 +329,13 @@ export const SEED_CASES: SeedCase[] = [
     }),
     key: {
       outcome: "CHARGE_ALLOCATED", disputeCents: 0, allocation: { "PRJ-RLA": 180_000 }, policyId: null, outOfBand: true,
-      correction: "We asked Helios to hold the disk image for 6 h after termination for the crash investigation. The charge is ours; do not dispute it.",
+      correction: "We asked Lambda to hold the disk image for 6 h after termination for the crash investigation. The charge is ours; do not dispute it.",
     },
   },
 
   /* ---------- Rate mismatches ---------- */
   {
-    id: "R-01", category: "rate_mismatch", title: "Helios H100 billed at $110/h vs $100 contract",
+    id: "R-01", category: "rate_mismatch", title: "Lambda H100 billed at $110/h vs $100 contract",
     data: buildInstanceCase({
       key: "r1", providerId: "PRV-HELIOS", instanceId: "i-hel-4605", instanceType: "h100.8x", projectId: "PRJ-FLM",
       experimentId: "exp-flm-code-sft", experimentName: "Code SFT mixture", owner: "Jonah Brooks",
@@ -345,7 +345,7 @@ export const SEED_CASES: SeedCase[] = [
     key: { outcome: "VENDOR_CREDIT", disputeCents: 24_000, allocation: { "PRJ-FLM": 240_000 }, policyId: null, vendorReply: "accept" },
   },
   {
-    id: "R-02", category: "rate_mismatch", title: "Meridian H200 billed at $135/h vs $120 contract",
+    id: "R-02", category: "rate_mismatch", title: "Nebius H200 billed at $135/h vs $120 contract",
     data: buildInstanceCase({
       key: "r2", providerId: "PRV-MERIDIAN", instanceId: "i-mer-2305", instanceType: "h200.8x", projectId: "PRJ-INF",
       experimentId: "exp-inf-moe-serving", experimentName: "MoE serving load test", owner: "Diego Alvarez",
@@ -355,7 +355,7 @@ export const SEED_CASES: SeedCase[] = [
     key: { outcome: "VENDOR_CREDIT", disputeCents: 15_000, allocation: { "PRJ-INF": 120_000 }, policyId: null, vendorReply: "accept" },
   },
   {
-    id: "R-03", category: "rate_mismatch", title: "Helios A100 billed at the H100 rate",
+    id: "R-03", category: "rate_mismatch", title: "Lambda A100 billed at the H100 rate",
     data: buildInstanceCase({
       key: "r3", providerId: "PRV-HELIOS", instanceId: "i-hel-4606", instanceType: "a100.8x", projectId: "PRJ-MMP",
       experimentId: "exp-mmp-caption-filter", experimentName: "Caption quality filter", owner: "Ravi Shah",
@@ -365,7 +365,7 @@ export const SEED_CASES: SeedCase[] = [
     key: { outcome: "VENDOR_CREDIT", disputeCents: 72_000, allocation: { "PRJ-MMP": 128_000 }, policyId: null, vendorReply: "accept" },
   },
   {
-    id: "R-04", category: "rate_mismatch", title: "Helios H100 billed at $90/h, below contract",
+    id: "R-04", category: "rate_mismatch", title: "Lambda H100 billed at $90/h, below contract",
     data: buildInstanceCase({
       key: "r4", providerId: "PRV-HELIOS", instanceId: "i-hel-4607", instanceType: "h100.8x", projectId: "PRJ-RLA",
       experimentId: "exp-rla-self-play", experimentName: "Self-play league", owner: "Elena Petrova",
@@ -377,29 +377,29 @@ export const SEED_CASES: SeedCase[] = [
 
   /* ---------- Duplicate invoice lines ---------- */
   {
-    id: "D-01a", category: "clean", title: "Helios H100, 24 h, first billing",
+    id: "D-01a", category: "clean", title: "Lambda H100, 24 h, first billing",
     data: D1,
     key: { outcome: "AUTO_MATCHED", disputeCents: 0, allocation: { "PRJ-INF": 240_000 }, policyId: AUTO },
   },
   {
-    id: "D-01b", category: "duplicate_line", title: "Same Helios instance billed again on a later invoice",
+    id: "D-01b", category: "duplicate_line", title: "Same Lambda instance billed again on a later invoice",
     data: rebill(D1, { id: "INV-HEL-2026-10-140", number: "HEL-2026-10-140", lineId: "HEL-2026-10-140-L1" }),
     key: { outcome: "VENDOR_CREDIT", disputeCents: 240_000, allocation: {}, policyId: null, vendorReply: "accept" },
   },
   {
-    id: "D-02a", category: "clean", title: "Meridian H200, 12 h, first billing",
+    id: "D-02a", category: "clean", title: "Nebius H200, 12 h, first billing",
     data: D2,
     key: { outcome: "AUTO_MATCHED", disputeCents: 0, allocation: { "PRJ-FLM": 144_000 }, policyId: AUTO },
   },
   {
-    id: "D-02b", category: "duplicate_line", title: "Same Meridian instance billed again for 6 h",
+    id: "D-02b", category: "duplicate_line", title: "Same Nebius instance billed again for 6 h",
     data: rebill(D2, { id: "INV-MER-2026-10-031", number: "MER-2026-10-031", lineId: "MER-2026-10-031-L1" }, 6),
     key: { outcome: "VENDOR_CREDIT", disputeCents: 72_000, allocation: {}, policyId: null, vendorReply: "accept" },
   },
 
   /* ---------- Missing experiment owners ---------- */
   {
-    id: "N-01", category: "missing_owner", title: "Helios H100 charge with no owning project",
+    id: "N-01", category: "missing_owner", title: "Lambda H100 charge with no owning project",
     data: buildInstanceCase({
       key: "n1", providerId: "PRV-HELIOS", instanceId: "i-hel-4609", instanceType: "h100.8x", projectId: null,
       experimentId: "exp-scratch-0412", experimentName: "Untagged scratch run", owner: "unknown",
@@ -412,7 +412,7 @@ export const SEED_CASES: SeedCase[] = [
     },
   },
   {
-    id: "N-02", category: "missing_owner", title: "Meridian minimum charge with no owning project",
+    id: "N-02", category: "missing_owner", title: "Nebius minimum charge with no owning project",
     data: buildInstanceCase({
       key: "n2", providerId: "PRV-MERIDIAN", instanceId: "i-mer-2307", instanceType: "h200.8x", projectId: null,
       experimentId: "exp-scratch-0415", experimentName: "Untagged notebook session", owner: "unknown",
@@ -425,7 +425,7 @@ export const SEED_CASES: SeedCase[] = [
     },
   },
   {
-    id: "N-03", category: "missing_owner", title: "Unowned Helios instance also billed past termination",
+    id: "N-03", category: "missing_owner", title: "Unowned Lambda instance also billed past termination",
     data: buildInstanceCase({
       key: "n3", providerId: "PRV-HELIOS", instanceId: "i-hel-4610", instanceType: "h100.8x", projectId: null,
       experimentId: "exp-scratch-0419", experimentName: "Untagged eval job", owner: "unknown",

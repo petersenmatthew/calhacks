@@ -1,7 +1,8 @@
-import { ReviewPage } from "@/components/review/review-page";
+import { redirect } from "next/navigation";
 
-export default async function Page({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ v?: string | string[] }> }) {
-  const [{ id }, { v }] = await Promise.all([params, searchParams]);
-  return <ReviewPage id={id} variant={v === "proof" ? "proof" : "focus"} />;
+/** Tasks are reviewed in the canvas sidebar. Old task links land there. */
+export default async function Page({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  redirect("/canvas?task=" + id);
 }
 
