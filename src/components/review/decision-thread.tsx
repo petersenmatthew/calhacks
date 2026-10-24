@@ -9,13 +9,13 @@ import { money } from "@/lib/format";
 import type { Choice, Decision } from "@/lib/decision";
 import { cn } from "@/lib/utils";
 import type { WorkspaceData } from "@/server/queries";
-import type { DecisionTurn } from "@/server/assistant";
+import type { BudgetChange, DecisionTurn } from "@/server/assistant";
 import { AgentAvatar } from "../status";
 import { doneMessage, submitDecision } from "./decision-card";
 import { ProofView, SplitBar, TONE_BG } from "./proof";
 
 /** One message in a decision conversation. Agent replies may carry the option the controller picked in words. */
-export type TalkTurn = { role: "user" | "assistant"; content: string; choiceId?: string | null; note?: string | null };
+export type TalkTurn = { role: "user" | "assistant"; content: string; choiceId?: string | null; note?: string | null; budget?: BudgetChange | null };
 
 function typing(t: EventTarget | null) {
   return t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName));
@@ -88,12 +88,16 @@ export function DecisionThread({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [w.item.id, decision.approvalId]);
 
-  const act = async (choice: Choice | null, note?: string) => {
+  const act = async (choice: Choice | null, note?: string, budget?: BudgetChange | null) => {
     if (busy || done) return;
     setBusy(choice?.id ?? "note");
     try {
-      await submitDecision(w, decision, choice, note);
-      setDone(doneMessage(decision, choice, w));
+      await submitDecision(w, decision, choice, note, budget);
+      setDone(
+        [doneMessage(decision, choice, w), budget ? "Budget Analyst sets " + budget.projectName + " to " + money(budget.monthlyCents) + " a month." : null]
+          .filter(Boolean)
+          .join(" "),
+      );
       onDone();
     } catch (e) {
       toast.error((e as Error).message);
@@ -228,8 +232,12 @@ export function DecisionThread({
                       ? "Send your answer"
                       : "Send back with your note"
                 }
+                extras={[
+                  ...(t.choiceId && t.note ? ["Plus: " + t.note] : []),
+                  ...(t.budget ? ["Set " + t.budget.projectName + " budget to " + money(t.budget.monthlyCents) + " a month"] : []),
+                ]}
                 busy={busy !== null}
-                onConfirm={() => act(decision.choices.find((x) => x.id === t.choiceId) ?? null, t.choiceId ? undefined : (t.note ?? undefined))}
+                onConfirm={() => act(decision.choices.find((x) => x.id === t.choiceId) ?? null, t.note ?? undefined, t.budget)}
                 onCancel={() => setDismissed((d) => [...d, i])}
               />
             ) : null}
@@ -247,15 +255,33 @@ export function DecisionThread({
         </div>
       ) : null}
 
-      {footer ? <div className="text-[12.5px] text-zinc-500">{footer}</div> : null}
     </div>
   );
 }
 
-function ConfirmRow({ label, busy, onConfirm, onCancel }: { label: string; busy: boolean; onConfirm: () => void; onCancel: () => void }) {
+function ConfirmRow({
+  label,
+  extras,
+  busy,
+  onConfirm,
+  onCancel,
+}: {
+  label: string;
+  extras: string[];
+  busy: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
   return (
     <div className="animate-enter mt-2.5 flex items-center gap-1.5 rounded-xl bg-zinc-50 p-1.5 pl-3 ring-1 ring-zinc-200">
-      <span className="min-w-0 flex-1 truncate text-[12.5px] text-zinc-600">{label}</span>
+      <span className="min-w-0 flex-1 text-[12.5px] text-zinc-600">
+        <span className="block truncate">{label}</span>
+        {extras.map((x) => (
+          <span key={x} className="block text-zinc-500">
+            {x}
+          </span>
+        ))}
+      </span>
       <button type="button" onClick={onCancel} disabled={busy} className="h-7 rounded-lg px-2.5 text-[12.5px] text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900">
         Not yet
       </button>

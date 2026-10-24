@@ -39,6 +39,7 @@ export type Permission =
   | "dispute:send"
   | "dispute:close"
   | "budget:note"
+  | "budget:write"
   | "invoice:ingest"
   | "invoice:record"
   | "vendor:respond"
@@ -73,7 +74,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   ],
   capacity_planner: ["workitem:read", "compute:read", "contract:read", "findings:compute:write", "handoff:finance", "info:request"],
   vendor_liaison: ["workitem:read", "contract:read", "dispute:read", "dispute:send", "dispute:close", "dispute:follow_up"],
-  budget_analyst: ["workitem:read", "budget:read", "budget:note"],
+  budget_analyst: ["workitem:read", "budget:read", "budget:note", "budget:write"],
   policy_analyst: ["workitem:read", "policy:read", "precedent:read", "policy:propose", "handoff:finance", "history:read"],
   controller: ["workitem:read", "approval:decide", "workitem:respond", "settings:update", "environment:reset", "invoice:ingest", "clock:advance"],
   orchestrator: ["workflow:orchestrate"],

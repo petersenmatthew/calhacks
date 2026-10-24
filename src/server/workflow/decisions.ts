@@ -133,7 +133,12 @@ function executeApprovedProposal(ctx: AppContext, item: WorkItemRow, proposal: P
   // Disputes go out through the Vendor Liaison, who asks the ledger gateway to submit them.
   markProposal(ctx, proposal.id, "APPROVED", authorization);
   assignAgent(ctx, item.id, ACTOR.vendorLiaison);
-  enqueueJob(ctx, { workItemId: item.id, kind: "AGENT_RUN", agentId: ACTOR.vendorLiaison, payload: { trigger: "dispute_approved", approvalId: approval.id } });
+  enqueueJob(ctx, {
+    workItemId: item.id,
+    kind: "AGENT_RUN",
+    agentId: ACTOR.vendorLiaison,
+    payload: { trigger: "dispute_approved", approvalId: approval.id, note: approval.decisionReason ?? null },
+  });
 }
 
 /** The approved dispute proposal and its approval for a work item, if any. */

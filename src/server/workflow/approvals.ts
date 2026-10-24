@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { recordActivity } from "../activity";
 import { appendAudit } from "../audit";
 import { nextId, nowIso, type AppContext } from "../context";
-import { approvalRequests, policies, precedents, proposals } from "../db/schema";
+import { approvalRequests, policies, precedents, projects, proposals } from "../db/schema";
 import { METHOD_LABELS, type AllocationMethod } from "../domain/allocation";
 import { formatCents } from "../domain/money";
 import { ACTOR, getActor } from "../security/actors";
@@ -76,6 +76,8 @@ export interface DecisionInput {
   decision: Decision;
   reason?: string | null;
   directive?: string | null;
+  /** Set alongside an approval: the Budget Analyst changes this project's monthly budget. */
+  budget?: { projectId: string; monthlyCents: number } | null;
 }
 
 /**
@@ -105,6 +107,12 @@ export function decideApproval(ctx: AppContext, input: DecisionInput) {
       const reason = input.reason?.trim() ?? "";
       if (input.decision !== "APPROVED" && reason.length < 3) {
         throw new ControlError("A reason is required to reject or request changes", "REASON_REQUIRED", "FAILED");
+      }
+      if (input.budget && (input.decision !== "APPROVED" || approval.subjectType !== "PROPOSAL")) {
+        throw new ControlError("A budget change can only ride along with an approved proposal", "STATE_MACHINE", "FAILED");
+      }
+      if (input.budget && !ctx.db.select().from(projects).where(eq(projects.id, input.budget.projectId)).get()) {
+        throw new ControlError("Unknown project " + input.budget.projectId, "NOT_FOUND", "FAILED");
       }
       const actor = getActor(ctx, input.actorId);
       const ts = nowIso();
@@ -197,7 +205,7 @@ export function decideApproval(ctx: AppContext, input: DecisionInput) {
         approvalId: approval.id,
         policyId: approval.subjectType === "POLICY" ? approval.subjectId : null,
         rule: "SOD",
-        details: { decision: input.decision, reason: reason || null, directive: input.directive ?? null },
+        details: { decision: input.decision, reason: reason || null, directive: input.directive ?? null, budget: input.budget ?? null },
       });
       const verb =
         input.decision === "APPROVED" ? "approved" : input.decision === "REJECTED" ? "rejected" : "requested changes to";
@@ -240,6 +248,15 @@ export function decideApproval(ctx: AppContext, input: DecisionInput) {
 
       if (approval.subjectType === "PROPOSAL") {
         enqueueJob(ctx, { workItemId: approval.workItemId, kind: "EXECUTE_DECISION", payload: { approvalId: approval.id } });
+        // Queued after the decision runs, so the Budget Analyst finds the item approved.
+        if (input.budget) {
+          enqueueJob(ctx, {
+            workItemId: approval.workItemId,
+            kind: "AGENT_RUN",
+            agentId: ACTOR.budget,
+            payload: { trigger: "controller_note", approvalId: approval.id, note: reason || null, ...input.budget },
+          });
+        }
       } else if (input.decision === "APPROVED") {
         recordActivity(ctx, {
           workItemId: approval.workItemId,

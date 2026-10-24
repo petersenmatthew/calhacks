@@ -41,7 +41,7 @@ export const ONBOARDING_INSTRUCTIONS =
 export const BUDGET_INSTRUCTIONS =
   "You are the Budget Analyst.\nAfter anything posts to a research team, you check that team's compute burn against its monthly budget and warn early.\n\nRules:\n- " +
   SHARED_RULES +
-  "\n- Use the status computed by forecast_project_burn. You cannot change allocations or budgets.\n\nWorkflow:\n1. get_work_item and get_posted_charges.\n2. forecast_project_burn for each project charged.\n3. record_budget_note for the project most at risk, with a one or two sentence note for the project lead and the controller.";
+  "\n- Use the status computed by forecast_project_burn. You cannot change allocations. You change a budget only when the controller tells you to, with set_project_budget.\n\nWorkflow:\n1. get_work_item and get_posted_charges.\n2. forecast_project_burn for each project charged.\n3. record_budget_note for the project most at risk, with a one or two sentence note for the project lead and the controller.\n\nWhen the controller asks for a budget change: forecast_project_burn for that project, then set_project_budget with exactly the project and amount they gave, and a one sentence note on where the project stands at the new budget.";
 
 function baseInstructions(agentId: string) {
   if (agentId === ACTOR.compute) return COMPUTE_INSTRUCTIONS;
@@ -72,12 +72,20 @@ export function buildRunInput(run: AgentRunContext) {
   }
   if (trigger.trigger === "handoff" && trigger.note) lines.push("Handoff note: " + String(trigger.note));
   if (trigger.trigger === "finance_question") lines.push("The Cost Accountant asks: " + String(trigger.question ?? ""));
-  if (trigger.trigger === "dispute_approved") lines.push("The controller approved the dispute (" + String(trigger.approvalId) + "). Send it.");
+  if (trigger.trigger === "dispute_approved") {
+    lines.push("The controller approved the dispute (" + String(trigger.approvalId) + "). Send it." + (trigger.note ? " Their note with the approval: " + String(trigger.note) : ""));
+  }
   if (trigger.trigger === "vendor_reply") lines.push("The provider replied to the dispute. Read the reply and close the case.");
   if (trigger.trigger === "vendor_message") {
     lines.push("The provider emailed about the dispute (message " + String(trigger.messageId ?? "") + "). Read it with get_vendor_thread and handle it.");
   }
   if (trigger.trigger === "posting") lines.push("Journal entry " + String(trigger.entryId) + " was just posted. Check the burn of every project it charged.");
+  if (trigger.trigger === "controller_note") {
+    lines.push(
+      "When approving " + String(trigger.approvalId) + ", the controller asked you to set the monthly budget of project " + String(trigger.projectId) +
+        " to " + String(trigger.monthlyCents) + " cents (monthly_budget_cents)." + (trigger.note ? " Their words: " + String(trigger.note) : ""),
+    );
+  }
   if (trigger.trigger === "controller_feedback") {
     lines.push("The controller decided on approval " + String(trigger.approvalId) + ". Their rationale is in controller_feedback on the work item.");
   }

@@ -43,16 +43,25 @@ export function doneMessage(d: Decision, c: Choice | null, w: WorkspaceData) {
 }
 
 /** Records a decision: a choice, or free text (a different instruction, or an answer to a question). */
-export async function submitDecision(w: WorkspaceData, decision: Decision, choice: Choice | null, text?: string) {
+export async function submitDecision(
+  w: WorkspaceData,
+  decision: Decision,
+  choice: Choice | null,
+  text?: string,
+  budget?: { projectId: string; monthlyCents: number } | null,
+) {
   if (choice?.action.type === "answer" || (!choice && decision.custom === "answer")) {
-    const answer = choice?.action.type === "answer" ? choice.action.answer : (text ?? "");
+    const answer = choice?.action.type === "answer" ? [choice.action.answer, text].filter(Boolean).join(" ") : (text ?? "");
     await postJson("/api/work-items/" + w.item.id + "/info", { answer });
   } else if (decision.approvalId) {
     const a = choice?.action;
+    // "Yes, but": whatever the controller added rides along with the option they picked.
+    const reason = !a ? text : a.type === "reject" || a.type === "changes" ? [a.reason, text].filter(Boolean).join(" ") : (text ?? null);
     await postJson("/api/approvals/" + decision.approvalId, {
       decision: !a ? "CHANGES_REQUESTED" : a.type === "approve" ? "APPROVED" : a.type === "reject" ? "REJECTED" : "CHANGES_REQUESTED",
-      reason: !a ? text : a.type === "reject" || a.type === "changes" ? a.reason : null,
+      reason,
       directive: a?.type === "changes" ? (a.directive ?? null) : null,
+      budget: a?.type === "approve" && budget ? { projectId: budget.projectId, monthlyCents: budget.monthlyCents } : null,
     });
   }
 }

@@ -480,6 +480,18 @@ async function budgetPolicy(c: Caller) {
   await c.call("record_budget_note", { project_id: worst.project.id, status: worst.status, summary, evidence_ids: c.ids });
 }
 
+/** Budget Analyst on the controller's instruction: apply exactly the budget they approved. */
+async function budgetChangePolicy(c: Caller, run: AgentRunContext) {
+  const t = run.trigger;
+  await c.call("get_work_item", {});
+  const before = await c.call("forecast_project_burn", { project_id: t.projectId });
+  await c.call("set_project_budget", {
+    project_id: t.projectId,
+    monthly_budget_cents: t.monthlyCents,
+    summary: before.project.name + " has " + before.posted_to_date + " posted this month and is on pace for " + before.projected_month_end + ".",
+  });
+}
+
 async function onboardingPolicy(c: Caller) {
   const all = await c.call("query_ap_history", { provider_id: null, months: 6 });
   const stats = all.stats as Json;
@@ -542,6 +554,7 @@ export async function runDeterministicAgent(ctx: AppContext, run: AgentRunContex
   else if (run.agentId === ACTOR.finance) await financePolicy(caller);
   else if (run.agentId === ACTOR.policy) await policyAnalystPolicy(caller, run);
   else if (run.agentId === ACTOR.vendorLiaison) await vendorPolicy(caller);
+  else if (run.agentId === ACTOR.budget && trigger === "controller_note") await budgetChangePolicy(caller, run);
   else if (run.agentId === ACTOR.budget) await budgetPolicy(caller);
   else throw new Error("No deterministic policy for " + run.agentId);
 }
