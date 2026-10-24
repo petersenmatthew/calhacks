@@ -340,7 +340,7 @@ async function vendorPolicy(c: Caller) {
   await c.call("close_dispute", {
     summary:
       reply?.status === "CREDIT_ACCEPTED"
-        ? vendor + " credited " + pkg.disputed_amount + " (" + reply.vendor_reference + "). The payable drops by that amount."
+        ? vendor + " credited " + pkg.disputed_amount + " (" + (reply.credit_memo ?? reply.case_reference) + "). The payable drops by that amount."
         : vendor + " denied the dispute. The disputed " + pkg.disputed_amount + " is charged to the owning project, and the controller can reopen it with the vendor.",
   });
 }

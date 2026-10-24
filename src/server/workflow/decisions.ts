@@ -230,7 +230,7 @@ export function submitApprovedDispute(ctx: AppContext, item: WorkItemRow, letter
     approvalId: approval.id,
     rule: "APPROVAL",
     evidenceIds: proposal.evidenceIds,
-    details: { amountCents: dispute.disputedCents, provider: provider?.name ?? dispute.providerId, sentTo: to, subject, clauses: dispute.clauseRefs },
+    details: { caseReference: vendorReference, amountCents: dispute.disputedCents, provider: provider?.name ?? dispute.providerId, sentTo: to, subject, clauses: dispute.clauseRefs },
   });
   recordActivity(ctx, {
     workItemId: item.id,
@@ -278,7 +278,7 @@ export function recordVendorResponse(ctx: AppContext, input: { workItemId: strin
     const memoRef = "CM-" + dispute.id.split("-")[1];
     ctx.db
       .update(vendorDisputes)
-      .set(accepted ? { status: "CREDIT_ACCEPTED", vendorReference: memoRef, resolvedAt: nowIso() } : { status: "DENIED", resolvedAt: nowIso() })
+      .set(accepted ? { status: "CREDIT_ACCEPTED", creditMemoRef: memoRef, resolvedAt: nowIso() } : { status: "DENIED", resolvedAt: nowIso() })
       .where(eq(vendorDisputes.id, dispute.id))
       .run();
     recordActivity(ctx, {
@@ -319,8 +319,8 @@ export function closeDispute(ctx: AppContext, item: WorkItemRow) {
   const lines: JournalLineDraft[] = [
     ...(credited > 0
       ? [
-          { accountCode: ACCOUNTS.AP, projectId: null, debitCents: credited, creditCents: 0, memo: "Vendor credit " + dispute.vendorReference },
-          { accountCode: ACCOUNTS.CLEARING, projectId: null, debitCents: 0, creditCents: credited, memo: "Vendor credit " + dispute.vendorReference },
+          { accountCode: ACCOUNTS.AP, projectId: null, debitCents: credited, creditCents: 0, memo: "Vendor credit " + (dispute.creditMemoRef ?? dispute.vendorReference) + " on " + dispute.vendorReference },
+          { accountCode: ACCOUNTS.CLEARING, projectId: null, debitCents: 0, creditCents: credited, memo: "Vendor credit " + (dispute.creditMemoRef ?? dispute.vendorReference) + " on " + dispute.vendorReference },
         ]
       : []),
     ...(upheld > 0

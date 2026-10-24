@@ -1377,7 +1377,7 @@ const getDisputePackage = defineTool({
         })() : null,
         evidence_note: "The application attaches the evidence pack and the cited clause text to your letter. Your letter should state the disputed amount, the instance id, and the grounds in a sentence or two.",
         vendor_dispute: record
-          ? { id: record.id, status: record.status, vendor_reference: record.vendorReference, submitted_at: record.submittedAt, replied_at: record.resolvedAt }
+          ? { id: record.id, status: record.status, case_reference: record.vendorReference, credit_memo: record.creditMemoRef, submitted_at: record.submittedAt, replied_at: record.resolvedAt }
           : null,
       },
       evidence: [{ sourceType: "dispute", sourceId: proposal.id, label: "Approved dispute " + proposal.id, snapshot: { dispute: d, approvalId: approval.id } }],

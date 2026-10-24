@@ -177,7 +177,7 @@ export function receiveVendorEmail(ctx: AppContext, m: InboundEmail): ReceiveRes
       targetType: "vendor_dispute",
       targetId: dispute.id,
       workItemId: item.id,
-      details: { messageId: id, from: m.from, subject: m.subject.slice(0, 300) },
+      details: { caseReference: dispute.vendorReference, messageId: id, from: m.from, subject: m.subject.slice(0, 300) },
     });
     recordActivity(ctx, {
       workItemId: item.id,
@@ -328,7 +328,7 @@ function sendInThread(
   const to = last?.fromAddr || dispute.sentTo || "";
   const baseSubject = (last?.subject || dispute.letterSubject || "[" + dispute.vendorReference + "] Billing dispute " + dispute.id).replace(/^(re:\s*)+/i, "");
   const subject = "Re: " + baseSubject;
-  const body = input.text.trim() + "\n\nReference: " + (dispute.letterSubject?.match(/\b[A-Z0-9]+-CASE-\d+\b/)?.[0] ?? dispute.vendorReference) + " (dispute " + dispute.id + ", " + formatCents(dispute.amountCents) + ").";
+  const body = input.text.trim() + "\n\nReference: " + dispute.vendorReference + " (dispute " + dispute.id + ", " + formatCents(dispute.amountCents) + ").";
   const threadIds = [
     ...ctx.db
       .select({ id: outbox.providerMessageId })
@@ -473,7 +473,7 @@ export function recordVendorDecision(
     .set(
       input.decision === "denied"
         ? { status: "DENIED", resolvedAt: nowIso() }
-        : { status: "CREDIT_ACCEPTED", vendorReference: reference, creditedCents, resolvedAt: nowIso() },
+        : { status: "CREDIT_ACCEPTED", creditMemoRef: reference, creditedCents, resolvedAt: nowIso() },
     )
     .where(eq(vendorDisputes.id, dispute.id))
     .run();

@@ -73,7 +73,10 @@ describe("vendor replies", () => {
     await orchestrator.drain();
     const d = ctx.db.select().from(vendorDisputes).where(eq(vendorDisputes.id, dispute.id)).get()!;
     expect(d.status).toBe("CREDIT_ACCEPTED");
-    expect(d.vendorReference).toBe("CM-88213");
+    // The case number stays put; the vendor's memo number sits beside it.
+    expect(d.vendorReference).toBe(dispute.vendorReference);
+    expect(d.vendorReference).toMatch(/-CASE-\d+$/);
+    expect(d.creditMemoRef).toBe("CM-88213");
     expect(workItem(ctx, id).state).toBe("RESOLVED");
     expect(workItem(ctx, id).outcome).toBe("VENDOR_CREDIT");
     expect(apBefore - accountBalance(ctx, "2000")).toBe(120_000);

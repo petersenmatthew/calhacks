@@ -166,7 +166,8 @@ function Outcome({ data }: { data: WorkspaceData }) {
           <KV
             rows={[
               ["Dispute", <span key="d" className="tnum">{dispute.id} · {dispute.creditedCents != null ? money(dispute.creditedCents) + " of " : ""}{money(dispute.amountCents)} · <span className="text-destructive">{dispute.status.toLowerCase()}</span></span>],
-              ["Vendor ref", dispute.vendorReference],
+              ["Case ref", dispute.vendorReference],
+              ...(dispute.creditMemoRef ? ([["Credit memo", dispute.creditMemoRef]] as [string, string][]) : []),
               ["Owed (AP)", <span key="ap" className="tnum">{money(data.apOutstandingCents)}{dispute.status === "SUBMITTED" ? " until credited" : ""}</span>],
             ]}
           />
