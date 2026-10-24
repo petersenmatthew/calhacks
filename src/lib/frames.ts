@@ -5,7 +5,7 @@
  * Everything shown comes from stored tool arguments and results.
  */
 import { agentSteps } from "./agent-steps";
-import { dateTimeUtc, clockTime, money } from "./format";
+import { dateTimeUtc, clockTime, compactMoney, dateOnly, hours, money } from "./format";
 import { sourceForTool, WRITE_TOOLS, type SourceId } from "./sources";
 import type { ActivityRow, WorkspaceData } from "@/server/queries";
 
@@ -14,11 +14,56 @@ export type OrbitNodeId = "compute" | "finance" | "vendor" | "budget" | "policy"
 
 export type Check = { label: string; detail?: string; ok?: boolean };
 
+/** Color of a bar, row or pill. Muted is idle or not counted. */
+export type Tone = "base" | "ok" | "warn" | "bad" | "muted";
+
+/** Time ranges on one shared axis. Positions are fractions of the axis, 0 to 1. */
+export type TimelineSpec = {
+  ticks: { at: number; label: string }[];
+  lanes: { key: string; label: string; value: string; tone: Tone; spans: { from: number; to: number; tone?: Tone }[] }[];
+  marks: { at: number; label: string; tone: Tone }[];
+};
+
+/** One amount checked against the records that should support it. */
+export type MatchSpec = {
+  head: { label: string; detail: string; value: string };
+  rows: { label: string; detail?: string; value: string; delta?: string; tone: Tone }[];
+  result: { label: string; value: string; tone: Tone };
+};
+
+/** One whole split into parts: a single stacked bar with a legend. */
+export type StackSpec = { total: string; parts: { label: string; share: number; display: string; tone?: Tone }[] };
+
+/** Month-to-date spend, its straight-line projection, and the budget. Amounts in cents. */
+export type BurnSpec = { days: number; elapsed: number; budget: number; posted: number; projected: number; tone: Tone };
+
+/** A case with an outside party: where it stands and the messages so far. */
+export type ThreadSpec = {
+  steps: { label: string; state: "done" | "now" | "todo"; tone?: Tone }[];
+  messages: { from: string; to: string; subject?: string; body: string; tone?: Tone }[];
+};
+
+/** An invoice line as the vendor sent it. */
+export type DocSpec = {
+  vendor: string;
+  logo?: string;
+  number: string;
+  meta: { label: string; value: string }[];
+  line: { description: string; qty: string; rate: string; amount: string };
+};
+
 export type FrameSpec = {
   eyebrow: string;
   title: string;
   /** The system of record this frame read from or wrote to. */
   source?: { id: SourceId; name: string; logo: string; write?: boolean };
+  status?: { label: string; tone: Tone };
+  doc?: DocSpec;
+  timeline?: TimelineSpec;
+  match?: MatchSpec;
+  stack?: StackSpec;
+  burn?: BurnSpec;
+  thread?: ThreadSpec;
   query?: { lang: "sql" | "json" | "call"; text: string };
   table?: { cols: string[]; rows: string[][] };
   bars?: { label: string; share: number; display: string }[];
@@ -27,6 +72,8 @@ export type FrameSpec = {
   ledger?: { lines: { account: string; memo: string; dr: string; cr: string }[]; balanced: boolean };
   summary?: string;
   evidence?: string[];
+  /** Records the employee read on the way to this frame. */
+  sources?: string[];
 };
 
 export type Frame = {
@@ -36,6 +83,8 @@ export type Frame = {
   createdAt: string;
   tone: "ok" | "warn" | "denied" | "live";
   spec: FrameSpec;
+  /** Other activity ids folded into this frame (reads, follow-up calls). */
+  members?: string[];
 };
 
 /* ------------------------------------------------------------- json access */
@@ -58,6 +107,8 @@ const list = (o: unknown, path: string) => {
   return Array.isArray(v) ? v : [];
 };
 const q = (v: string) => "'" + v + "'";
+/** "$1,234.50" to 1234.5. */
+const dollars = (v: string) => Number(v.replace(/[$,]/g, "")) || 0;
 
 /* ------------------------------------------------------------- labels */
 
@@ -227,21 +278,17 @@ function toolSpec(row: ActivityRow, w: WorkspaceData): FrameSpec {
       const usage = list(r, "usage_by_project");
       return {
         ...base,
-        query: {
-          lang: "sql",
-          text:
-            "SELECT e.project_id, SUM(j.gpus * hours(j.started_at, j.ended_at)) AS gpu_hours\nFROM compute_jobs j\nJOIN experiments e ON e.id = j.experiment_id\nWHERE j.reservation_id = " +
-            q(s(a, "reservation_id")) + "\nGROUP BY e.project_id;",
+        stack: {
+          total: n(r, "reserved_gpu_hours").toLocaleString("en-US") + " GPU-h reserved",
+          parts: [
+            ...usage.map((u) => ({ label: s(u, "project_name"), share: n(u, "gpu_hours") / reserved, display: n(u, "gpu_hours").toLocaleString("en-US") + " GPU-h" })),
+            { label: "Idle", share: n(r, "idle_gpu_hours") / reserved, display: n(r, "idle_gpu_hours").toLocaleString("en-US") + " GPU-h", tone: "muted" as const },
+          ],
         },
-        bars: [
-          ...usage.map((u) => ({ label: s(u, "project_name"), share: n(u, "gpu_hours") / reserved, display: n(u, "gpu_hours") + " GPU-h" })),
-          { label: "Idle", share: n(r, "idle_gpu_hours") / reserved, display: n(r, "idle_gpu_hours") + " GPU-h" },
-        ],
         checks: [
-          { label: "Reservation owner", detail: s(r, "reservation.owner_project_name"), ok: true },
           {
-            label: "Owner accountable for idle",
-            detail: get(r, "reservation.owner_accountable_for_idle") ? "Yes, per internal terms" : "Not stated",
+            label: "Idle time goes to " + s(r, "reservation.owner_project_name"),
+            detail: get(r, "reservation.owner_accountable_for_idle") ? "The reservation owner pays for idle, per internal terms" : "Internal terms do not say who pays for idle",
             ok: Boolean(get(r, "reservation.owner_accountable_for_idle")),
           },
         ],
@@ -250,22 +297,41 @@ function toolSpec(row: ActivityRow, w: WorkspaceData): FrameSpec {
     case "submit_compute_findings": {
       const c = get(r, "computed");
       const assessment = s(a, "charge_assessment");
+      const status = { label: assessment.replace(/_/g, " "), tone: (assessment === "explained" ? "ok" : assessment === "not_explained" ? "bad" : "warn") as Tone };
       if (s(c, "lifecycle_hours")) {
+        const billed = n(c, "billed_hours");
+        const life = n(c, "lifecycle_hours");
+        const meter = n(c, "provider_meter_hours");
+        const billable = n(c, "contract_billable_hours");
+        const idle = n(c, "idle_hours");
+        const gap = n(c, "discrepancy_cents");
+        const rate = w.item.checks.kind === "instance" ? w.item.checks.contractRateCents : 0;
+        const delta = (h: number) => {
+          const d = Math.round((h - billed) * 100) / 100;
+          return d === 0 ? "same as billed" : (d > 0 ? "+" : "") + d.toLocaleString("en-US") + " h";
+        };
         return {
           ...base,
-          checks: [
-            { label: "Lifecycle hours", detail: n(c, "lifecycle_hours") + " h", ok: true },
-            { label: "Contract billable", detail: n(c, "contract_billable_hours") + " h", ok: true },
-            { label: "Billed", detail: n(c, "billed_hours") + " h", ok: n(c, "billed_hours") <= n(c, "contract_billable_hours") },
-            { label: "Scheduler runtime", detail: n(c, "scheduler_hours") + " h (" + n(c, "idle_hours") + " h idle)" },
-            { label: "Provider meter", detail: n(c, "provider_meter_hours") + " h", ok: n(c, "provider_meter_hours") === n(c, "lifecycle_hours") },
-            { label: "Discrepancy", detail: money(n(c, "discrepancy_cents")), ok: n(c, "discrepancy_cents") === 0 },
-            { label: "Assessment", detail: assessment.replace("_", " "), ok: assessment === "explained" ? true : assessment === "not_explained" ? false : undefined },
-          ],
+          title: gap > 0 ? money(gap) + " of " + money(w.line?.amountCents) + " is not supported" : "Charge supported in full",
+          status,
+          match: {
+            head: {
+              label: "Invoice " + (w.line?.externalLineId ?? w.item.invoiceLineId),
+              detail: hours(billed) + " at " + money(w.line?.unitPriceCents) + "/h",
+              value: money(w.line?.amountCents),
+            },
+            rows: [
+              { label: "Provider meter", detail: "What the provider says it metered", value: hours(meter), delta: delta(meter), tone: Math.abs(meter - life) <= 0.5 ? "ok" : "warn" },
+              { label: "Instance lifetime", detail: "Provisioned to terminated", value: hours(life), delta: delta(life), tone: life + 0.01 >= billed ? "ok" : "bad" },
+              { label: "Jobs running", detail: idle ? hours(idle) + " idle on the instance" : "No idle time", value: hours(n(c, "scheduler_hours")), tone: "muted" },
+              { label: "Contract billable", detail: rate ? "At " + money(rate) + "/h" : "Per contract terms", value: hours(billable), delta: delta(billable), tone: billable + 0.01 >= billed ? "ok" : "bad" },
+            ],
+            result: gap > 0 ? { label: "Not supported by the contract", value: money(gap), tone: "bad" } : { label: "Supported in full", value: money(0), tone: "ok" },
+          },
           summary: s(a, "summary"),
         };
       }
-      return { ...base, checks: [{ label: "Assessment", detail: assessment.replace("_", " ") }], summary: s(a, "summary") };
+      return { ...base, status, summary: s(a, "summary") };
     }
     case "handoff_to_finance":
       return { ...base, draft: { to: "Cost Accountant", subject: "Handoff: " + w.item.id, body: s(a, "note") }, summary: undefined };
@@ -303,15 +369,13 @@ function toolSpec(row: ActivityRow, w: WorkspaceData): FrameSpec {
       };
     case "calculate_cost_allocation": {
       const lines = list(r, "lines");
-      const total = lines.reduce((sum: number, l) => sum + Number(s(l, "amount").replace(/[$,]/g, "") || 0), 0) || 1;
+      const total = lines.reduce((sum: number, l) => sum + dollars(s(l, "amount")), 0) || 1;
       return {
         ...base,
-        query: { lang: "call", text: "calculate_cost_allocation(\n  work_item = " + q(s(a, "work_item_id")) + ",\n  method = " + q(s(a, "method")) + "\n)" },
-        bars: lines.map((l) => ({
-          label: s(l, "project_name"),
-          share: Number(s(l, "amount").replace(/[$,]/g, "") || 0) / total,
-          display: s(l, "amount"),
-        })),
+        stack: {
+          total: s(r, "total"),
+          parts: lines.map((l) => ({ label: s(l, "project_name"), share: dollars(s(l, "amount")) / total, display: s(l, "amount") })),
+        },
         checks: [
           { label: "Method", detail: s(r, "method_label") },
           { label: "Lines sum exactly to total", detail: s(r, "total"), ok: Boolean(get(r, "sums_exactly_to_total")) },
@@ -341,17 +405,17 @@ function toolSpec(row: ActivityRow, w: WorkspaceData): FrameSpec {
     }
     case "propose_vendor_dispute": {
       const provider = w.providers[w.item.providerId]?.name ?? "Vendor";
-      const body =
-        "Hello " + provider + " billing team,\n\n" +
-        "We are disputing " + s(r, "disputed_amount") + " on invoice line " + (w.line?.externalLineId ?? w.item.invoiceLineId) + ".\n\n" +
-        s(a, "rationale") +
-        "\n\nContract clauses: " + list(a, "clause_refs").join(", ") +
-        "\nUndisputed amount: " + s(r, "undisputed_amount") +
-        "\n\nPlease issue a credit for the disputed amount.\n\nAtlas Research Finance";
       return {
         ...base,
-        draft: { to: provider + " billing", subject: "Billing dispute: " + (w.line?.externalLineId ?? w.item.invoiceLineId), body },
-        summary: s(r, "liability_note") || undefined,
+        match: {
+          head: { label: "Invoice " + (w.line?.externalLineId ?? w.item.invoiceLineId), detail: provider, value: money(w.line?.amountCents) },
+          rows: [
+            { label: "Pay", detail: "Supported by the contract", value: s(r, "undisputed_amount"), tone: "ok" },
+            { label: "Dispute", detail: list(a, "clause_refs").length ? "Clauses " + list(a, "clause_refs").join(", ") : "Not supported", value: s(r, "disputed_amount"), tone: "bad" },
+          ],
+          result: { label: "Ask " + provider + " for a credit", value: s(r, "disputed_amount"), tone: "warn" },
+        },
+        summary: s(a, "rationale") || s(r, "liability_note") || undefined,
       };
     }
     case "propose_policy":
@@ -426,20 +490,21 @@ function toolSpec(row: ActivityRow, w: WorkspaceData): FrameSpec {
         summary: undefined,
       };
     case "forecast_project_burn": {
-      const budget = Number(s(r, "monthly_budget").replace(/[$,]/g, "")) || 1;
-      const money2 = (k: string) => Number(s(r, k).replace(/[$,]/g, "")) || 0;
       const status = s(r, "status");
+      const tone: Tone = status === "on_track" ? "ok" : status === "watch" ? "warn" : "bad";
+      const cents = (k: string) => Math.round(dollars(s(r, k)) * 100);
       return {
         ...base,
-        query: { lang: "call", text: "forecast_project_burn(\n  project = " + q(s(a, "project_id")) + ",\n  days = " + n(r, "days_elapsed") + " of " + n(r, "days_in_month") + "\n)" },
-        bars: [
-          { label: "Posted so far", share: money2("posted_to_date") / budget, display: s(r, "posted_to_date") },
-          { label: "On pace for", share: money2("projected_month_end") / budget, display: s(r, "projected_month_end") + " (" + n(r, "projected_pct_of_budget") + "%)" },
-        ],
-        checks: [
-          { label: "Monthly budget", detail: s(r, "monthly_budget") },
-          { label: "Status", detail: status.replace("_", " "), ok: status === "on_track" ? true : status === "watch" ? undefined : false },
-        ],
+        title: s(r, "project.name") + " is on pace for " + compactMoney(cents("projected_month_end")) + " of " + compactMoney(cents("monthly_budget")),
+        status: { label: status.replace(/_/g, " "), tone },
+        burn: {
+          days: n(r, "days_in_month"),
+          elapsed: n(r, "days_elapsed"),
+          budget: cents("monthly_budget"),
+          posted: cents("posted_to_date"),
+          projected: cents("projected_month_end"),
+          tone,
+        },
       };
     }
     case "record_budget_note": {
@@ -465,30 +530,31 @@ function intakeFrames(w: WorkspaceData): Frame[] {
   const first: OrbitNodeId = w.item.type === "SHARED_ALLOCATION" ? "capacity" : "compute";
   const line = w.line;
   if (line) {
+    const provider = w.providers[w.item.providerId]?.name ?? w.item.providerId;
     frames.push({
       id: "intake-event",
       node: first,
-      label: "Billing event",
+      label: "Invoice",
       createdAt: w.item.createdAt,
       tone: "ok",
       spec: {
         eyebrow: "Provider feed · webhook",
-        title: "Received " + line.externalLineId + " from " + (w.providers[w.item.providerId]?.name ?? w.item.providerId),
-        query: {
-          lang: "json",
-          text: JSON.stringify(
-            {
-              invoice: w.invoice?.invoiceNumber ?? line.invoiceId,
-              line: line.externalLineId,
-              description: line.description,
-              quantity: line.quantity,
-              unit_price: money(line.unitPriceCents),
-              amount: money(line.amountCents),
-              service: dateTimeUtc(line.serviceStart) + " to " + dateTimeUtc(line.serviceEnd),
-            },
-            null,
-            2,
-          ),
+        title: "Received " + line.externalLineId + " from " + provider,
+        doc: {
+          vendor: provider,
+          logo: sourceForTool("get_work_item", w.item.providerId)?.logo,
+          number: w.invoice?.invoiceNumber ?? line.invoiceId,
+          meta: [
+            { label: "Issued", value: dateOnly(w.invoice?.issuedAt) },
+            { label: "Line", value: line.externalLineId },
+            { label: "Service", value: dateTimeUtc(line.serviceStart) + " to " + dateTimeUtc(line.serviceEnd) },
+          ],
+          line: {
+            description: line.description,
+            qty: line.quantity.toLocaleString("en-US") + " " + line.unit,
+            rate: money(line.unitPriceCents),
+            amount: money(line.amountCents),
+          },
         },
         checks: [{ label: "New event id", detail: "Not seen before; ingesting once", ok: true }],
       },
@@ -499,7 +565,6 @@ function intakeFrames(w: WorkspaceData): Frame[] {
   const flagged = new Set(c.flags.map((f) => f.code));
   const flagMsg = (code: string) => c.flags.find((f) => f.code === code)?.message;
   let checks: Check[];
-  let table: FrameSpec["table"];
   if (c.kind === "instance") {
     checks = [
       { label: "Rate matches contract", detail: flagMsg("RATE_MISMATCH") ?? money(c.invoicedRateCents) + "/h", ok: !flagged.has("RATE_MISMATCH") },
@@ -514,29 +579,11 @@ function intakeFrames(w: WorkspaceData): Frame[] {
       { label: "Scheduler covers runtime", detail: flagMsg("IDLE_TIME") ?? c.schedulerHours + " h of jobs", ok: !flagged.has("IDLE_TIME") },
       { label: "Owner identified", detail: flagMsg("MISSING_OWNER") ?? c.ownerProjectIds.map((p) => w.projects[p]?.name ?? p).join(", "), ok: !flagged.has("MISSING_OWNER") },
     ];
-    table = {
-      cols: ["Source", "Hours"],
-      rows: [
-        ["Invoice", String(c.billedHours)],
-        ["Lifecycle", String(c.lifecycleHours)],
-        ["Provider meter", String(c.providerMeterHours)],
-        ["Scheduler jobs", String(c.schedulerHours)],
-      ],
-    };
   } else {
     checks = [
       ...c.flags.map((f) => ({ label: f.code, detail: f.message, ok: false })),
       { label: "Amount matches commitment", detail: money(c.invoicedCents), ok: !flagged.has("AMOUNT_VARIANCE") },
     ];
-    table = {
-      cols: ["Reservation", "GPU-h"],
-      rows: [
-        ["Reserved", String(c.reservedGpuHours)],
-        ["Used", String(c.usedGpuHours)],
-        ["Idle", String(c.idleGpuHours)],
-        ...c.usageByProject.map((u) => [w.projects[u.projectId]?.name ?? u.projectId, String(u.gpuHours)]),
-      ],
-    };
   }
   const opened = w.activity.find((e) => e.type === "WORK_ITEM");
   frames.push({
@@ -555,12 +602,135 @@ function intakeFrames(w: WorkspaceData): Frame[] {
             ? "SELECT l.quantity, l.unit_price, i.lifecycle_hours,\n       u.meter_hours, j.scheduler_hours\nFROM invoice_lines l\nJOIN gpu_instances i ON i.id = l.instance_id\nWHERE l.id = " + q(w.item.invoiceLineId) + ";"
             : "SELECT r.gpu_count * r.hours AS reserved, SUM(j.gpu_hours)\nFROM reservations r\nJOIN compute_jobs j ON j.reservation_id = r.id\nWHERE r.id = " + q(c.reservationId) + ";",
       },
-      table,
       checks,
       summary: opened?.summary ?? undefined,
     },
   });
   return frames;
+}
+
+/* ------------------------------------------------------------- timeline and thread */
+
+const tickFmt = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+const tickHourFmt = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" });
+const LANE_ORDER = ["invoice", "meter", "life", "jobs"];
+
+/**
+ * The billing period, provider meter, instance lifetime and jobs on one time
+ * axis. A lane appears once the employee has read the record behind it.
+ */
+function timelineSpec(w: WorkspaceData, got: Set<string>): { spec: TimelineSpec; title: string; tone: Frame["tone"] } | null {
+  const c = w.item.checks;
+  const line = w.line;
+  if (c.kind !== "instance" || !line) return null;
+  const life = got.has("get_instance_lifecycle") && Boolean(c.provisionedAt);
+  const meter = got.has("get_provider_usage");
+  const contract = got.has("get_billing_terms");
+  const ms = (iso: string) => Date.parse(iso);
+
+  const points = [line.serviceStart, line.serviceEnd];
+  if (life) {
+    points.push(c.provisionedAt!);
+    if (c.terminatedAt) points.push(c.terminatedAt);
+    for (const j of w.jobs) points.push(j.startedAt, j.endedAt);
+  }
+  if (meter) for (const u of w.usage) points.push(u.usageStart, u.usageEnd);
+  const times = points.map(ms).filter(Number.isFinite);
+  let lo = Math.min(...times);
+  let hi = Math.max(...times);
+  const pad = (hi - lo) * 0.03 || 3_600_000;
+  lo -= pad;
+  hi += pad;
+  const at = (t: number) => Math.min(1, Math.max(0, (t - lo) / (hi - lo)));
+  const x = (iso: string) => at(ms(iso));
+
+  const lanes: TimelineSpec["lanes"] = [
+    { key: "invoice", label: "Invoice", value: hours(c.billedHours) + " billed", tone: "base", spans: [{ from: x(line.serviceStart), to: x(line.serviceEnd) }] },
+  ];
+  const marks: TimelineSpec["marks"] = [];
+  const overHours = c.terminatedAt ? c.providerMeterHours - c.lifecycleHours : 0;
+
+  if (meter) {
+    const cut = c.terminatedAt ? ms(c.terminatedAt) : Infinity;
+    const spans = w.usage.flatMap((u) => {
+      const a = ms(u.usageStart);
+      const b = ms(u.usageEnd);
+      if (b <= cut) return [{ from: at(a), to: at(b), tone: "ok" as const }];
+      if (a >= cut) return [{ from: at(a), to: at(b), tone: "bad" as const }];
+      return [{ from: at(a), to: at(cut), tone: "ok" as const }, { from: at(cut), to: at(b), tone: "bad" as const }];
+    });
+    lanes.push({ key: "meter", label: "Provider meter", value: hours(c.providerMeterHours), tone: overHours > 0.5 ? "bad" : "ok", spans });
+  }
+  if (life) {
+    const end = c.terminatedAt ?? line.serviceEnd;
+    lanes.push({ key: "life", label: "Instance up", value: hours(c.lifecycleHours), tone: "ok", spans: [{ from: x(c.provisionedAt!), to: x(end) }] });
+    lanes.push({
+      key: "jobs",
+      label: "Jobs running",
+      value: hours(c.schedulerHours) + (c.idleHours > 0.01 ? " · " + hours(c.idleHours) + " idle" : ""),
+      tone: "ok",
+      spans: w.jobs.map((j) => ({ from: x(j.startedAt), to: x(j.endedAt) })),
+    });
+    if (c.terminatedAt) marks.push({ at: x(c.terminatedAt), label: "Terminated", tone: "base" });
+  }
+  if (contract && c.provisionedAt) {
+    const billableEnd = at(ms(c.provisionedAt) + c.billableHours * 3_600_000);
+    const near = marks.find((m) => Math.abs(m.at - billableEnd) < 0.04);
+    if (near) near.label += " · billable ends";
+    else marks.push({ at: billableEnd, label: "Billable ends", tone: "ok" });
+  }
+  lanes.sort((p, q2) => LANE_ORDER.indexOf(p.key) - LANE_ORDER.indexOf(q2.key));
+
+  const fmt = hi - lo < 4 * 86_400_000 ? tickHourFmt : tickFmt;
+  const ticks = [0.08, 0.36, 0.64, 0.92].map((f) => ({ at: f, label: fmt.format(new Date(lo + f * (hi - lo))) }));
+  const overbilled = life && c.billedHours > c.lifecycleHours + 0.01;
+  const title =
+    meter && overHours > 0.5
+      ? "Meter ran " + hours(overHours) + " past termination"
+      : overbilled
+        ? "Billed " + hours(c.billedHours) + "; the instance ran " + hours(c.lifecycleHours)
+        : life
+          ? "Instance ran " + hours(c.lifecycleHours) + "; billed " + hours(c.billedHours)
+          : "Billing period for " + line.externalLineId;
+  return { spec: { ticks, lanes, marks }, title, tone: (meter && overHours > 0.5) || overbilled ? "warn" : "ok" };
+}
+
+/** The dispute as one case: approval, the letter, the vendor's reply, the close. */
+function threadSpec(w: WorkspaceData, send: ActivityRow, close?: ActivityRow, pkg?: ActivityRow): { spec: Partial<FrameSpec>; label: string; tone: Frame["tone"] } {
+  const provider = w.providers[w.item.providerId]?.name ?? "Vendor";
+  const d = w.dispute;
+  const replied = Boolean(d && d.status !== "SUBMITTED");
+  const credited = d?.status === "CREDIT_ACCEPTED";
+  const approvedBy = pkg ? s(pkg.result, "approved_by") : "";
+  const amount = d ? money(d.amountCents) : s(send.result, "disputed_amount");
+  const steps: ThreadSpec["steps"] = [
+    { label: approvedBy ? "Approved by " + approvedBy : "Approved", state: "done" },
+    { label: "Sent", state: "done" },
+    { label: replied ? (credited ? "Credited" : "Denied") : "Waiting on " + provider, state: replied ? "done" : "now", tone: replied ? (credited ? "ok" : "bad") : undefined },
+    { label: "Closed", state: close ? "done" : replied ? "now" : "todo" },
+  ];
+  const messages: ThreadSpec["messages"] = [{ from: "Atlas Research Finance", to: provider + " billing", subject: s(send.args, "subject"), body: s(send.args, "message") }];
+  if (replied && d) {
+    const ref = d.vendorReference ? " (" + d.vendorReference + ")" : "";
+    messages.push({
+      from: provider + " billing",
+      to: "Vendor Liaison",
+      body: credited ? "We reviewed the dispute and issued a credit memo for " + amount + ref + "." : "We reviewed the dispute and are upholding the charge" + ref + ".",
+      tone: credited ? "ok" : "bad",
+    });
+  }
+  const credit = close && s(close.result, "outcome") === "VENDOR_CREDIT";
+  return {
+    label: "Dispute",
+    tone: replied && !credited ? "denied" : "ok",
+    spec: {
+      title: replied ? (credited ? provider + " credited " + amount : provider + " denied the dispute") : "Disputed " + amount + " with " + provider,
+      thread: { steps, messages },
+      draft: undefined,
+      checks: close ? [{ label: credit ? "Payable reduced" : "Charged to the owning project", detail: s(close.result, "journal_entry_id"), ok: true }] : undefined,
+      summary: close ? s(close.args, "summary") || undefined : undefined,
+    },
+  };
 }
 
 /* ------------------------------------------------------------- ledger, vendor, policy */
@@ -694,9 +864,86 @@ function liveFrame(w: WorkspaceData, agentId: string): Frame | null {
 
 /* ------------------------------------------------------------- entry */
 
+/** A frame as plain text, so an employee can talk about exactly what the controller is looking at. */
+export function frameText(spec: FrameSpec): string {
+  const out: string[] = [spec.eyebrow, spec.title];
+  if (spec.status) out.push("Status: " + spec.status.label);
+  if (spec.doc) out.push("Invoice " + spec.doc.number + " from " + spec.doc.vendor + ": " + spec.doc.line.description + ", " + spec.doc.line.qty + " at " + spec.doc.line.rate + " = " + spec.doc.line.amount);
+  if (spec.timeline) {
+    out.push("Timeline lanes: " + spec.timeline.lanes.map((l) => l.label + " " + l.value + (l.spans.some((s) => s.tone === "bad") ? " (part flagged)" : "")).join("; "));
+    if (spec.timeline.marks.length) out.push("Marks: " + spec.timeline.marks.map((m) => m.label).join("; "));
+  }
+  if (spec.match) {
+    out.push(spec.match.head.label + " (" + spec.match.head.detail + "): " + spec.match.head.value);
+    for (const r of spec.match.rows) out.push("- " + r.label + ": " + r.value + (r.delta ? " (" + r.delta + ")" : "") + (r.detail ? ", " + r.detail : ""));
+    out.push("Result: " + spec.match.result.label + " " + spec.match.result.value);
+  }
+  if (spec.stack) out.push("Split of " + spec.stack.total + ": " + spec.stack.parts.map((p) => p.label + " " + p.display + " (" + Math.round(p.share * 100) + "%)").join("; "));
+  if (spec.burn) out.push("Burn: posted " + money(spec.burn.posted) + " by day " + spec.burn.elapsed + " of " + spec.burn.days + "; projected " + money(spec.burn.projected) + " vs budget " + money(spec.burn.budget));
+  if (spec.thread) {
+    out.push("Steps: " + spec.thread.steps.map((s) => s.label + " (" + s.state + ")").join("; "));
+    for (const m of spec.thread.messages) out.push("Message from " + m.from + " to " + m.to + ": " + (m.subject ? m.subject + ". " : "") + m.body);
+  }
+  if (spec.query) out.push("Query: " + spec.query.text);
+  if (spec.table) out.push(spec.table.cols.join(" | "), ...spec.table.rows.map((r) => r.join(" | ")));
+  if (spec.bars) out.push(...spec.bars.map((b) => b.label + ": " + b.display));
+  if (spec.ledger) out.push(...spec.ledger.lines.map((l) => l.account + " " + l.memo + " Dr " + (l.dr || "-") + " Cr " + (l.cr || "-")), spec.ledger.balanced ? "Balanced" : "Out of balance");
+  if (spec.draft) out.push("Draft to " + spec.draft.to + ": " + spec.draft.subject + ". " + spec.draft.body);
+  if (spec.checks) out.push(...spec.checks.map((c) => (c.ok === true ? "[pass] " : c.ok === false ? "[fail] " : "[info] ") + c.label + (c.detail ? ": " + c.detail : "")));
+  if (spec.summary) out.push("Summary: " + spec.summary);
+  if (spec.evidence?.length) out.push("Evidence: " + spec.evidence.join("; "));
+  if (spec.sources?.length) out.push("Records read first: " + spec.sources.join(", "));
+  return out.join("\n");
+}
+
+/** Reads that become source tags on the employee's next frame instead of frames of their own. */
+const TAG_TOOLS = new Set([
+  "get_work_item",
+  "get_experiment",
+  "get_billing_terms",
+  "get_gpu_job_logs",
+  "search_precedents",
+  "get_allocation_policy",
+  "get_project_budget",
+  "get_posted_charges",
+  "get_dispute_package",
+]);
+
 export function buildFrames(w: WorkspaceData): Frame[] {
   const frames: Frame[] = [...intakeFrames(w)];
   const deniedPostings: ActivityRow[] = [];
+  const got = new Set(w.activity.filter((r) => r.toolName && r.status !== "denied" && r.status !== "error").map((r) => r.toolName!));
+  /** Reads waiting to be tagged onto the employee's next frame. */
+  const pending = new Map<string, ActivityRow[]>();
+  /** Frames a later call folds into, keyed by employee and kind. */
+  const open = new Map<string, Frame>();
+  let timeline: Frame | null = null;
+  const dispute: { frame?: Frame; send?: ActivityRow; close?: ActivityRow; pkg?: ActivityRow } = {};
+
+  const toolFrame = (row: ActivityRow, agent: OrbitNodeId): Frame => {
+    const src = sourceForTool(row.toolName, w.item.providerId);
+    const spec = toolSpec(row, w);
+    return {
+      id: "act-" + row.id,
+      node: agent,
+      label: LABELS[row.toolName!] ?? row.toolName!,
+      createdAt: row.createdAt,
+      tone: "ok",
+      spec: src ? { ...spec, source: { id: src.id, name: src.name, logo: src.logo, write: WRITE_TOOLS.has(row.toolName!) } } : spec,
+    };
+  };
+  const fold = (f: Frame, rows: ActivityRow[]) => {
+    f.members = [...(f.members ?? []), ...rows.map((r) => "act-" + r.id)];
+  };
+  const tag = (f: Frame, actorId: string) => {
+    const reads = pending.get(actorId);
+    if (!reads?.length) return;
+    const labels = reads.map((r) => LABELS[r.toolName!] ?? r.toolName!);
+    f.spec.sources = [...new Set([...(f.spec.sources ?? []), ...labels])];
+    fold(f, reads);
+    pending.delete(actorId);
+  };
+
   for (const row of w.activity) {
     const agent = NODE_OF[row.actorId] ?? null;
     if (!agent) continue;
@@ -715,23 +962,96 @@ export function buildFrames(w: WorkspaceData): Frame[] {
       });
       continue;
     }
-    if (!row.toolName) continue;
-    const src = sourceForTool(row.toolName, w.item.providerId);
-    const spec = toolSpec(row, w);
+    const tool = row.toolName;
+    if (!tool) continue;
+    if (TAG_TOOLS.has(tool)) {
+      if (tool === "get_dispute_package") dispute.pkg = row;
+      pending.set(row.actorId, [...(pending.get(row.actorId) ?? []), row]);
+      continue;
+    }
+
+    const key = (kind: string) => row.actorId + ":" + kind;
+    let target: Frame;
+    if ((tool === "get_instance_lifecycle" || tool === "get_provider_usage") && w.item.checks.kind === "instance") {
+      if (timeline) fold(timeline, [row]);
+      else frames.push((timeline = toolFrame(row, agent)));
+      target = timeline;
+    } else if (tool === "propose_adjustment" && open.has(key("alloc"))) {
+      target = open.get(key("alloc"))!;
+      open.delete(key("alloc"));
+      fold(target, [row]);
+      const auth = get(row.result, "standing_authorization");
+      target.label = "Proposal";
+      target.spec.title = row.title;
+      target.spec.status = get(auth, "authorized") ? { label: "Covered by standing policy", tone: "ok" } : { label: "Needs controller approval", tone: "warn" };
+      target.spec.summary = s(row.args, "rationale") || row.summary || target.spec.summary;
+    } else if (tool === "record_budget_note" && open.has(key("burn"))) {
+      target = open.get(key("burn"))!;
+      open.delete(key("burn"));
+      fold(target, [row]);
+      target.spec.summary = s(row.args, "summary") || row.summary || target.spec.summary;
+    } else if (tool === "close_dispute" && dispute.frame) {
+      target = dispute.frame;
+      dispute.close = row;
+      fold(target, [row]);
+    } else {
+      target = toolFrame(row, agent);
+      frames.push(target);
+      if (tool === "calculate_cost_allocation") open.set(key("alloc"), target);
+      if (tool === "forecast_project_burn") open.set(key("burn"), target);
+      if (tool === "send_vendor_dispute") {
+        dispute.frame = target;
+        dispute.send = row;
+      }
+    }
+    tag(target, row.actorId);
+  }
+
+  if (timeline) {
+    const t = timelineSpec(w, got);
+    if (t) {
+      timeline.label = "Timeline";
+      timeline.tone = t.tone;
+      timeline.spec = {
+        eyebrow: AGENT_NAME["agent.compute"] + " · lifecycle and meter",
+        title: t.title,
+        timeline: t.spec,
+        sources: timeline.spec.sources,
+      };
+    }
+  }
+  if (dispute.frame && dispute.send) {
+    const t = threadSpec(w, dispute.send, dispute.close, dispute.pkg);
+    dispute.frame.label = t.label;
+    dispute.frame.tone = t.tone;
+    dispute.frame.spec = { ...dispute.frame.spec, ...t.spec };
+  }
+
+  // Reads with no frame after them yet. A running employee will tag them onto
+  // its next frame; otherwise show what was read.
+  const running = new Set(w.runs.filter((r) => r.status === "running").map((r) => r.agentId));
+  for (const [actorId, reads] of pending) {
+    if (running.has(actorId) || !NODE_OF[actorId]) continue;
+    const last = reads.at(-1)!;
     frames.push({
-      id: "act-" + row.id,
-      node: agent,
-      label: LABELS[row.toolName] ?? row.toolName,
-      createdAt: row.createdAt,
+      id: "act-" + reads[0].id,
+      node: NODE_OF[actorId],
+      label: "Reads",
+      createdAt: last.createdAt,
       tone: "ok",
-      spec: src ? { ...spec, source: { id: src.id, name: src.name, logo: src.logo, write: WRITE_TOOLS.has(row.toolName) } } : spec,
+      members: reads.slice(1).map((r) => "act-" + r.id),
+      spec: {
+        eyebrow: (AGENT_NAME[actorId] ?? actorId) + " · reads",
+        title: "Read " + reads.length + " record" + (reads.length > 1 ? "s" : ""),
+        checks: reads.map((r) => ({ label: LABELS[r.toolName!] ?? r.toolName!, detail: r.title, ok: true })),
+      },
     });
   }
-  frames.push(...ledgerFrames(w, deniedPostings), ...vendorReplyFrames(w), ...policyFrames(w));
+
+  frames.push(...ledgerFrames(w, deniedPostings), ...(dispute.frame ? [] : vendorReplyFrames(w)), ...policyFrames(w));
   for (const id of Object.keys(NODE_OF)) {
     const live = liveFrame(w, id);
     if (live) frames.push(live);
   }
   return frames.sort((x, y) => (x.createdAt < y.createdAt ? -1 : x.createdAt > y.createdAt ? 1 : 0));
 }
-
