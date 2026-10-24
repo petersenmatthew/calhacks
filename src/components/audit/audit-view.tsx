@@ -26,16 +26,16 @@ const FILTERS: { key: Filter; label: string }[] = [
 ];
 
 const OUTCOME_TONE: Record<string, string> = {
-  ALLOWED: "bg-emerald-50 text-emerald-700 ring-emerald-600/15",
-  DENIED: "bg-rose-50 text-rose-700 ring-rose-600/15",
-  FAILED: "bg-amber-50 text-amber-800 ring-amber-600/20",
+  ALLOWED: "text-zinc-500",
+  DENIED: "text-rose-600",
+  FAILED: "text-amber-700",
 };
 
 const POLICY_TONE: Record<string, string> = {
-  APPROVED: "bg-emerald-100 text-emerald-700",
-  PROPOSED: "bg-orange-100 text-orange-700",
-  SUPERSEDED: "bg-zinc-100 text-zinc-500",
-  REJECTED: "bg-rose-100 text-rose-700",
+  APPROVED: "text-emerald-700",
+  PROPOSED: "text-orange-700",
+  SUPERSEDED: "text-zinc-400",
+  REJECTED: "text-rose-600",
 };
 
 function EventsTable({ data }: { data: AuditData }) {
@@ -43,6 +43,13 @@ function EventsTable({ data }: { data: AuditData }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<number | null>(null);
   const q = query.trim().toLowerCase();
+  const counts: Record<Filter, number> = {
+    all: data.events.length,
+    decision: data.events.filter((e) => e.category === "decision").length,
+    posting: data.events.filter((e) => e.category === "posting").length,
+    agents: data.events.filter((e) => e.actorKind === "agent").length,
+    denied: data.events.filter((e) => e.outcome !== "ALLOWED").length,
+  };
   const rows = data.events.filter((e) => {
     if (filter === "decision" && e.category !== "decision") return false;
     if (filter === "posting" && e.category !== "posting") return false;
@@ -52,8 +59,8 @@ function EventsTable({ data }: { data: AuditData }) {
     return [e.action, e.workItemId, e.targetId, e.actorId, e.policyId, e.approvalId, e.rule].some((v) => (v ?? "").toLowerCase().includes(q));
   });
   return (
-    <div className="rounded-xl bg-white ring-1 ring-zinc-200/80">
-      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
+    <div className="border-t">
+      <div className="flex flex-wrap items-center gap-2 border-b px-6 py-2.5">
         <div className="flex rounded-lg bg-zinc-100 p-0.5">
           {FILTERS.map((f) => (
             <button
@@ -64,7 +71,7 @@ function EventsTable({ data }: { data: AuditData }) {
                 filter === f.key ? "bg-white text-zinc-900 shadow-xs" : "text-zinc-500 hover:text-zinc-800",
               )}
             >
-              {f.label}
+              {f.label} <span className={cn("ml-0.5 tnum", f.key === "denied" && counts.denied ? "text-rose-600" : "text-zinc-400")}>{counts[f.key]}</span>
             </button>
           ))}
         </div>
@@ -74,22 +81,22 @@ function EventsTable({ data }: { data: AuditData }) {
         <table className="w-full min-w-[980px] text-[12px]">
           <thead>
             <tr className="border-b text-left text-[11px] text-muted-foreground">
-              <th className="py-2 pr-2 pl-4 font-medium">#</th>
+              <th className="py-2 pr-2 pl-6 font-medium">#</th>
               <th className="px-2 py-2 font-medium">Time</th>
               <th className="px-2 py-2 font-medium">Actor</th>
               <th className="px-2 py-2 font-medium">Action</th>
               <th className="px-2 py-2 font-medium">Outcome</th>
               <th className="px-2 py-2 font-medium">Target</th>
-              <th className="px-2 py-2 font-medium">Work item</th>
+              <th className="px-2 py-2 font-medium whitespace-nowrap">Work item</th>
               <th className="px-2 py-2 font-medium">Rule / authorization</th>
-              <th className="py-2 pr-4 pl-2 font-medium">Evidence</th>
+              <th className="py-2 pr-6 pl-2 font-medium">Evidence</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((e) => (
               <Fragment key={e.id}>
                 <tr onClick={() => setOpen(open === e.id ? null : e.id)} className="cursor-pointer border-b hover:bg-zinc-50">
-                  <td className="py-2 pr-2 pl-4 font-mono text-[10.5px] text-muted-foreground">
+                  <td className="py-2 pr-2 pl-6 font-mono text-[10.5px] text-muted-foreground">
                     <span className="flex items-center gap-1">
                       <ChevronRight className={cn("size-3 transition-transform", open === e.id && "rotate-90")} />
                       {e.id}
@@ -104,7 +111,7 @@ function EventsTable({ data }: { data: AuditData }) {
                   </td>
                   <td className="px-2 py-2 font-mono text-[11px]">{e.action}</td>
                   <td className="px-2 py-2">
-                    <span className={cn("inline-flex h-5 items-center rounded-full px-2 text-[10.5px] font-medium ring-1 ring-inset", OUTCOME_TONE[e.outcome])}>{e.outcome}</span>
+                    <span className={cn("text-[11px] font-medium", OUTCOME_TONE[e.outcome])}>{e.outcome.toLowerCase()}</span>
                   </td>
                   <td className="px-2 py-2 font-mono text-[11px] whitespace-nowrap text-zinc-600">{e.targetId ?? "—"}</td>
                   <td className="px-2 py-2 font-mono text-[11px] whitespace-nowrap">
@@ -119,11 +126,11 @@ function EventsTable({ data }: { data: AuditData }) {
                   <td className="px-2 py-2 text-[11px] text-zinc-600">
                     {[e.rule, e.approvalId, e.policyId].filter(Boolean).join(" · ") || "—"}
                   </td>
-                  <td className="py-2 pr-4 pl-2 text-[11px] text-muted-foreground tnum">{e.evidenceIds.length || ""}</td>
+                  <td className="py-2 pr-6 pl-2 text-[11px] text-muted-foreground tnum">{e.evidenceIds.length || ""}</td>
                 </tr>
                 {open === e.id ? (
                   <tr className="border-b bg-zinc-50/60">
-                    <td colSpan={9} className="px-4 py-3">
+                    <td colSpan={9} className="px-6 py-3">
                       <div className="grid gap-3 md:grid-cols-[1fr_320px]">
                         <JsonView value={e.details} className="max-h-60" />
                         <div className="space-y-1 font-mono text-[10.5px] text-zinc-600">
@@ -149,10 +156,10 @@ function EventsTable({ data }: { data: AuditData }) {
 function PoliciesList({ data }: { data: AuditData }) {
   const keys = [...new Set(data.policies.map((p) => p.policyKey))];
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid border-t lg:grid-cols-2 lg:divide-x">
       {keys.map((key) => (
-        <div key={key} className="rounded-xl bg-white ring-1 ring-zinc-200/80">
-          <div className="border-b px-4 py-3">
+        <div key={key} className="border-b">
+          <div className="border-b px-6 py-3">
             <div className="text-[13px] font-semibold">{data.policies.find((p) => p.policyKey === key)?.title}</div>
             <div className="font-mono text-[11px] text-muted-foreground">{key}</div>
           </div>
@@ -161,11 +168,11 @@ function PoliciesList({ data }: { data: AuditData }) {
               .filter((p) => p.policyKey === key)
               .reverse()
               .map((p) => (
-                <li key={p.id} className="space-y-1.5 px-4 py-3">
+                <li key={p.id} className="space-y-1.5 px-6 py-3">
                   <div className="flex items-center gap-2 text-[12px]">
                     <span className="font-medium">v{p.version}</span>
                     <span className="font-mono text-[11px] text-muted-foreground">{p.rule.method}</span>
-                    <span className={cn("ml-auto rounded px-1.5 py-0.5 text-[10px] font-medium", POLICY_TONE[p.status])}>{p.status}</span>
+                    <span className={cn("ml-auto text-[11px] font-medium", POLICY_TONE[p.status])}>{p.status.toLowerCase()}</span>
                   </div>
                   <p className="text-[12px] leading-snug text-zinc-700">{p.statement}</p>
                   <div className="text-[11px] text-muted-foreground">
@@ -196,9 +203,9 @@ function Ledger({ data }: { data: AuditData }) {
   const debits = data.trialBalance.reduce((s, a) => s + a.debits, 0);
   const credits = data.trialBalance.reduce((s, a) => s + a.credits, 0);
   return (
-    <div className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
-      <div className="h-fit rounded-xl bg-white ring-1 ring-zinc-200/80">
-        <div className="border-b px-4 py-3">
+    <div className="grid border-t lg:grid-cols-[360px_minmax(0,1fr)] lg:divide-x">
+      <div>
+        <div className="border-b px-6 py-3">
           <div className="text-[13px] font-semibold">Trial balance</div>
           <div className={cn("text-[11.5px]", debits === credits ? "text-emerald-700" : "text-rose-600")}>
             {debits === credits ? "Debits equal credits" : "Out of balance"}
@@ -207,35 +214,35 @@ function Ledger({ data }: { data: AuditData }) {
         <table className="w-full text-[12px]">
           <thead>
             <tr className="text-left text-[11px] text-muted-foreground">
-              <th className="px-4 py-2 font-medium">Account</th>
+              <th className="px-6 py-2 font-medium">Account</th>
               <th className="px-2 py-2 text-right font-medium">Debits</th>
-              <th className="px-4 py-2 text-right font-medium">Credits</th>
+              <th className="px-6 py-2 text-right font-medium">Credits</th>
             </tr>
           </thead>
           <tbody>
             {data.trialBalance.map((a) => (
               <tr key={a.code} className="border-t">
-                <td className="px-4 py-2">
+                <td className="px-6 py-2">
                   <span className="font-mono text-zinc-500">{a.code}</span> {a.name}
                 </td>
                 <td className="px-2 py-2 text-right tnum">{money(a.debits)}</td>
-                <td className="px-4 py-2 text-right tnum">{money(a.credits)}</td>
+                <td className="px-6 py-2 text-right tnum">{money(a.credits)}</td>
               </tr>
             ))}
             <tr className="border-t font-medium">
-              <td className="px-4 py-2">Total</td>
+              <td className="px-6 py-2">Total</td>
               <td className="px-2 py-2 text-right tnum">{money(debits)}</td>
-              <td className="px-4 py-2 text-right tnum">{money(credits)}</td>
+              <td className="px-6 py-2 text-right tnum">{money(credits)}</td>
             </tr>
           </tbody>
         </table>
       </div>
-      <div className="rounded-xl bg-white ring-1 ring-zinc-200/80">
-        <div className="border-b px-4 py-3 text-[13px] font-semibold">Journal entries</div>
+      <div>
+        <div className="border-b px-6 py-3 text-[13px] font-semibold">Journal entries</div>
         <ol className="divide-y">
           {data.journal.map((entry) => (
             <li key={entry.id}>
-              <details className="px-4 py-2.5">
+              <details className="px-6 py-2.5">
                 <summary className="flex cursor-pointer items-center gap-3 text-[12px]">
                   <span className="font-mono text-[11px] text-zinc-500">{entry.id}</span>
                   <span className="min-w-0 flex-1 truncate">{entry.memo}</span>
@@ -286,62 +293,42 @@ export function AuditView() {
   useLiveRefresh(() => mutate(), undefined, 800);
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto max-w-[1440px] space-y-5 px-6 py-5">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h1 className="text-[19px] font-semibold tracking-tight">Audit trail</h1>
-            <p className="mt-1 text-[13px] text-muted-foreground">
-              Append-only record of every agent tool call, human decision, posting, and denied action, with the rule and approval behind it.
-            </p>
-          </div>
+      <Tabs defaultValue="events" className="gap-0">
+        <header className="flex h-12 items-center gap-4 border-b px-6">
+          <h1 className="text-[14px] font-semibold">Audit trail</h1>
+          <TabsList className="h-7">
+            <TabsTrigger value="events" className="text-[12px]">Events</TabsTrigger>
+            <TabsTrigger value="policies" className="text-[12px]">Policies</TabsTrigger>
+            <TabsTrigger value="ledger" className="text-[12px]">Ledger</TabsTrigger>
+          </TabsList>
           {data ? (
-            <div
-              className={cn(
-                "flex items-center gap-2 rounded-lg px-3 py-2 text-[12px] ring-1",
-                data.chain.ok ? "bg-emerald-50 text-emerald-800 ring-emerald-200" : "bg-rose-50 text-rose-800 ring-rose-200",
-              )}
-            >
-              {data.chain.ok ? <ShieldCheck className="size-4" /> : <ShieldX className="size-4" />}
-              {data.chain.ok ? "Hash chain intact across " + data.chain.count + " events" : "Hash chain broken at event " + data.chain.brokenAtId}
-            </div>
+            <span className={cn("ml-auto flex items-center gap-1.5 text-[12px]", data.chain.ok ? "text-emerald-700" : "text-rose-600")}>
+              {data.chain.ok ? <ShieldCheck className="size-3.5" /> : <ShieldX className="size-3.5" />}
+              {data.chain.ok ? "Hash chain intact · " + data.chain.count + " events" : "Hash chain broken at event " + data.chain.brokenAtId}
+            </span>
           ) : null}
-        </div>
+        </header>
+        <p className="px-6 py-3 text-[12.5px] text-muted-foreground">
+          Append-only record of every agent tool call, human decision, posting, and denied action.
+        </p>
         {!data ? (
-          <Skeleton className="h-[480px] rounded-xl" />
+          <div className="px-6">
+            <Skeleton className="h-[480px] rounded-lg" />
+          </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              {[
-                ["Audit events", data.chain.count],
-                ["Allowed", data.counts.ALLOWED ?? 0],
-                ["Denied", data.counts.DENIED ?? 0],
-                ["Failed validation", data.counts.FAILED ?? 0],
-              ].map(([label, value]) => (
-                <div key={label} className="rounded-xl bg-white p-4 ring-1 ring-zinc-200/80">
-                  <div className="text-[12px] text-muted-foreground">{label}</div>
-                  <div className={cn("mt-1.5 text-[22px] font-semibold tnum", label === "Denied" && Number(value) > 0 && "text-rose-600")}>{value}</div>
-                </div>
-              ))}
-            </div>
-            <Tabs defaultValue="events">
-              <TabsList>
-                <TabsTrigger value="events">Events</TabsTrigger>
-                <TabsTrigger value="policies">Policies</TabsTrigger>
-                <TabsTrigger value="ledger">Journal and trial balance</TabsTrigger>
-              </TabsList>
-              <TabsContent value="events" className="mt-3">
-                <EventsTable data={data} />
-              </TabsContent>
-              <TabsContent value="policies" className="mt-3">
-                <PoliciesList data={data} />
-              </TabsContent>
-              <TabsContent value="ledger" className="mt-3">
-                <Ledger data={data} />
-              </TabsContent>
-            </Tabs>
+            <TabsContent value="events">
+              <EventsTable data={data} />
+            </TabsContent>
+            <TabsContent value="policies">
+              <PoliciesList data={data} />
+            </TabsContent>
+            <TabsContent value="ledger">
+              <Ledger data={data} />
+            </TabsContent>
           </>
         )}
-      </div>
+      </Tabs>
     </div>
   );
 }

@@ -21,7 +21,7 @@ export function ReservationUsage({ data }: { data: WorkspaceData }) {
     { key: "idle", label: "Idle reserved capacity", gpuHours: u.idleGpuHours, className: "hatch-zinc", owner: false },
   ];
   return (
-    <div className="rounded-lg border bg-white p-3">
+    <div>
       <div className="mb-2 flex items-center justify-between text-[11.5px]">
         <span className="font-medium text-zinc-700">Reserved capacity consumption</span>
         <span className="text-muted-foreground tnum">{u.reservedGpuHours.toLocaleString("en-US")} GPU-h reserved</span>

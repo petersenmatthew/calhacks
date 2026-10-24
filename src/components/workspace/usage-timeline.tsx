@@ -53,7 +53,7 @@ export function UsageTimeline({ data }: { data: WorkspaceData }) {
   ];
 
   return (
-    <div className="rounded-lg border bg-white p-3">
+    <div>
       <div className="mb-2 flex items-center justify-between text-[11.5px]">
         <span className="font-medium text-zinc-700">What ran vs what was billed</span>
         <span className="text-muted-foreground">hours from provisioning</span>

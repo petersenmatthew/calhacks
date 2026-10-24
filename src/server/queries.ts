@@ -82,12 +82,21 @@ export function getAgentStatuses(ctx: AppContext) {
     const completedRuns = ctx.sqlite
       .prepare("SELECT COUNT(*) AS n FROM agent_runs WHERE agent_id = ? AND status = 'completed'")
       .get(agentId) as { n: number };
+    const runTools = running
+      ? (
+          ctx.sqlite
+            .prepare("SELECT tool_name AS tool FROM activity_events WHERE run_id = ? AND tool_name IS NOT NULL ORDER BY id")
+            .all(running.id) as { tool: string }[]
+        ).map((r) => r.tool)
+      : [];
     return {
       agentId,
       status: running ? "working" : queued.length ? "queued" : "idle",
       currentTask: running?.task ?? null,
       currentWorkItemId: running?.workItemId ?? queued[0]?.workItemId ?? null,
       currentMode: running?.mode ?? null,
+      runId: running?.id ?? null,
+      runTools,
       queued: queued.length,
       completedRuns: completedRuns.n,
       latestAction: latestEvent ? { title: latestEvent.title, at: latestEvent.createdAt, workItemId: latestEvent.workItemId } : null,
@@ -100,7 +109,15 @@ export function getAgentStatuses(ctx: AppContext) {
 
 export function getStatus(ctx: AppContext) {
   const pending = ctx.db.select({ id: approvalRequests.id }).from(approvalRequests).where(eq(approvalRequests.status, "PENDING")).all();
-  return { agents: getAgentStatuses(ctx), settings: getSettingsView(ctx), pendingApprovals: pending.length };
+  const needsInfo = ctx.db.select({ id: workItems.id }).from(workItems).where(eq(workItems.state, "NEEDS_INFO")).all();
+  const open = ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM work_items WHERE state != 'RESOLVED'").get() as { n: number };
+  return {
+    agents: getAgentStatuses(ctx),
+    settings: getSettingsView(ctx),
+    pendingApprovals: pending.length,
+    needsInfo: needsInfo.length,
+    openItems: open.n,
+  };
 }
 
 function nextBusinessDay5(period: string) {

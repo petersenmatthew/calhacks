@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Check, LoaderCircle, ShieldAlert, TriangleAlert, Undo2, X } from "lucide-react";
+import { Check, LoaderCircle, TriangleAlert, Undo2, X } from "lucide-react";
 import { postJson } from "@/lib/api";
 import { money, relativeTime } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
@@ -106,11 +106,7 @@ export function ApprovalCard({ approval }: { approval: Approval }) {
         reason: reason.trim() || null,
         directive: directive === "none" ? null : directive,
       });
-      toast.success(
-        decision === "APPROVED"
-          ? "Approved. The workflow resumes and the ledger gateway executes it."
-          : "Sent back to the Finance Agent with your rationale.",
-      );
+      toast.success(decision === "APPROVED" ? "Approved. The ledger gateway executes it." : "Sent back to the Finance Agent with your reason.");
       refresh();
     } catch (error) {
       toast.error((error as Error).message);
@@ -120,107 +116,114 @@ export function ApprovalCard({ approval }: { approval: Approval }) {
   };
 
   let title = approval.subjectId;
-  if (proposal?.kind === "VENDOR_DISPUTE") title = "Vendor dispute: " + money(proposal.payload.dispute?.disputedCents ?? 0) + " with " + data.providers[data.item.providerId]?.name;
-  else if (proposal) title = "Allocation " + proposal.id + " v" + proposal.version + ": " + money(proposal.payload.totalCents);
-  else if (policy) title = "New policy: " + policy.policyKey + " v" + policy.version;
+  if (proposal?.kind === "VENDOR_DISPUTE") title = "Dispute " + money(proposal.payload.dispute?.disputedCents ?? 0) + " with " + data.providers[data.item.providerId]?.name + "?";
+  else if (proposal) title = "Post allocation of " + money(proposal.payload.totalCents) + "?";
+  else if (policy) title = "Adopt policy " + policy.policyKey + " v" + policy.version + "?";
 
   return (
-    <div className="overflow-hidden rounded-xl border border-orange-200 bg-white shadow-xs animate-enter">
-      <div className="flex items-center gap-2 border-b border-orange-100 bg-orange-50/70 px-3 py-2">
-        <ShieldAlert className="size-4 text-orange-600" />
-        <span className="text-[12px] font-semibold text-orange-800">Controller approval required</span>
-        <span className="ml-auto font-mono text-[10.5px] text-orange-700/70">{approval.id}</span>
-      </div>
-      <div className="space-y-3 p-3">
-        <div>
-          <div className="text-[13px] font-semibold">{title}</div>
-          <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <AgentAvatar actorId={approval.requestedBy} size="sm" />
-            Requested by {data.actors[approval.requestedBy]?.name} · {relativeTime(approval.createdAt, now)}
-          </div>
-          <p className="mt-2 text-[12px] leading-snug text-zinc-700">{approval.summary}</p>
+    <div className="max-w-3xl space-y-3 px-6 py-4 animate-enter">
+      <div>
+        <div className="text-[14px] font-semibold">{title}</div>
+        <div className="mt-1 flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
+          <AgentAvatar actorId={approval.requestedBy} size="sm" />
+          {data.actors[approval.requestedBy]?.name} asked {relativeTime(approval.createdAt, now)}
+          <span className="font-mono">· {approval.id}</span>
         </div>
+        {proposal?.kind === "VENDOR_DISPUTE" ? null : <p className="mt-2 text-[12.5px] leading-snug text-zinc-700">{approval.summary}</p>}
+      </div>
 
-        {proposal?.kind === "VENDOR_DISPUTE" && proposal.payload.dispute ? (
-          <div className="grid grid-cols-3 rounded-lg bg-zinc-50 p-2 text-center text-[11px]">
-            <div>
-              <div className="text-muted-foreground">Invoiced</div>
-              <div className="font-semibold tnum">{money(proposal.payload.dispute.invoicedCents)}</div>
-            </div>
-            <div>
-              <div className="text-muted-foreground">Supported</div>
-              <div className="font-semibold tnum">{money(proposal.payload.dispute.undisputedCents)}</div>
-            </div>
-            <div>
-              <div className="text-muted-foreground">Disputed</div>
-              <div className="font-semibold text-rose-600 tnum">{money(proposal.payload.dispute.disputedCents)}</div>
-            </div>
+      {proposal?.kind === "VENDOR_DISPUTE" && proposal.payload.dispute ? (
+        <div className="flex gap-8 text-[12px]">
+          <div>
+            <div className="text-muted-foreground">Invoiced</div>
+            <div className="text-[14px] font-semibold tnum">{money(proposal.payload.dispute.invoicedCents)}</div>
           </div>
-        ) : null}
-
-        {proposal ? (
-          <div className="space-y-2">
-            <div className="text-[11px] font-medium text-muted-foreground">{METHOD_LABEL[proposal.method] ?? proposal.method}</div>
-            <AllocationTable proposal={proposal} projects={data.projects} />
-            {deviatesFromPolicy && currentPolicy ? (
-              <div className="rounded-md bg-sky-50 px-2.5 py-2 text-[11.5px] leading-snug text-sky-900">
-                Deviates from {currentPolicy.policyKey} v{currentPolicy.version} ({METHOD_LABEL[currentPolicy.rule.method] ?? currentPolicy.rule.method}) and follows
-                the reservation terms.
-                {pendingPolicy ? " " + pendingPolicy.policyKey + " v" + pendingPolicy.version + " is proposed so future cases use this method." : ""}
-              </div>
-            ) : proposal.payload.policyFit && !proposal.payload.policyFit.consistent ? (
-              <div className="flex gap-2 rounded-md bg-amber-50 px-2.5 py-2 text-[11.5px] leading-snug text-amber-900">
-                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
-                <span>{proposal.payload.policyFit.conflicts.join(" ")}</span>
-              </div>
-            ) : null}
-            {proposal.kind === "VENDOR_DISPUTE" ? (
-              <p className="text-[11px] leading-snug text-muted-foreground">
-                On approval the ledger gateway submits the dispute and posts only the supported amount. Accounts payable stays at the full invoice
-                until the vendor issues a credit.
-              </p>
-            ) : null}
-            <details className="rounded-md border px-2.5 py-1.5">
-              <summary className="cursor-pointer text-[11.5px] font-medium text-zinc-700">Journal entry preview</summary>
-              <div className="pt-1.5">
-                <JournalPreview lines={proposal.payload.journalPreview} projects={data.projects} />
-              </div>
-            </details>
-            <details className="rounded-md border px-2.5 py-1.5">
-              <summary className="cursor-pointer text-[11.5px] font-medium text-zinc-700">Agent rationale and evidence</summary>
-              <p className="pt-1.5 text-[11.5px] leading-snug text-zinc-700">{proposal.rationale}</p>
-              <div className="pt-1.5">
-                <EvidenceChips ids={proposal.evidenceIds} max={12} />
-              </div>
-            </details>
+          <div>
+            <div className="text-muted-foreground">Supported</div>
+            <div className="text-[14px] font-semibold tnum">{money(proposal.payload.dispute.undisputedCents)}</div>
           </div>
-        ) : null}
-
-        {policy ? (
-          <div className="space-y-2 rounded-lg bg-indigo-50/50 p-2.5 ring-1 ring-indigo-100">
-            <p className="text-[12px] leading-snug text-zinc-800">{policy.statement}</p>
-            <ul className="list-disc space-y-0.5 pl-4 text-[11.5px] text-zinc-700">
-              {policy.rule.conditions.map((c) => (
-                <li key={c}>{c}</li>
-              ))}
-            </ul>
-            <div className="text-[11px] text-muted-foreground">
-              Auto-post limit {money(policy.rule.autoPostLimitCents, { cents: false })} · supersedes {policy.supersedesId ?? "nothing"} · learned from{" "}
-              {policy.learnedFromWorkItemId} · precedents {policy.precedentIds.join(", ") || "none"}
-            </div>
+          <div>
+            <div className="text-muted-foreground">Disputed</div>
+            <div className="text-[14px] font-semibold text-rose-600 tnum">{money(proposal.payload.dispute.disputedCents)}</div>
           </div>
-        ) : null}
+        </div>
+      ) : null}
 
-        <div className="space-y-2">
-          <Textarea
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="Reason or additional context (required to reject or request changes)"
-            className="min-h-[64px] text-[12.5px]"
-          />
+      {proposal && proposal.kind !== "VENDOR_DISPUTE" ? (
+        <div className="max-w-xl space-y-1.5">
+          <div className="text-[11.5px] text-muted-foreground">{METHOD_LABEL[proposal.method] ?? proposal.method}</div>
+          <AllocationTable proposal={proposal} projects={data.projects} />
+        </div>
+      ) : null}
+
+      {deviatesFromPolicy && currentPolicy ? (
+        <p className="text-[12px] leading-snug text-sky-800">
+          Differs from {currentPolicy.policyKey} v{currentPolicy.version} ({METHOD_LABEL[currentPolicy.rule.method] ?? currentPolicy.rule.method}) and follows the
+          reservation terms.
+          {pendingPolicy ? " " + pendingPolicy.policyKey + " v" + pendingPolicy.version + " is proposed so future cases use this method." : ""}
+        </p>
+      ) : proposal?.payload.policyFit && !proposal.payload.policyFit.consistent && !proposal.payload.policyFit.conflicts.every((c) => approval.summary.includes(c)) ? (
+        <p className="flex gap-1.5 text-[12px] leading-snug text-amber-800">
+          <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+          {proposal.payload.policyFit.conflicts.join(" ")}
+        </p>
+      ) : null}
+
+
+      {policy ? (
+        <div className="space-y-1.5">
+          <p className="text-[12.5px] leading-snug text-zinc-800">{policy.statement}</p>
+          <ul className="list-disc space-y-0.5 pl-4 text-[12px] text-zinc-700">
+            {policy.rule.conditions.map((c) => (
+              <li key={c}>{c}</li>
+            ))}
+          </ul>
+          <div className="text-[11.5px] text-muted-foreground">
+            Auto-posts up to {money(policy.rule.autoPostLimitCents, { cents: false })} · replaces {policy.supersedesId ?? "nothing"}
+          </div>
+        </div>
+      ) : null}
+
+      {proposal ? (
+        <details className="group text-[12px]">
+          <summary className="cursor-pointer list-none text-muted-foreground hover:text-zinc-900">
+            <span className="group-open:hidden">Show journal entry, rationale, and evidence</span>
+            <span className="hidden group-open:inline">Hide details</span>
+          </summary>
+          <div className="mt-2 max-w-xl space-y-3">
+            <JournalPreview lines={proposal.payload.journalPreview} projects={data.projects} />
+            <p className="leading-snug text-zinc-700">{proposal.rationale}</p>
+            <EvidenceChips ids={proposal.evidenceIds} max={12} />
+          </div>
+        </details>
+      ) : null}
+
+      <div className="sticky bottom-0 space-y-2 bg-white pt-1 pb-1">
+        <Textarea
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Reason (required to reject or request changes)"
+          className="min-h-[40px] text-[12.5px]"
+          rows={1}
+        />
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Button
+            size="sm"
+            onClick={() => decide("APPROVED")}
+            disabled={busy !== null}
+            title={proposal?.kind === "VENDOR_DISPUTE" ? "Submits the dispute and posts only the supported amount. Payables stay at the full invoice until the vendor credits it." : undefined}
+          >
+            {busy === "APPROVED" ? <LoaderCircle className="animate-spin" /> : <Check />} Approve
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => decide("CHANGES_REQUESTED")} disabled={busy !== null}>
+            {busy === "CHANGES_REQUESTED" ? <LoaderCircle className="animate-spin" /> : <Undo2 />} Request changes
+          </Button>
+          <Button size="sm" variant="ghost" className="text-rose-600 hover:text-rose-700" onClick={() => decide("REJECTED")} disabled={busy !== null}>
+            {busy === "REJECTED" ? <LoaderCircle className="animate-spin" /> : <X />} Reject
+          </Button>
           {isAllocation ? (
             <Select value={directive} onValueChange={setDirective}>
-              <SelectTrigger className="w-full text-[12px]">
+              <SelectTrigger size="sm" className="ml-auto w-[280px] text-[12px]">
                 <SelectValue placeholder="Corrected allocation basis (optional)" />
               </SelectTrigger>
               <SelectContent>
@@ -231,17 +234,6 @@ export function ApprovalCard({ approval }: { approval: Approval }) {
               </SelectContent>
             </Select>
           ) : null}
-          <div className="flex flex-wrap gap-1.5">
-            <Button size="sm" onClick={() => decide("APPROVED")} disabled={busy !== null}>
-              {busy === "APPROVED" ? <LoaderCircle className="animate-spin" /> : <Check />} Approve
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => decide("CHANGES_REQUESTED")} disabled={busy !== null}>
-              {busy === "CHANGES_REQUESTED" ? <LoaderCircle className="animate-spin" /> : <Undo2 />} Request changes
-            </Button>
-            <Button size="sm" variant="destructive" onClick={() => decide("REJECTED")} disabled={busy !== null}>
-              {busy === "REJECTED" ? <LoaderCircle className="animate-spin" /> : <X />} Reject
-            </Button>
-          </div>
         </div>
       </div>
     </div>

@@ -42,9 +42,9 @@ Copy `.env.example` to `.env.local`. All are optional.
 
 ## Three-minute demo
 
-1. **Operations** shows the October close: spend, reconciliation rate, open discrepancies, potential overcharges, pending approvals, agent activity, and month-close status.
+1. **Work** has two views. **Board** is a Kanban (Investigate, Propose, Needs you, Vendor, Done) where the card an agent is on shows its live steps. **Canvas** maps the whole system (invoices, Compute Agent, Finance Agent, you, ledger, vendor) with live counts and moving connections.
 2. Click **Simulate billing event**, keep **GPU overbilling**, and send it. Helios bills 36 h at $100/h for an instance whose lifecycle shows 24 h. Deterministic checks open a work item and assign the Compute Agent.
-3. Open the investigation. Watch the Compute Agent pull the lifecycle, scheduler log, provider meter, and contract, then hand off. The Finance Agent cites the Helios precedent and proposes a $1,200 dispute. The chart shows the 12 h billed after termination.
+3. Open the investigation. The **Flow** tab shows each agent's steps and what it gathered; **Log** has every tool call. Watch the Compute Agent pull the lifecycle, scheduler log, provider meter, and contract, then hand off. The Finance Agent cites the Helios precedent and proposes a $1,200 dispute. The chart shows the 12 h billed after termination.
 4. **Approve** the dispute. The ledger gateway submits it and posts only the supported $2,400. Accounts payable stays at $3,600 until you click **Vendor issues credit**.
 5. Simulate **Shared cluster allocation** ($12,400, two teams). The Finance Agent follows written policy v1 (usage split: $6,975 / $5,425) and tries to post it. The ledger gateway denies the posting because v1 conflicts with the reservation terms (a red denied event in the timeline and audit), so the agent requests approval instead.
 6. **Reject** it with: "Reserved capacity must be charged to the team that owns the reservation, subject to company policy." The Finance Agent reworks the allocation ($8,060 / $4,340) and proposes reusable policy **ALLOC-SHARED v2**. Approve both.
