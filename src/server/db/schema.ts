@@ -670,7 +670,7 @@ export const outbox = sqliteTable(
   "outbox",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
-    channel: text("channel").notNull(), // email | slack
+    channel: text("channel").notNull(), // email | slack | slack_reaction
     destination: text("destination").notNull(), // email address, #channel, or @handle for a DM
     subject: text("subject"),
     body: text("body").notNull(),
@@ -686,10 +686,16 @@ export const outbox = sqliteTable(
     attempts: integer("attempts").notNull().default(0),
     lastError: text("last_error"),
     providerMessageId: text("provider_message_id"),
+    /** Slack: the channel id the message landed in, so later replies and reactions can find it. */
+    providerChannel: text("provider_channel"),
+    /** Slack: post as a thread reply under this outbox row (or react to it, for a reaction row). */
+    threadOf: integer("thread_of"),
+    /** Slack: also show a thread reply in the channel. */
+    broadcast: integer("broadcast", { mode: "boolean" }).notNull().default(false),
     createdAt: text("created_at").notNull(),
     sentAt: text("sent_at"),
   },
-  (t) => [index("outbox_status_idx").on(t.status), index("outbox_channel_idx").on(t.channel, t.destination)],
+  (t) => [index("outbox_status_idx").on(t.status), index("outbox_channel_idx").on(t.channel, t.destination), index("outbox_ref_idx").on(t.event, t.ref)],
 );
 
 /**

@@ -172,3 +172,59 @@ describe("vendor replies", () => {
     expect(r.status).toBe("unmatched");
   });
 });
+
+describe("vendor replies alongside other work", () => {
+  it("handles a vendor reply right away in one-case-at-a-time mode, even while another case is in focus", async () => {
+    const { ctx, orchestrator } = setup(":memory:", { comms: { vendorEmail: "vendor@example.test" } as never, defaultRunMode: "one" } as never);
+    await orchestrator.drain();
+    const { setFocusWorkItem } = await import("@/server/settings");
+    const first = runScenario(ctx, "overbilling");
+    const id = first.status === "work_item_created" ? first.workItemId : "";
+    setFocusWorkItem(ctx, id);
+    await orchestrator.drain();
+    decideApproval(ctx, { approvalId: pendingApprovals(ctx, id)[0].id, actorId: ACTOR.controller, decision: "APPROVED" });
+    await orchestrator.drain();
+    const dispute = ctx.db.select().from(vendorDisputes).where(eq(vendorDisputes.workItemId, id)).get()!;
+    // A newer case takes the team's focus and waits on the controller.
+    const second = runScenario(ctx, "shared_allocation");
+    if (second.status === "work_item_created") setFocusWorkItem(ctx, second.workItemId);
+    await orchestrator.drain();
+    vendorSays(ctx, dispute, "We have denied this request.");
+    await orchestrator.drain();
+    expect(workItem(ctx, id).outcome).toBe("CHARGE_UPHELD");
+  });
+
+  it("never reads our own letter back as a vendor reply", async () => {
+    const { ctx, dispute } = await openDispute();
+    const r = receiveVendorEmail(ctx, { from: "vendor@example.test", subject: dispute.letterSubject!, text: dispute.letterBody!, messageId: "<letter-1@atlas.test>" });
+    expect(r.status).toBe("unmatched");
+  });
+});
+
+describe("mail the liaison should not act on", () => {
+  it("stores an out-of-office reply without acting on it", async () => {
+    const { ctx, orchestrator, id, dispute } = await openDispute();
+    receiveVendorEmail(ctx, { from: "billing@helios.test", subject: "Automatic reply: " + dispute.letterSubject, text: "I'm out until Monday.", kind: "auto_reply", receivedAt: new Date(Date.now() + 1000).toISOString() });
+    await orchestrator.drain();
+    expect(inbound(ctx, id)[0]).toMatchObject({ status: "ignored", kind: "auto_reply" });
+    expect(outbound(ctx, id)).toHaveLength(0);
+    expect(workItem(ctx, id).state).toBe("DISPUTED");
+  });
+
+  it("marks the dispute bounced and pings the controller when the letter is undeliverable", async () => {
+    const { ctx, id, dispute } = await openDispute();
+    const r = receiveVendorEmail(ctx, {
+      from: "mailer-daemon@googlemail.com",
+      subject: "Delivery Status Notification (Failure)",
+      text: "Address not found\nYour message wasn't delivered to billing@helios.test because the address couldn't be found.\n\nSubject: " + dispute.letterSubject,
+      kind: "bounce",
+      receivedAt: new Date(Date.now() + 1000).toISOString(),
+    });
+    expect(r).toEqual({ status: "bounced", disputeId: dispute.id });
+    expect(ctx.db.select().from(vendorDisputes).where(eq(vendorDisputes.id, dispute.id)).get()!.emailStatus).toBe("bounced");
+    const pings = ctx.db.select().from(outbox).where(eq(outbox.event, "dispute.bounced")).all();
+    expect(pings.map((p) => p.destination).sort()).toEqual(["#vendor-disputes", "@priya"]);
+    expect(pings.find((p) => p.destination === "#vendor-disputes")!.broadcast).toBe(true);
+    expect(inbound(ctx, id)).toHaveLength(0);
+  });
+});

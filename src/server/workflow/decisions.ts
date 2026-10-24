@@ -14,7 +14,7 @@ import { assignAgent, getWorkItem, transitionWorkItem, type WorkItemRow } from "
 import { contractForProvider } from "./checks";
 import { buildDisputeEvidence, renderEvidenceCsv, renderEvidenceText } from "./dispute-evidence";
 import { CONTROLLER, leadFor } from "../comms/directory";
-import { mention, postSlack, queueEmail, taskLink, vendorEmail } from "../comms/outbox";
+import { mention, postSlack, queueEmail, reactSlack, taskLink, vendorEmail } from "../comms/outbox";
 
 function escapeHtml(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -348,6 +348,12 @@ export function closeDispute(ctx: AppContext, item: WorkItemRow) {
   setWorkItemOutcome(ctx, item.id, outcome);
   transitionWorkItem(ctx, item.id, "RESOLVED", ACTOR.orchestrator, "Vendor responded to " + dispute.id);
   const lead = leadFor(item.ownerProjectId);
+  reactSlack(ctx, {
+    on: { event: "dispute.sent", ref: dispute.id },
+    emoji: !accepted ? "x" : upheld > 0 ? "handshake" : "white_check_mark",
+    event: "dispute.closed",
+    workItemId: item.id,
+  });
   postSlack(ctx, {
     channel: "vendor-disputes",
     event: "dispute.closed",

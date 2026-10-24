@@ -34,6 +34,8 @@ export interface InboundEmail {
   inReplyTo?: string | null;
   references?: string[];
   receivedAt?: string;
+  /** reply (default), auto_reply (out of office and the like: stored, not acted on), or bounce (our letter was not delivered). */
+  kind?: "reply" | "auto_reply" | "bounce";
 }
 
 /** Drop the quoted original that mail clients append under a reply. */
@@ -104,7 +106,30 @@ function liaisonBusy(ctx: AppContext, workItemId: string) {
 export type ReceiveResult =
   | { status: "duplicate"; id: string }
   | { status: "unmatched" }
-  | { status: "recorded"; id: string; disputeId: string; workItemId: string; routed: boolean };
+  | { status: "recorded"; id: string; disputeId: string; workItemId: string; routed: boolean }
+  | { status: "bounced"; disputeId: string };
+
+/** Our letter to the vendor could not be delivered: mark the dispute and tell the controller, who has the right address. */
+function recordBounce(ctx: AppContext, dispute: DisputeRow, m: InboundEmail): ReceiveResult {
+  if (dispute.emailStatus === "bounced") return { status: "duplicate", id: dispute.id };
+  const item = getWorkItem(ctx, dispute.workItemId);
+  const reason = stripQuoted(m.text).split("\n").find((l) => /address|not found|does not exist|rejected|blocked|quota|unknown user/i.test(l))?.trim().slice(0, 200) ?? "the mail server rejected it";
+  return tx(ctx, () => {
+    ctx.db.update(vendorDisputes).set({ emailStatus: "bounced" }).where(eq(vendorDisputes.id, dispute.id)).run();
+    recordActivity(ctx, {
+      workItemId: item.id,
+      actorId: ACTOR.scheduler,
+      type: "ERROR",
+      status: "error",
+      title: "Email to " + (dispute.sentTo ?? "the vendor") + " about " + dispute.id + " bounced",
+      summary: reason + ". Check the vendor's billing address; the dispute is not with them yet.",
+    });
+    const text = mention(CONTROLLER) + " the email for " + dispute.id + " to " + (dispute.sentTo ?? "the vendor") + " bounced (" + reason + "). The vendor has not seen the dispute. " + taskLink(ctx, item.id);
+    postSlack(ctx, { channel: "vendor-disputes", event: "dispute.bounced", workItemId: item.id, ref: dispute.id, mentions: [CONTROLLER], text });
+    dmSlack(ctx, { to: CONTROLLER, event: "dispute.bounced", workItemId: item.id, ref: dispute.id, text });
+    return { status: "bounced" as const, disputeId: dispute.id };
+  });
+}
 
 /** Store a vendor email against its dispute and, if the case is still open, put the Vendor Liaison on it. */
 export function receiveVendorEmail(ctx: AppContext, m: InboundEmail): ReceiveResult {
@@ -112,15 +137,19 @@ export function receiveVendorEmail(ctx: AppContext, m: InboundEmail): ReceiveRes
     const dup = ctx.db.select().from(vendorMessages).where(eq(vendorMessages.messageId, m.messageId)).get();
     if (dup) return { status: "duplicate", id: dup.id };
   }
+  // Our own letter, read back from a shared inbox (sent before the X-Atlas-Outbox header existed, or by a client that dropped it).
+  if (m.messageId && ctx.db.select({ id: outbox.id }).from(outbox).where(eq(outbox.providerMessageId, m.messageId)).get()) return { status: "unmatched" };
   const dispute = matchDispute(ctx, m);
   if (!dispute) return { status: "unmatched" };
   // A reply cannot predate the letter it answers (guards against old mail after a demo reset reuses case numbers).
   if (m.receivedAt && new Date(m.receivedAt).getTime() < new Date(dispute.submittedAt).getTime() - 5 * 60_000) return { status: "unmatched" };
+  if (m.kind === "bounce") return recordBounce(ctx, dispute, m);
   const body = stripQuoted(m.text) || m.text.trim().slice(0, 4000);
   if (!body) return { status: "unmatched" };
   const item = getWorkItem(ctx, dispute.workItemId);
   const vendor = providerName(ctx, dispute.providerId);
-  const open = item.state === "DISPUTED" && dispute.status === "SUBMITTED";
+  const automated = m.kind === "auto_reply";
+  const open = item.state === "DISPUTED" && dispute.status === "SUBMITTED" && !automated;
   return tx(ctx, () => {
     const id = nextId(ctx, "VM", 7001);
     ctx.db
@@ -137,6 +166,7 @@ export function receiveVendorEmail(ctx: AppContext, m: InboundEmail): ReceiveRes
         messageId: m.messageId ?? null,
         inReplyTo: m.inReplyTo ?? null,
         status: open ? "new" : "ignored",
+        kind: automated ? "auto_reply" : null,
         receivedAt: m.receivedAt ?? nowIso(),
       })
       .run();
@@ -154,7 +184,9 @@ export function receiveVendorEmail(ctx: AppContext, m: InboundEmail): ReceiveRes
       actorId: ACTOR.vendor,
       type: "DISPUTE",
       status: "info",
-      title: vendor + " replied on " + dispute.id + (m.from ? " (" + m.from + ")" : ""),
+      title: automated
+        ? "Automatic reply from " + (m.from ?? vendor) + " on " + dispute.id + " (not acted on)"
+        : vendor + " replied on " + dispute.id + (m.from ? " (" + m.from + ")" : ""),
       summary: snippet(body, 600),
       changes: ["Vendor message " + id],
     });
@@ -172,7 +204,7 @@ export function receiveVendorEmail(ctx: AppContext, m: InboundEmail): ReceiveRes
         enqueueJob(ctx, { workItemId: item.id, kind: "AGENT_RUN", agentId: ACTOR.vendorLiaison, payload: { trigger: "vendor_message", messageId: id } });
       }
       routed = true;
-    } else {
+    } else if (!automated) {
       postSlack(ctx, {
         channel: "vendor-disputes",
         event: "dispute.vendor_message",

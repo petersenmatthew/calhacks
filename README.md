@@ -56,9 +56,9 @@ Copy `.env.example` to `.env.local`. All are optional.
 | `EMAIL_FROM`, `EMAIL_REPLY_TO` | Resend test sender / SMTP user | Sender and reply-to for vendor email. |
 | `IMAP_URL` | the Gmail account in `SMTP_URL` | Mailbox vendor replies are read from (`imaps://user:pass@host:993`). |
 | `INBOX_POLL_MS` | `30000` | How often to check it. `0` turns reading off. |
-| `SLACK_BOT_TOKEN` | unset | Post to a real Slack workspace. Scopes: `chat:write`, `chat:write.public`, `channels:read`, `channels:manage`, `channels:join`; the bot creates and joins the channels below. |
+| `SLACK_BOT_TOKEN` | unset | Post to a real Slack workspace. Scopes: `chat:write`, `chat:write.public`, `channels:read`, `channels:manage`, `channels:join`, `users:read`, `reactions:write`; the bot creates and joins the channels below. |
 | `SLACK_WEBHOOK_URL` | unset | Or post everything to one channel through an incoming webhook. |
-| `SLACK_USER_IDS` | `{}` | One member id (`U0123`, everyone pings you) or a JSON map from handle to id, e.g. `{"priya":"U0123"}`. |
+| `SLACK_USERS` | unset | Who is who, by Slack username or member id: `controller=belinda, cfo=matthewpetersen, leads=matthewpetersen` (role keys `controller`, `cfo`, `leads`, `*`, or any handle). `SLACK_USER_IDS` (JSON or one id) still works. |
 | `APP_URL` | `http://localhost:3000` | Base for the links in Slack messages. |
 
 ### Execution modes
@@ -139,7 +139,9 @@ Everything the system tells a person or a vendor goes through an outbox table, w
 | Offered a partial credit, or asked for something only staff know (PO, signature) | Asks Priya, with its recommendation, in Slack and on the task (Accept / Hold out / write an answer); the case stays open | A partial credit can only be booked after Priya answers, and is split: credit for what the vendor gave, the rest to the team |
 | Only acknowledged | Notes it and keeps waiting | |
 
-Our own outgoing mail carries an `X-Atlas-Outbox` header so it is never read back as a reply, a reply cannot predate its letter, and once the vendor has answered the 14-day chase stops. A reply that arrived some other way can be pasted on the task.
+Out-of-office and other automatic replies are stored on the thread but not acted on. A bounce marks the dispute's email "Bounced" and pings Priya, since the vendor has not seen it. Attachment names (a credit memo PDF, say) are noted in the reply the liaison reads, and HTML-only replies are converted to text. Our own outgoing mail carries an `X-Atlas-Outbox` header so it is never read back as a reply, a reply cannot predate its letter, and once the vendor has answered the 14-day chase stops. A reply that arrived some other way can be pasted on the task.
+
+**Slack threads and reactions.** Each approval request and each dispute is one message; everything after it goes in its thread. A decided approval gets a reaction on the request (✅ approved, ❌ rejected, ↩️ changes requested) and a thread reply with who decided and what happens next. A dispute's thread collects the vendor's replies, the liaison's answers and questions, follow-ups and the close; the close (and a bounce) also show in the channel, and the letter gets ✅ (credited), 🤝 (partial credit) or ❌ (denied). Replies and reactions wait until the message they belong to is posted, and a Slack rate limit pauses delivery for as long as Slack asks without counting as a failed attempt.
 
 **Who gets pinged** (Atlas Research Slack workspace):
 

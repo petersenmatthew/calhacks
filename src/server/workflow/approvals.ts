@@ -10,7 +10,7 @@ import { authorize, guard } from "../security/authorize";
 import { ControlError } from "../security/errors";
 import { enqueueJob } from "./jobs";
 import { CONTROLLER } from "../comms/directory";
-import { mention, postSlack, taskLink } from "../comms/outbox";
+import { mention, postSlack, reactSlack, taskLink } from "../comms/outbox";
 
 export type ApprovalRow = typeof approvalRequests.$inferSelect;
 export type Decision = "APPROVED" | "REJECTED" | "CHANGES_REQUESTED";
@@ -209,6 +209,33 @@ export function decideApproval(ctx: AppContext, input: DecisionInput) {
         title: (actor?.name ?? input.actorId) + " " + verb + " " + subjectLabel,
         summary: reason || null,
         changes: ["Approval " + approval.id + ": " + input.decision],
+      });
+
+      // Slack: mark the original request so the channel shows the outcome at a glance, and say what happens next in its thread.
+      const proposalKind =
+        approval.subjectType === "PROPOSAL" ? ctx.db.select({ kind: proposals.kind }).from(proposals).where(eq(proposals.id, approval.subjectId)).get()?.kind : null;
+      const next =
+        input.decision !== "APPROVED"
+          ? "Back to " + (getActor(ctx, approval.requestedBy)?.name ?? "the agent") + " to rework."
+          : approval.subjectType === "POLICY"
+            ? "The policy is active for new cases."
+            : proposalKind === "VENDOR_DISPUTE"
+              ? "The Vendor Liaison is sending the dispute."
+              : "The ledger gateway is posting it.";
+      reactSlack(ctx, {
+        on: { event: "approval.requested", ref: approval.id },
+        emoji: input.decision === "APPROVED" ? "white_check_mark" : input.decision === "REJECTED" ? "x" : "leftwards_arrow_with_hook",
+        event: "approval.decided",
+        workItemId: approval.workItemId,
+      });
+      postSlack(ctx, {
+        channel: "finance-approvals",
+        event: "approval.decided",
+        workItemId: approval.workItemId,
+        ref: approval.id,
+        text:
+          (input.decision === "APPROVED" ? "Approved" : input.decision === "REJECTED" ? "Rejected" : "Changes requested") + " by " +
+          (actor?.name ?? input.actorId) + (reason ? ": \u201c" + reason.slice(0, 300) + "\u201d" : ".") + " " + next,
       });
 
       if (approval.subjectType === "PROPOSAL") {

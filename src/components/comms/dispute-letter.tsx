@@ -13,6 +13,7 @@ const STATUS: Record<string, { label: string; className: string }> = {
   sent: { label: "Emailed", className: "bg-accent text-brand-ink" },
   simulated: { label: "Recorded", className: "bg-zinc-100 text-zinc-600" },
   failed: { label: "Email failed", className: "bg-destructive/10 text-destructive" },
+  bounced: { label: "Bounced", className: "bg-destructive/10 text-destructive" },
 };
 
 /** The dispute exactly as it went to the provider: recipient, subject, letter, evidence, attachment. */
