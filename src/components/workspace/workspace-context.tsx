@@ -18,10 +18,10 @@ export function useWorkspace() {
 }
 
 export const PROJECT_COLORS: Record<string, { bar: string; dot: string; text: string }> = {
-  "PRJ-FLM": { bar: "bg-indigo-500", dot: "bg-indigo-500", text: "text-indigo-700" },
-  "PRJ-MMP": { bar: "bg-amber-500", dot: "bg-amber-500", text: "text-amber-700" },
-  "PRJ-RLA": { bar: "bg-emerald-500", dot: "bg-emerald-500", text: "text-emerald-700" },
-  "PRJ-INF": { bar: "bg-sky-500", dot: "bg-sky-500", text: "text-sky-700" },
+  "PRJ-FLM": { bar: "bg-primary", dot: "bg-primary", text: "text-foreground" },
+  "PRJ-MMP": { bar: "bg-zinc-700", dot: "bg-zinc-700", text: "text-foreground" },
+  "PRJ-RLA": { bar: "bg-zinc-400", dot: "bg-zinc-400", text: "text-foreground" },
+  "PRJ-INF": { bar: "bg-zinc-200", dot: "bg-zinc-200", text: "text-foreground" },
 };
 
 export const SIMULATED_SOURCES = new Set([

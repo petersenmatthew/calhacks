@@ -15,24 +15,24 @@ import { cn } from "@/lib/utils";
 
 export const STATE_META: Record<string, { label: string; dot: string }> = {
   NEW: { label: "New", dot: "bg-zinc-400" },
-  INVESTIGATING: { label: "Investigating", dot: "bg-blue-500" },
-  NEEDS_INFO: { label: "Needs info", dot: "bg-orange-500" },
-  PROPOSED: { label: "Proposed", dot: "bg-blue-500" },
-  NEEDS_APPROVAL: { label: "Needs approval", dot: "bg-orange-500" },
-  APPROVED: { label: "Approved", dot: "bg-blue-500" },
-  POSTED: { label: "Posted", dot: "bg-emerald-500" },
-  DISPUTED: { label: "Disputed", dot: "bg-rose-500" },
-  RESOLVED: { label: "Resolved", dot: "bg-emerald-500" },
+  INVESTIGATING: { label: "Investigating", dot: "bg-primary" },
+  NEEDS_INFO: { label: "Needs info", dot: "bg-primary" },
+  PROPOSED: { label: "Proposed", dot: "bg-primary" },
+  NEEDS_APPROVAL: { label: "Needs approval", dot: "bg-primary" },
+  APPROVED: { label: "Approved", dot: "bg-primary" },
+  POSTED: { label: "Posted", dot: "bg-primary" },
+  DISPUTED: { label: "Disputed", dot: "bg-destructive" },
+  RESOLVED: { label: "Resolved", dot: "bg-primary" },
 };
 
 /** Where an item sits from the controller's point of view. Drives grouping and counts. */
 export type StateGroup = "needs_you" | "working" | "vendor" | "done";
 
 export const GROUP_META: Record<StateGroup, { label: string; dot: string }> = {
-  needs_you: { label: "Needs you", dot: "bg-orange-500" },
-  working: { label: "Agents working", dot: "bg-blue-500" },
-  vendor: { label: "Waiting on vendor", dot: "bg-rose-500" },
-  done: { label: "Done", dot: "bg-emerald-500" },
+  needs_you: { label: "Needs you", dot: "bg-primary" },
+  working: { label: "Agents working", dot: "bg-primary" },
+  vendor: { label: "Waiting on vendor", dot: "bg-destructive" },
+  done: { label: "Done", dot: "bg-primary" },
 };
 
 export function stateGroup(state: string, pendingApproval = false): StateGroup {
@@ -60,9 +60,9 @@ export function StateBadge({ state, className }: { state: string; className?: st
 export const PRIORITY_LABEL = ["Urgent", "High", "Medium", "Low"];
 
 const ACTOR_STYLE: Record<string, { icon?: LucideIcon; initials?: string; className: string }> = {
-  "agent.compute": { icon: Cpu, className: "bg-sky-600 text-white" },
-  "agent.finance": { icon: Calculator, className: "bg-violet-600 text-white" },
-  "human.controller": { initials: "PN", className: "bg-amber-500 text-white" },
+  "agent.compute": { icon: Cpu, className: "bg-primary text-primary-foreground" },
+  "agent.finance": { icon: Calculator, className: "bg-primary text-primary-foreground" },
+  "human.controller": { initials: "PN", className: "bg-zinc-200 text-zinc-700" },
   "system.orchestrator": { icon: Workflow, className: "bg-zinc-200 text-zinc-700" },
   "system.ingestion": { icon: Inbox, className: "bg-zinc-200 text-zinc-700" },
   "system.erp": { icon: Database, className: "bg-zinc-200 text-zinc-700" },
@@ -84,8 +84,8 @@ export function AgentAvatar({ actorId, size = "md", className }: { actorId: stri
 }
 
 const AGENT_STATUS: Record<string, { label: string; dot: string; text: string }> = {
-  working: { label: "Working", dot: "animate-pulse bg-blue-500", text: "text-blue-700" },
-  queued: { label: "Queued", dot: "bg-amber-500", text: "text-amber-700" },
+  working: { label: "Working", dot: "animate-pulse bg-primary", text: "text-brand-ink" },
+  queued: { label: "Queued", dot: "bg-primary", text: "text-brand-ink" },
   idle: { label: "Idle", dot: "bg-zinc-300", text: "text-zinc-500" },
 };
 

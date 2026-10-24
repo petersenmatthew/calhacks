@@ -54,7 +54,7 @@ function Connector({ active, tone = "blue" }: { active: boolean; tone?: "blue" |
         y1="6"
         x2="100%"
         y2="6"
-        stroke={active ? (tone === "orange" ? "#f97316" : "#3b82f6") : "#d4d4d8"}
+        stroke={active ? (tone === "orange" ? "var(--primary)" : "var(--primary)") : "#d4d4d8"}
         strokeWidth={active ? 1.75 : 1.25}
         strokeDasharray={active ? undefined : "3 5"}
         className={active ? "flow-dash" : undefined}
@@ -68,7 +68,7 @@ function AgentCard({ data, agentId }: { data: WorkspaceData; agentId: string }) 
   const active = r.status === "running";
   const idle = r.status === "none" && !r.queued;
   return (
-    <div className={cn("card-soft w-[190px] shrink-0 p-3", active && "outline-2! outline-blue-300!", idle && "opacity-60")}>
+    <div className={cn("card-soft w-[190px] shrink-0 p-3", active && "outline-2! outline-primary!", idle && "opacity-60")}>
       <div className="flex items-center gap-2">
         <AgentAvatar actorId={agentId} size="sm" />
         <span className="flex-1 truncate text-[13px] font-semibold">{data.actors[agentId]?.name}</span>
@@ -84,15 +84,15 @@ function PillNode({ icon: Icon, label, state, sub }: { icon: LucideIcon; label: 
     <div
       className={cn(
         "card-soft flex shrink-0 flex-col items-center gap-1 px-4 py-3",
-        state === "waiting" && "outline-2! outline-orange-300!",
-        state === "alert" && "outline-rose-300!",
+        state === "waiting" && "outline-2! outline-primary!",
+        state === "alert" && "outline-destructive/30!",
         (state === "todo" || state === "skipped") && "opacity-50",
       )}
     >
       <span className="relative">
         <Icon className="size-5 text-zinc-600" />
-        {state === "done" ? <Check className="absolute -right-2 -bottom-1 size-3.5 rounded-full bg-emerald-500 p-0.5 text-white" /> : null}
-        {state === "waiting" ? <span className="absolute -top-0.5 -right-1 size-2 animate-pulse rounded-full bg-orange-500" /> : null}
+        {state === "done" ? <Check className="absolute -right-2 -bottom-1 size-3.5 rounded-full bg-primary p-0.5 text-primary-foreground" /> : null}
+        {state === "waiting" ? <span className="absolute -top-0.5 -right-1 size-2 animate-pulse rounded-full bg-primary" /> : null}
       </span>
       <span className="text-[12.5px] font-medium">{label}</span>
       {sub ? <span className="text-[10.5px] text-muted-foreground">{sub}</span> : null}
@@ -196,7 +196,7 @@ function ResultBar({ data }: { data: WorkspaceData }) {
   const segments = dispute
     ? [
         { key: "ok", label: "Supported", cents: dispute.undisputedCents, className: "bg-zinc-700" },
-        { key: "bad", label: "Disputed", cents: dispute.disputedCents, className: "hatch-red ring-1 ring-rose-400 ring-inset" },
+        { key: "bad", label: "Disputed", cents: dispute.disputedCents, className: "hatch-red ring-1 ring-destructive/30 ring-inset" },
       ]
     : proposal.payload.allocation.map((l) => ({
         key: l.projectId,
@@ -217,7 +217,7 @@ function ResultBar({ data }: { data: WorkspaceData }) {
           <span key={s.key} className="flex items-center gap-1.5 text-[12px]">
             <span className={cn("size-2.5 rounded-sm", s.className)} />
             <span className="text-zinc-500">{s.label}</span>
-            <span className={cn("font-medium tnum", s.key === "bad" ? "text-rose-600" : "text-zinc-900")}>{money(s.cents, { cents: false })}</span>
+            <span className={cn("font-medium tnum", s.key === "bad" ? "text-destructive" : "text-zinc-900")}>{money(s.cents, { cents: false })}</span>
           </span>
         ))}
       </div>
@@ -243,7 +243,9 @@ export function FlowView() {
       <div className="mx-auto max-w-[860px] space-y-8 px-6 py-6">
         <FlowStrip data={data} />
         <div className="relative pt-4">
-          <StatusPill label={status.label} tone={status.tone} spin={status.spin} className="absolute top-0 left-5 z-10" />
+          {status.tone === "orange" ? null : (
+            <StatusPill label={status.label} tone={status.tone} spin={status.spin} className="absolute top-0 left-5 z-10" />
+          )}
           <div className="card-soft space-y-6 p-5 pt-7">
             <Panel title="Gathered">
               <SourceTiles data={data} />

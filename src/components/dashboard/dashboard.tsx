@@ -1,34 +1,24 @@
 "use client";
 
-import { useState } from "react";
 import useSWR from "swr";
-import { Network, SquareKanban } from "lucide-react";
 import { fetcher } from "@/lib/api";
-import { money, pct, periodLabel } from "@/lib/format";
+import { money, pct } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { DashboardData } from "@/server/queries";
+import { useShell } from "../app-shell";
 import { useLiveRefresh } from "../live-events";
 import { Skeleton } from "../ui/skeleton";
 import { Board } from "./board";
 import { SystemCanvas } from "./canvas";
 import { Caption } from "./caption";
-import { ResetButton } from "./reset-button";
-import { SimulateDialog } from "./simulate-dialog";
-
-type View = "board" | "canvas";
-
-const VIEWS: { key: View; label: string; icon: typeof Network }[] = [
-  { key: "board", label: "Board", icon: SquareKanban },
-  { key: "canvas", label: "Canvas", icon: Network },
-];
 
 const CLOSE: Record<string, { label: string; dot: string }> = {
-  IN_PROGRESS: { label: "Close in progress", dot: "bg-amber-500" },
-  AWAITING_VENDORS: { label: "Awaiting vendors", dot: "bg-blue-500" },
-  READY: { label: "Ready to close", dot: "bg-emerald-500" },
+  IN_PROGRESS: { label: "Close in progress", dot: "bg-primary" },
+  AWAITING_VENDORS: { label: "Awaiting vendors", dot: "bg-primary" },
+  READY: { label: "Ready to close", dot: "bg-primary" },
 };
 
-function Metrics({ data }: { data: DashboardData }) {
+export function Metrics({ data }: { data: DashboardData }) {
   const m = data.metrics;
   const close = CLOSE[m.monthClose.status];
   return (
@@ -38,7 +28,7 @@ function Metrics({ data }: { data: DashboardData }) {
       </span>
       {m.potentialOverchargeCents > 0 ? (
         <span>
-          <span className="font-medium text-rose-600 tnum">{money(m.potentialOverchargeCents, { cents: false })}</span> overbilled
+          <span className="font-medium text-destructive tnum">{money(m.potentialOverchargeCents, { cents: false })}</span> overbilled
         </span>
       ) : null}
       <span className="flex items-center gap-1.5">
@@ -49,70 +39,32 @@ function Metrics({ data }: { data: DashboardData }) {
   );
 }
 
-export function Dashboard() {
-  const [view, setView] = useState<View>("board");
-  const [period, setPeriod] = useState<string | null>(null);
-  const { data, error, mutate } = useSWR<DashboardData>("/api/dashboard" + (period ? "?period=" + period : ""), fetcher, { keepPreviousData: true });
+/** Shared key so the top bar, the views and the task page reuse one request. */
+export function dashboardKey(period: string | null) {
+  return "/api/dashboard" + (period ? "?period=" + period : "");
+}
+
+export function Dashboard({ view }: { view: "board" | "canvas" }) {
+  const { period } = useShell();
+  const { data, error, mutate } = useSWR<DashboardData>(dashboardKey(period), fetcher, { keepPreviousData: true });
   useLiveRefresh(() => mutate(), undefined, 250);
 
   if (error && !data) {
-    return <div className="p-8 text-sm text-rose-600">Could not load work: {String(error.message)}</div>;
+    return <div className="p-8 text-sm text-destructive">Could not load work: {String(error.message)}</div>;
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b px-5">
-        <h1 className="text-[14px] font-semibold">Work</h1>
-        <div className="flex rounded-md bg-zinc-100 p-0.5">
-          {VIEWS.map((v) => (
-            <button
-              key={v.key}
-              onClick={() => setView(v.key)}
-              className={cn(
-                "flex items-center gap-1.5 rounded px-2 py-0.5 text-[12px] font-medium",
-                view === v.key ? "bg-white text-zinc-900 shadow-xs" : "text-zinc-500 hover:text-zinc-800",
-              )}
-            >
-              <v.icon className="size-3.5" />
-              {v.label}
-            </button>
-          ))}
+    <div className="relative h-full min-h-0">
+      {!data ? (
+        <div className="p-6">
+          <Skeleton className="h-64 rounded-lg" />
         </div>
-        {data && data.periods.length > 1 ? (
-          <select
-            value={data.period}
-            onChange={(e) => setPeriod(e.target.value)}
-            className="h-7 rounded-md bg-transparent px-1 text-[12px] text-muted-foreground outline-none hover:bg-zinc-100"
-          >
-            {data.periods.map((p) => (
-              <option key={p} value={p}>
-                {periodLabel(p, true)}
-              </option>
-            ))}
-          </select>
-        ) : data ? (
-          <span className="text-[12px] text-muted-foreground">{periodLabel(data.period, true)}</span>
-        ) : null}
-        <div className="ml-auto flex items-center gap-4">
-          {data ? <Metrics data={data} /> : null}
-          <div className="flex items-center gap-1.5">
-            <ResetButton onDone={() => mutate()} />
-            <SimulateDialog onDone={() => mutate()} />
-          </div>
-        </div>
-      </header>
-      <div className="relative min-h-0 flex-1">
-        {!data ? (
-          <div className="p-6">
-            <Skeleton className="h-64 rounded-lg" />
-          </div>
-        ) : view === "board" ? (
-          <Board data={data} />
-        ) : (
-          <SystemCanvas data={data} />
-        )}
-        {data ? <Caption data={data} /> : null}
-      </div>
+      ) : view === "board" ? (
+        <Board data={data} />
+      ) : (
+        <SystemCanvas data={data} />
+      )}
+      {data ? <Caption data={data} /> : null}
     </div>
   );
 }

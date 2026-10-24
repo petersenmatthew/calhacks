@@ -1,12 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import useSWR from "swr";
-import { ChevronRight, ScrollText, Workflow } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronUp, ScrollText, Workflow } from "lucide-react";
 import { fetcher } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import type { WorkspaceData } from "@/server/queries";
+import type { DashboardData, WorkspaceData } from "@/server/queries";
+import { useShell, viewHref } from "../app-shell";
+import { dashboardKey } from "../dashboard/dashboard";
 import { useLiveRefresh } from "../live-events";
 import { AgentStatusText, StateBadge } from "../status";
 import { Skeleton } from "../ui/skeleton";
@@ -33,6 +36,58 @@ function WorkingNow({ data }: { data: WorkspaceData }) {
   );
 }
 
+function typing(target: EventTarget | null) {
+  return target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+}
+
+/** Back to the view you came from, plus previous/next task. Esc goes back; J / K step through tasks. */
+function TaskNav({ id }: { id: string }) {
+  const router = useRouter();
+  const { period, lastView } = useShell();
+  const { data } = useSWR<DashboardData>(dashboardKey(period), fetcher, { keepPreviousData: true });
+  const ids = (data?.workItems ?? []).map((i) => i.id);
+  const index = ids.indexOf(id);
+  const prev = index > 0 ? ids[index - 1] : null;
+  const next = index >= 0 && index < ids.length - 1 ? ids[index + 1] : null;
+  const back = viewHref(lastView);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || typing(e.target) || document.querySelector('[role="dialog"]')) return;
+      if (e.key === "Escape") router.push(back);
+      else if ((e.key === "k" || e.key === "K") && prev) router.push("/investigations/" + prev);
+      else if ((e.key === "j" || e.key === "J") && next) router.push("/investigations/" + next);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [router, back, prev, next]);
+
+  const btn = "grid size-7 place-items-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 disabled:pointer-events-none disabled:opacity-30";
+  return (
+    <>
+      <Link href={back} title="Back (Esc)" className="-ml-2 flex h-7 items-center gap-1.5 rounded-md px-2 text-[12.5px] font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
+        <ArrowLeft className="size-3.5" />
+        {lastView === "canvas" ? "Canvas" : "Board"}
+      </Link>
+      <span className="text-zinc-300">/</span>
+      <span className="font-mono text-[12px] text-zinc-700">{id}</span>
+      {index >= 0 ? (
+        <div className="ml-3 flex items-center gap-0.5">
+          <button type="button" className={btn} disabled={!prev} onClick={() => prev && router.push("/investigations/" + prev)} title="Previous task (K)" aria-label="Previous task">
+            <ChevronUp className="size-4" />
+          </button>
+          <button type="button" className={btn} disabled={!next} onClick={() => next && router.push("/investigations/" + next)} title="Next task (J)" aria-label="Next task">
+            <ChevronDown className="size-4" />
+          </button>
+          <span className="ml-1 text-[11.5px] text-muted-foreground tnum">
+            {index + 1} of {ids.length}
+          </span>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 export function Workspace({ id }: { id: string }) {
   const [evidenceId, setEvidenceId] = useState<string | null>(null);
   const [tab, setTab] = useState<"flow" | "log">("flow");
@@ -45,8 +100,8 @@ export function Workspace({ id }: { id: string }) {
       <div className="p-8 text-[13px]">
         <div className="font-medium">Could not open {id}</div>
         <div className="mt-1 text-muted-foreground">{String(error.message)}</div>
-        <Link href="/" className="mt-3 inline-block text-blue-700 hover:underline">
-          Back to work
+        <Link href="/" className="mt-3 inline-block text-brand-ink hover:underline">
+          Back to board
         </Link>
       </div>
     );
@@ -65,12 +120,8 @@ export function Workspace({ id }: { id: string }) {
     <WorkspaceContext.Provider value={ctx}>
       <div className="h-full overflow-y-auto xl:grid xl:grid-cols-[minmax(0,1fr)_360px] xl:overflow-hidden">
         <div className="flex min-h-0 flex-col xl:h-full">
-          <div className="flex h-12 shrink-0 items-center gap-1.5 border-b px-6 text-[13px]">
-            <Link href="/" className="text-muted-foreground hover:text-zinc-900">
-              Work
-            </Link>
-            <ChevronRight className="size-3.5 text-muted-foreground" />
-            <span className="font-mono text-[12px] text-zinc-700">{item.id}</span>
+          <div className="flex h-11 shrink-0 items-center gap-1.5 border-b px-6 text-[13px]">
+            <TaskNav id={item.id} />
             <div className="ml-auto">
               <WorkingNow data={data} />
             </div>
@@ -79,7 +130,7 @@ export function Workspace({ id }: { id: string }) {
             <h1 className="text-[18px] leading-snug font-semibold tracking-tight">{item.title}</h1>
             <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-muted-foreground">
               <StateBadge state={item.state} />
-              {reworked ? <span className="text-amber-700">· Reworked after your feedback</span> : null}
+              {reworked ? <span className="text-brand-ink">· Reworked after your feedback</span> : null}
             </div>
           </div>
           <DecisionPanel />

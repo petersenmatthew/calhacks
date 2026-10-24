@@ -2,192 +2,93 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { createContext, useContext, useState } from "react";
 import useSWR from "swr";
-import { toast } from "sonner";
-import { ChevronsUpDown, LayoutList, ShieldCheck } from "lucide-react";
-import { agentSteps } from "@/lib/agent-steps";
-import { fetcher, postJson } from "@/lib/api";
+import { Network, ShieldCheck, SquareKanban } from "lucide-react";
+import { fetcher } from "@/lib/api";
+import { periodLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { StatusData } from "@/server/queries";
-import { useLiveConnected, useLiveRefresh } from "./live-events";
-import { AgentAvatar, AgentStatusText } from "./status";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "./ui/dropdown-menu";
+import type { DashboardData } from "@/server/queries";
+import { dashboardKey, Metrics } from "./dashboard/dashboard";
+import { ResetButton } from "./dashboard/reset-button";
+import { SimulateDialog } from "./dashboard/simulate-dialog";
 
-const NAV = [
-  { href: "/", label: "Work", icon: LayoutList },
-  { href: "/audit", label: "Audit trail", icon: ShieldCheck },
-];
+type View = "board" | "canvas";
 
-const AGENT_NAMES: Record<string, string> = { "agent.compute": "Compute Agent", "agent.finance": "Finance Agent" };
+type Shell = {
+  period: string | null;
+  setPeriod: (p: string) => void;
+  /** The work view the person last looked at, so the task page can go back to it. */
+  lastView: View;
+};
 
-function isActive(href: string, pathname: string) {
-  return href === "/" ? pathname === "/" || pathname.startsWith("/investigations") : pathname.startsWith(href);
-}
+const ShellContext = createContext<Shell>({ period: null, setPeriod: () => {}, lastView: "board" });
+export const useShell = () => useContext(ShellContext);
+export const viewHref = (v: View) => (v === "canvas" ? "/canvas" : "/");
 
-function ModeSwitcher({ data, onChange }: { data: StatusData | undefined; onChange: () => void }) {
-  const settings = data?.settings;
-  const llm = settings?.mode === "llm";
-  const select = async (mode: "llm" | "deterministic") => {
-    try {
-      await postJson("/api/settings", { mode });
-      onChange();
-      toast.success(mode === "llm" ? "New agent runs use LLM agents" : "New agent runs use deterministic replay");
-    } catch (error) {
-      toast.error((error as Error).message);
-    }
-  };
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[12.5px] outline-none hover:bg-zinc-100">
-        <span className={cn("size-2 rounded-full", llm ? "bg-emerald-500" : "bg-zinc-400")} />
-        <span className="min-w-0 flex-1 truncate text-zinc-700">{llm ? "LLM agents · " + settings?.model : "Deterministic replay"}</span>
-        <ChevronsUpDown className="size-3.5 text-muted-foreground" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-64">
-        <DropdownMenuLabel className="text-xs">How new agent runs decide</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem disabled={!settings?.llmAvailable} onSelect={() => select("llm")} className="flex-col items-start gap-0.5">
-          <span className="text-[13px] font-medium">LLM agents</span>
-          <span className="text-[11px] text-muted-foreground">
-            {settings?.llmAvailable ? "OpenAI Agents SDK · " + settings.model : "Set OPENAI_API_KEY on the server to enable"}
-          </span>
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => select("deterministic")} className="flex-col items-start gap-0.5">
-          <span className="text-[13px] font-medium">Deterministic replay</span>
-          <span className="text-[11px] text-muted-foreground">Same tools and controls, scripted decisions</span>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-function AgentRow({ agent }: { agent: StatusData["agents"][number] }) {
-  const busy = agent.status !== "idle";
-  const detail =
-    agent.status === "working"
-      ? agentSteps(agent.agentId, agent.runTools, "running").current?.verb ?? "Working"
-      : agent.status === "queued"
-        ? "Next: " + agent.currentWorkItemId
-        : null;
-  const body = (
-    <div className="rounded-md px-2 py-1.5 hover:bg-zinc-100">
-      <div className="flex items-center gap-2">
-        <AgentAvatar actorId={agent.agentId} size="sm" />
-        <span className="flex-1 truncate text-[13px] text-zinc-800">{AGENT_NAMES[agent.agentId] ?? agent.agentId}</span>
-        <AgentStatusText status={agent.status} label={agent.status === "queued" ? agent.queued + " queued" : undefined} />
-      </div>
-      {busy && detail ? (
-        <div className="mt-0.5 truncate pl-7 text-[11.5px] text-muted-foreground">
-          {agent.status === "working" && agent.currentWorkItemId ? <span className="font-mono">{agent.currentWorkItemId} · </span> : null}
-          {detail}
-        </div>
-      ) : null}
-    </div>
-  );
-  return agent.currentWorkItemId && busy ? (
-    <Link href={"/investigations/" + agent.currentWorkItemId} className="block">
-      {body}
-    </Link>
-  ) : (
-    body
-  );
-}
+const TABS = [
+  { key: "board", href: "/", label: "Board", icon: SquareKanban },
+  { key: "canvas", href: "/canvas", label: "Canvas", icon: Network },
+  { key: "audit", href: "/audit", label: "Audit trail", icon: ShieldCheck },
+] as const;
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const connected = useLiveConnected();
-  const { data, mutate } = useSWR<StatusData>("/api/status", fetcher, { refreshInterval: 15000 });
-  useLiveRefresh(() => mutate(), undefined, 400);
+  const [period, setPeriod] = useState<string | null>(null);
+  const [lastView, setLastView] = useState<View>("board");
+  const { data, mutate } = useSWR<DashboardData>(dashboardKey(period), fetcher, { keepPreviousData: true });
 
-  const agents = data?.agents ?? [];
-  const needsYou = (data?.pendingApprovals ?? 0) + (data?.needsInfo ?? 0);
-  const running = agents.filter((a) => a.status === "working").length;
-  const queued = agents.reduce((s, a) => s + a.queued, 0);
-  const agentSummary = running || queued ? [running ? running + " running" : null, queued ? queued + " queued" : null].filter(Boolean).join(" · ") : "All idle";
+  // Remember which work view was open last (adjusted during render, no effect needed).
+  const here: View | null = pathname === "/" ? "board" : pathname === "/canvas" ? "canvas" : null;
+  if (here && here !== lastView) setLastView(here);
+
+  const onTask = pathname.startsWith("/investigations");
+  const active = pathname === "/audit" || pathname.startsWith("/audit/") ? "audit" : pathname === "/canvas" || (onTask && lastView === "canvas") ? "canvas" : "board";
 
   return (
-    <div className="flex h-dvh overflow-hidden">
-      <aside className="hidden w-[232px] shrink-0 flex-col border-r bg-zinc-50/70 md:flex">
-        <div className="flex h-12 items-center gap-2.5 px-4">
-          <span className="grid size-6 place-items-center rounded-md bg-zinc-900 text-[10px] font-semibold text-white">EL</span>
-          <div className="min-w-0 leading-tight">
-            <div className="truncate text-[13px] font-semibold tracking-tight">ExperimentLedger</div>
-            <div className="truncate text-[11px] text-muted-foreground">Atlas Research</div>
-          </div>
-        </div>
-
-        <nav className="space-y-px px-2 pt-1">
-          {NAV.map((item) => {
-            const active = isActive(item.href, pathname);
-            return (
+    <ShellContext.Provider value={{ period, setPeriod, lastView }}>
+      <div className="flex h-dvh flex-col overflow-hidden">
+        <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
+          <nav className="flex rounded-md bg-zinc-100 p-0.5">
+            {TABS.map((t) => (
               <Link
-                key={item.href}
-                href={item.href}
+                key={t.key}
+                href={t.href}
                 className={cn(
-                  "flex h-8 items-center gap-2.5 rounded-md px-2 text-[13px]",
-                  active ? "bg-zinc-200/60 font-medium text-zinc-900" : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900",
+                  "flex items-center gap-1.5 rounded px-2 py-0.5 text-[12px] font-medium",
+                  active === t.key ? "bg-white text-zinc-900 shadow-xs" : "text-zinc-500 hover:text-zinc-800",
                 )}
               >
-                <item.icon className="size-4 text-zinc-500" />
-                <span className="flex-1">{item.label}</span>
-                {item.href === "/" && needsYou > 0 ? (
-                  <span title="Waiting on your decision" className="rounded-full bg-orange-500 px-1.5 text-[10.5px] leading-[18px] font-semibold text-white tnum">
-                    {needsYou}
-                  </span>
-                ) : item.href === "/" && data?.openItems ? (
-                  <span title="Open work items" className="text-[11.5px] text-muted-foreground tnum">
-                    {data.openItems}
-                  </span>
-                ) : null}
+                <t.icon className="size-3.5" />
+                {t.label}
               </Link>
-            );
-          })}
-        </nav>
-
-        <div className="mt-5 flex items-center justify-between px-4 pb-1 text-[11.5px]">
-          <span className="font-medium text-zinc-500">Agents</span>
-          <span className={cn("tnum", running ? "text-blue-700" : "text-muted-foreground")}>{agentSummary}</span>
-        </div>
-        <div className="space-y-px px-2">
-          {agents.map((agent) => (
-            <AgentRow key={agent.agentId} agent={agent} />
-          ))}
-        </div>
-
-        <div className="mt-auto space-y-1 border-t p-2">
-          <ModeSwitcher data={data} onChange={() => mutate()} />
-          <div className="flex h-8 items-center gap-2 px-2">
-            <AgentAvatar actorId="human.controller" size="sm" />
-            <span className="min-w-0 flex-1 truncate text-[12.5px] text-zinc-700">Priya Natarajan</span>
-            <span
-              title={connected ? "Live updates connected" : "Reconnecting to live updates"}
-              className={cn("size-2 rounded-full", connected ? "bg-emerald-500" : "bg-zinc-300")}
-            />
+            ))}
+          </nav>
+          {data && data.periods.length > 1 ? (
+            <select
+              value={data.period}
+              onChange={(e) => setPeriod(e.target.value)}
+              className="h-7 rounded-md bg-transparent px-1 text-[12px] text-muted-foreground outline-none hover:bg-zinc-100"
+            >
+              {data.periods.map((p) => (
+                <option key={p} value={p}>
+                  {periodLabel(p, true)}
+                </option>
+              ))}
+            </select>
+          ) : data ? (
+            <span className="text-[12px] text-muted-foreground">{periodLabel(data.period, true)}</span>
+          ) : null}
+          <div className="ml-auto flex items-center gap-4">
+            {data ? <Metrics data={data} /> : null}
+            <div className="flex items-center gap-1.5">
+              <ResetButton onDone={() => mutate()} />
+              <SimulateDialog onDone={() => mutate()} />
+            </div>
           </div>
-        </div>
-      </aside>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-12 items-center gap-4 border-b px-4 md:hidden">
-          <span className="grid size-6 place-items-center rounded bg-zinc-900 text-[10px] font-semibold text-white">EL</span>
-          {NAV.map((item) => (
-            <Link key={item.href} href={item.href} className="flex items-center gap-1.5 text-[13px] text-zinc-700">
-              {item.label}
-              {item.href === "/" && needsYou > 0 ? (
-                <span className="rounded-full bg-orange-500 px-1.5 text-[10.5px] font-semibold text-white tnum">{needsYou}</span>
-              ) : null}
-            </Link>
-          ))}
-          <span className="ml-auto text-[11.5px] text-muted-foreground">{agentSummary}</span>
         </header>
         <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
       </div>
-    </div>
+    </ShellContext.Provider>
   );
 }

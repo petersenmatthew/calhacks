@@ -30,7 +30,7 @@ export function ReservationUsage({ data }: { data: WorkspaceData }) {
         {segments.map((s) => (
           <div
             key={s.key}
-            className={cn("flex items-center justify-center text-[10px] font-semibold text-white", s.className)}
+            className={cn("flex items-center justify-center text-[10px] font-semibold text-white", s.className, ["bg-primary", "bg-zinc-400", "bg-zinc-200"].includes(s.className) && "text-zinc-900")}
             style={{ width: (s.gpuHours / total) * 100 + "%" }}
             title={s.label + ": " + s.gpuHours + " GPU-h"}
           >

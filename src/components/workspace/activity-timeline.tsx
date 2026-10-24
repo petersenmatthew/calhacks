@@ -71,12 +71,12 @@ function EventRow({ event, data, showActor }: { event: ActivityRow; data: Worksp
             </div>
           ) : (
             <>
-              <div className={cn("text-[13px] leading-snug font-medium", bad ? "text-rose-600" : "text-zinc-900")}>{event.title}</div>
+              <div className={cn("text-[13px] leading-snug font-medium", bad ? "text-destructive" : "text-zinc-900")}>{event.title}</div>
               {event.summary ? <p className="mt-0.5 text-[12.5px] leading-snug text-zinc-600">{event.summary}</p> : null}
               {showActor || bad || event.evidenceIds.length ? (
                 <div className="mt-0.5 flex flex-wrap gap-x-2 text-[11px] text-muted-foreground">
                   {showActor ? <span>{data.actors[event.actorId]?.name ?? event.actorId}</span> : null}
-                  {bad ? <span className="font-medium text-rose-600">{event.status === "denied" || event.type === "DENIED" ? "denied" : "error"}</span> : null}
+                  {bad ? <span className="font-medium text-destructive">{event.status === "denied" || event.type === "DENIED" ? "denied" : "error"}</span> : null}
                   {event.evidenceIds.length ? <span>{event.evidenceIds.length} evidence</span> : null}
                 </div>
               ) : null}
@@ -125,13 +125,13 @@ function RunGroup({ runId, events, data }: { runId: string; events: ActivityRow[
           {tools} tool calls{run?.mode ? " · " + modeLabel(run.mode) : ""}
         </span>
         {run?.status === "running" ? (
-          <span className="flex shrink-0 items-center gap-1 text-[11.5px] font-medium text-blue-700">
+          <span className="flex shrink-0 items-center gap-1 text-[11.5px] font-medium text-brand-ink">
             <LoaderCircle className="size-3.5 animate-spin" /> Working
           </span>
         ) : run?.status === "completed" ? (
-          <CircleCheck className="size-3.5 shrink-0 text-emerald-600" />
+          <CircleCheck className="size-3.5 shrink-0 text-brand-ink" />
         ) : run?.status === "failed" ? (
-          <span className="flex shrink-0 items-center gap-1 text-[11.5px] font-medium text-rose-600">
+          <span className="flex shrink-0 items-center gap-1 text-[11.5px] font-medium text-destructive">
             <CircleX className="size-3.5" /> Failed
           </span>
         ) : null}
@@ -143,9 +143,9 @@ function RunGroup({ runId, events, data }: { runId: string; events: ActivityRow[
         {run?.status === "running" ? (
           <div className="flex items-center gap-2 py-1.5 text-[12px] text-muted-foreground">
             <span className="flex w-5 justify-center gap-0.5">
-              <span className="size-1 animate-bounce rounded-full bg-blue-500 [animation-delay:-0.2s]" />
-              <span className="size-1 animate-bounce rounded-full bg-blue-500 [animation-delay:-0.1s]" />
-              <span className="size-1 animate-bounce rounded-full bg-blue-500" />
+              <span className="size-1 animate-bounce rounded-full bg-primary [animation-delay:-0.2s]" />
+              <span className="size-1 animate-bounce rounded-full bg-primary [animation-delay:-0.1s]" />
+              <span className="size-1 animate-bounce rounded-full bg-primary" />
             </span>
             {run.mode === "llm" ? "Choosing the next tool" : "Running the next step"}
           </div>
@@ -159,7 +159,7 @@ function RunGroup({ runId, events, data }: { runId: string; events: ActivityRow[
             </span>
           </div>
         ) : null}
-        {run?.status === "failed" && run.error ? <div className="py-1 text-[12px] text-rose-600">{run.error}</div> : null}
+        {run?.status === "failed" && run.error ? <div className="py-1 text-[12px] text-destructive">{run.error}</div> : null}
       </div>
     </div>
   );
@@ -189,11 +189,10 @@ export function ActivityTimeline() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-10 shrink-0 items-center gap-2 px-6">
-        <span className="text-[13px] font-semibold">Activity</span>
-        <span className={cn("size-1.5 rounded-full", connected ? "animate-pulse bg-emerald-500" : "bg-zinc-300")} />
+        <span className={cn("size-1.5 rounded-full", connected ? "animate-pulse bg-primary" : "bg-zinc-300")} title={connected ? "Live" : "Reconnecting"} />
         <span className="ml-auto text-[11.5px] text-muted-foreground tnum">
           {data.runs.length} runs · {toolCalls} tool calls
-          {rejected ? <span className="text-rose-600"> · {rejected} rejected</span> : null}
+          {rejected ? <span className="text-destructive"> · {rejected} rejected</span> : null}
         </span>
       </div>
       <div

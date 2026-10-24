@@ -27,15 +27,15 @@ const FILTERS: { key: Filter; label: string }[] = [
 
 const OUTCOME_TONE: Record<string, string> = {
   ALLOWED: "text-zinc-500",
-  DENIED: "text-rose-600",
-  FAILED: "text-amber-700",
+  DENIED: "text-destructive",
+  FAILED: "text-brand-ink",
 };
 
 const POLICY_TONE: Record<string, string> = {
-  APPROVED: "text-emerald-700",
-  PROPOSED: "text-orange-700",
+  APPROVED: "text-brand-ink",
+  PROPOSED: "text-brand-ink",
   SUPERSEDED: "text-zinc-400",
-  REJECTED: "text-rose-600",
+  REJECTED: "text-destructive",
 };
 
 function EventsTable({ data }: { data: AuditData }) {
@@ -71,14 +71,14 @@ function EventsTable({ data }: { data: AuditData }) {
                 filter === f.key ? "bg-white text-zinc-900 shadow-xs" : "text-zinc-500 hover:text-zinc-800",
               )}
             >
-              {f.label} <span className={cn("ml-0.5 tnum", f.key === "denied" && counts.denied ? "text-rose-600" : "text-zinc-400")}>{counts[f.key]}</span>
+              {f.label} <span className={cn("ml-0.5 tnum", f.key === "denied" && counts.denied ? "text-destructive" : "text-zinc-400")}>{counts[f.key]}</span>
             </button>
           ))}
         </div>
         <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter by work item, action, policy, approval" className="ml-auto h-8 max-w-[300px] text-[12.5px]" />
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[980px] text-[12px]">
+        <table className="w-full min-w-[820px] text-[12px]">
           <thead>
             <tr className="border-b text-left text-[11px] text-muted-foreground">
               <th className="py-2 pr-2 pl-6 font-medium">#</th>
@@ -86,10 +86,9 @@ function EventsTable({ data }: { data: AuditData }) {
               <th className="px-2 py-2 font-medium">Actor</th>
               <th className="px-2 py-2 font-medium">Action</th>
               <th className="px-2 py-2 font-medium">Outcome</th>
-              <th className="px-2 py-2 font-medium">Target</th>
               <th className="px-2 py-2 font-medium whitespace-nowrap">Work item</th>
               <th className="px-2 py-2 font-medium">Rule / authorization</th>
-              <th className="py-2 pr-6 pl-2 font-medium">Evidence</th>
+
             </tr>
           </thead>
           <tbody>
@@ -113,28 +112,27 @@ function EventsTable({ data }: { data: AuditData }) {
                   <td className="px-2 py-2">
                     <span className={cn("text-[11px] font-medium", OUTCOME_TONE[e.outcome])}>{e.outcome.toLowerCase()}</span>
                   </td>
-                  <td className="px-2 py-2 font-mono text-[11px] whitespace-nowrap text-zinc-600">{e.targetId ?? "—"}</td>
                   <td className="px-2 py-2 font-mono text-[11px] whitespace-nowrap">
                     {e.workItemId ? (
-                      <Link onClick={(ev) => ev.stopPropagation()} className="text-blue-700 hover:underline" href={"/investigations/" + e.workItemId}>
+                      <Link onClick={(ev) => ev.stopPropagation()} className="text-brand-ink hover:underline" href={"/investigations/" + e.workItemId}>
                         {e.workItemId}
                       </Link>
                     ) : (
                       "—"
                     )}
                   </td>
-                  <td className="px-2 py-2 text-[11px] text-zinc-600">
+                  <td className="py-2 pr-6 pl-2 text-[11px] text-zinc-600">
                     {[e.rule, e.approvalId, e.policyId].filter(Boolean).join(" · ") || "—"}
                   </td>
-                  <td className="py-2 pr-6 pl-2 text-[11px] text-muted-foreground tnum">{e.evidenceIds.length || ""}</td>
                 </tr>
                 {open === e.id ? (
                   <tr className="border-b bg-zinc-50/60">
-                    <td colSpan={9} className="px-6 py-3">
+                    <td colSpan={7} className="px-6 py-3">
                       <div className="grid gap-3 md:grid-cols-[1fr_320px]">
                         <JsonView value={e.details} className="max-h-60" />
                         <div className="space-y-1 font-mono text-[10.5px] text-zinc-600">
                           <div>ts {e.ts}</div>
+                          {e.targetId ? <div className="break-all">target {e.targetId}</div> : null}
                           <div className="break-all">prev {e.prevHash}</div>
                           <div className="break-all">hash {e.hash}</div>
                           {e.evidenceIds.length ? <div className="break-all">evidence {e.evidenceIds.join(", ")}</div> : null}
@@ -184,7 +182,7 @@ function PoliciesList({ data }: { data: AuditData }) {
                   {p.learnedFromWorkItemId ? (
                     <div className="text-[11px] text-muted-foreground">
                       Learned from{" "}
-                      <Link className="text-blue-700 hover:underline" href={"/investigations/" + p.learnedFromWorkItemId}>
+                      <Link className="text-brand-ink hover:underline" href={"/investigations/" + p.learnedFromWorkItemId}>
                         {p.learnedFromWorkItemId}
                       </Link>{" "}
                       · precedents {p.precedentIds.join(", ") || "none"} · {p.evidenceIds.length} evidence references
@@ -207,7 +205,7 @@ function Ledger({ data }: { data: AuditData }) {
       <div>
         <div className="border-b px-6 py-3">
           <div className="text-[13px] font-semibold">Trial balance</div>
-          <div className={cn("text-[11.5px]", debits === credits ? "text-emerald-700" : "text-rose-600")}>
+          <div className={cn("text-[11.5px]", debits === credits ? "text-brand-ink" : "text-destructive")}>
             {debits === credits ? "Debits equal credits" : "Out of balance"}
           </div>
         </div>
@@ -255,7 +253,7 @@ function Ledger({ data }: { data: AuditData }) {
                     {entry.workItemId ? (
                       <>
                         {" · "}
-                        <Link className="text-blue-700 hover:underline" href={"/investigations/" + entry.workItemId}>
+                        <Link className="text-brand-ink hover:underline" href={"/investigations/" + entry.workItemId}>
                           {entry.workItemId}
                         </Link>
                       </>
@@ -294,23 +292,19 @@ export function AuditView() {
   return (
     <div className="h-full overflow-y-auto">
       <Tabs defaultValue="events" className="gap-0">
-        <header className="flex h-12 items-center gap-4 border-b px-6">
-          <h1 className="text-[14px] font-semibold">Audit trail</h1>
+        <header className="flex h-11 items-center gap-4 border-b px-6">
           <TabsList className="h-7">
             <TabsTrigger value="events" className="text-[12px]">Events</TabsTrigger>
             <TabsTrigger value="policies" className="text-[12px]">Policies</TabsTrigger>
             <TabsTrigger value="ledger" className="text-[12px]">Ledger</TabsTrigger>
           </TabsList>
           {data ? (
-            <span className={cn("ml-auto flex items-center gap-1.5 text-[12px]", data.chain.ok ? "text-emerald-700" : "text-rose-600")}>
+            <span className={cn("ml-auto flex items-center gap-1.5 text-[12px]", data.chain.ok ? "text-brand-ink" : "text-destructive")}>
               {data.chain.ok ? <ShieldCheck className="size-3.5" /> : <ShieldX className="size-3.5" />}
               {data.chain.ok ? "Hash chain intact · " + data.chain.count + " events" : "Hash chain broken at event " + data.chain.brokenAtId}
             </span>
           ) : null}
         </header>
-        <p className="px-6 py-3 text-[12.5px] text-muted-foreground">
-          Append-only record of every agent tool call, human decision, posting, and denied action.
-        </p>
         {!data ? (
           <div className="px-6">
             <Skeleton className="h-[480px] rounded-lg" />
