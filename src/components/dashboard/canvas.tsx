@@ -11,7 +11,6 @@ import { groupOf, Sidebar } from "../canvas/sidebar";
 import { useLiveRefresh } from "../live-events";
 import { AgentPanel } from "../orbit/agent-panel";
 import { EMPLOYEES, Orbit, type Focus } from "../orbit/orbit";
-import { ReviewSwitcher } from "../review/switcher";
 import { Caption } from "./caption";
 
 /** How many recently active tasks feed the canvas when no task is focused. */
@@ -95,7 +94,6 @@ export function SystemCanvas({ data, initialTask = null, onChanged }: { data: Da
           }}
         />
         <Caption data={data} />
-        {task ? <ReviewSwitcher taskId={task} current="sidebar" className="absolute right-4 bottom-4 z-40" /> : null}
       </div>
       <Sidebar
         data={data}
