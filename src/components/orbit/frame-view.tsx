@@ -169,7 +169,17 @@ export function FrameView({ spec, play, delay = 0, scroll }: { spec: FrameSpec; 
       style={{ width: DW, height: DH }}
       className={cn("flex flex-col bg-white p-7 text-zinc-800", scroll ? "overflow-y-auto overscroll-contain" : "overflow-hidden")}
     >
-      <div className="font-mono text-[12px] tracking-wider text-zinc-400 uppercase">{spec.eyebrow}</div>
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1 truncate font-mono text-[12px] tracking-wider text-zinc-400 uppercase">{spec.eyebrow}</div>
+        {spec.source ? (
+          <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-zinc-50 py-0.5 pr-2.5 pl-1 text-[12px] text-zinc-500 ring-1 ring-zinc-200">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={spec.source.logo} alt="" className="size-[18px] rounded-full object-cover" />
+            {spec.source.write ? "Writes to " : "From "}
+            <span className="font-medium text-zinc-700">{spec.source.name}</span>
+          </span>
+        ) : null}
+      </div>
       <div className="mt-1 text-[21px] leading-snug font-semibold tracking-tight">{spec.title}</div>
 
       {spec.query ? (
