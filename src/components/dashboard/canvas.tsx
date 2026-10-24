@@ -104,7 +104,6 @@ export function SystemCanvas({ data, initialTask = null, onChanged }: { data: Da
         <Orbit
           overview={data}
           frames={frames}
-          ghosts={!task}
           w={w}
           focus={focus}
           setFocus={setFocus}

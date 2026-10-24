@@ -401,15 +401,6 @@ function FrameCard({
   );
 }
 
-function GhostFrame({ x, y, dim, lit }: { x: number; y: number; dim: boolean; lit: boolean }) {
-  return (
-    <div
-      className={cn("absolute rounded-[10px] bg-white/50 ring-1 ring-zinc-200/70 transition-opacity duration-500", lit && "ring-zinc-300")}
-      style={{ left: x, top: y, width: FW, height: FH, opacity: dim ? 0.12 : 1 }}
-    />
-  );
-}
-
 /* ------------------------------------------------------------------ canvas */
 
 export type Focus = { kind: "node"; id: OrbitNodeId } | { kind: "frame"; id: string } | null;
@@ -428,7 +419,6 @@ export function Orbit({
   task,
   onClearTask,
   onYou,
-  ghosts = true,
 }: {
   overview: DashboardData;
   frames: Frame[];
@@ -441,8 +431,6 @@ export function Orbit({
   onClearTask?: () => void;
   /** The centre seat: start reviewing what is waiting. */
   onYou?: () => void;
-  /** Draw empty placeholders at seats with no frames. Off when one task is focused. */
-  ghosts?: boolean;
 }) {
   const { ref, size } = useViewport();
   const [hover, setHover] = useState<OrbitNodeId | null>(null);
@@ -474,10 +462,10 @@ export function Orbit({
   const level: "all" | "node" | "frame" = focusedFrame ? "frame" : focusNode ? "node" : "all";
 
   // Camera: where the viewport centre sits in canvas space, and the zoom.
-  // Fit what is actually drawn: the ring, its seats, and the frames shown (or their placeholders).
+  // Fit what is actually drawn: the ring, its seats, and the frames shown.
   const boxes = [
     { x0: CX - R, x1: CX + R, y0: CY - R, y1: CY + R },
-    ...groups.flatMap((g) => (g.shown.length || ghosts ? g.pos.map((s) => ({ x0: s.x, x1: s.x + FW, y0: s.y, y1: s.y + FH })) : [])),
+    ...groups.flatMap((g) => g.pos.slice(0, g.shown.length).map((s) => ({ x0: s.x, x1: s.x + FW, y0: s.y, y1: s.y + FH }))),
   ];
   const bx0 = Math.min(...boxes.map((b) => b.x0)) - 56;
   const bx1 = Math.max(...boxes.map((b) => b.x1)) + 56;
@@ -492,8 +480,9 @@ export function Orbit({
   } else if (focusNode) {
     const g = groups.find((x) => x.node.id === focusNode)!;
     const p = at(g.node.angle);
-    const xs = [p.x - NODE_W / 2, p.x + NODE_W / 2, ...g.pos.flatMap((s) => [s.x, s.x + FW])];
-    const ys = [p.y - NODE_H / 2 - 36, p.y + NODE_H / 2, ...g.pos.flatMap((s) => [s.y, s.y + FH])];
+    const shownPos = g.pos.slice(0, g.shown.length);
+    const xs = [p.x - NODE_W / 2, p.x + NODE_W / 2, ...shownPos.flatMap((s) => [s.x, s.x + FW])];
+    const ys = [p.y - NODE_H / 2 - 36, p.y + NODE_H / 2, ...shownPos.flatMap((s) => [s.y, s.y + FH])];
     const [x0, x1, y0, y1] = [Math.min(...xs) - 48, Math.max(...xs) + 48, Math.min(...ys) - 48, Math.max(...ys) + 48];
     cam = { x: (x0 + x1) / 2, y: (y0 + y1) / 2, k: Math.min(Math.min(size.w / (x1 - x0), size.h / (y1 - y0)) * 0.9, fit * 3.2) };
   }
@@ -566,6 +555,8 @@ export function Orbit({
               <path key={n.id} d={spoke("you", n.id)} stroke="rgb(212 212 216)" strokeDasharray="4 6" fill="none" vectorEffect="non-scaling-stroke" />
             ))}
             {groups.map((g) => {
+              // No arrows out of a seat with nothing to show yet.
+              if (!g.shown.length) return null;
               const { entry, links } = chain(g.node.id, g.pos);
               const on = lit(g.node.id);
               const marker = "url(#orbit-arrow-" + (on ? 1 : 0) + ")";
@@ -624,9 +615,7 @@ export function Orbit({
                     onMeasure={measure}
                   />
                 ))
-              : ghosts
-                ? g.pos.map((s, i) => <GhostFrame key={g.node.id + i} x={s.x} y={s.y} dim={level !== "all"} lit={lit(g.node.id)} />)
-                : null,
+              : null,
           )}
 
           {groups.map((g) => {
