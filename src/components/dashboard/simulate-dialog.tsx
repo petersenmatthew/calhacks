@@ -3,12 +3,14 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
-import { LoaderCircle, Plus } from "lucide-react";
+import { ArrowRight, LoaderCircle, Plus, X } from "lucide-react";
 import { postJson } from "@/lib/api";
 import { money } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { CrewMeadow } from "../crew-meadow";
+import { Flower, UI_FLOWERS } from "../landing/meadow";
 import { Button } from "../ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "../ui/dialog";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
@@ -56,6 +58,8 @@ const PROVIDERS = {
 } as const;
 
 type ProviderId = keyof typeof PROVIDERS;
+
+const OPTION_FLOWERS = [UI_FLOWERS.yellow, UI_FLOWERS.pink, UI_FLOWERS.purple, UI_FLOWERS.peach, UI_FLOWERS.green, UI_FLOWERS.yellow];
 
 /** The header button and its dialog. Pass open/onOpenChange to open it from elsewhere (the intro). */
 export function SimulateDialog({ onDone, open: openProp, onOpenChange }: { onDone: () => void; open?: boolean; onOpenChange?: (open: boolean) => void }) {
@@ -122,35 +126,44 @@ export function SimulateDialog({ onDone, open: openProp, onOpenChange }: { onDon
           <Plus /> Simulate billing event
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[620px]">
-        <DialogHeader>
-          <DialogTitle>Simulate a billing event</DialogTitle>
-          <DialogDescription>
-            Writes simulated source records (scheduler, infrastructure controller, provider meter), then sends the provider invoice line through
-            the same ingestion, checks, and agent workflow as any other event.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {OPTIONS.map((o) => (
+      <DialogContent showCloseButton={false} className="max-h-[calc(100dvh-2rem)] gap-0 overflow-y-auto p-0 sm:max-w-[640px]">
+        <CrewMeadow seed={11}>
+          <DialogClose
+            aria-label="Close"
+            className="absolute top-2.5 right-2.5 grid size-7 place-items-center rounded-lg bg-white/80 text-zinc-500 backdrop-blur-sm hover:bg-white hover:text-zinc-900"
+          >
+            <X className="size-4" />
+          </DialogClose>
+        </CrewMeadow>
+        <div className="px-7 pt-6 pb-7">
+        <DialogTitle className="text-[24px] leading-[1.15] font-semibold tracking-[-0.02em]">Pick a billing event</DialogTitle>
+        <DialogDescription className="mt-1.5 text-[14px] leading-relaxed text-zinc-600">
+          It goes through the same checks and the same team as a real provider bill.
+        </DialogDescription>
+        <div className="mt-5 grid gap-2 sm:grid-cols-2">
+          {OPTIONS.map((o, i) => (
             <button
               key={o.key}
               type="button"
               onClick={() => setScenario(o.key)}
               className={cn(
-                "rounded-lg border p-3 text-left transition-colors",
-                scenario === o.key ? "border-zinc-900 bg-zinc-50 ring-1 ring-zinc-900" : "hover:bg-zinc-50",
+                "flex gap-3 rounded-xl p-3 text-left ring-1 transition-colors",
+                scenario === o.key ? "bg-white ring-2 ring-zinc-900" : "ring-zinc-200 hover:bg-zinc-50",
               )}
             >
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[13px] font-medium">{o.title}</span>
-                {o.tag ? <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">{o.tag}</span> : null}
+              <Flower petal={OPTION_FLOWERS[i].petal} eye={OPTION_FLOWERS[i].eye} size={13} className="mt-0.5 shrink-0" />
+              <div className="min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[14px] font-medium text-zinc-900">{o.title}</span>
+                  {o.tag ? <span className="shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-[10.5px] font-medium text-zinc-500">{o.tag}</span> : null}
+                </div>
+                <p className="mt-0.5 text-[12.5px] leading-snug text-zinc-500">{o.body}</p>
               </div>
-              <p className="mt-1 text-[12px] leading-snug text-muted-foreground">{o.body}</p>
             </button>
           ))}
         </div>
         {scenario === "custom" ? (
-          <div className="space-y-3 rounded-lg border bg-zinc-50/60 p-3">
+          <div className="mt-3 space-y-3 rounded-xl bg-zinc-50 p-3.5">
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5 sm:col-span-2">
                 <Label className="text-xs">Provider and contract</Label>
@@ -199,7 +212,7 @@ export function SimulateDialog({ onDone, open: openProp, onOpenChange }: { onDon
                 <Input className="bg-white" inputMode="decimal" value={billed} onChange={(e) => setBilled(e.target.value)} />
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-2 rounded-md bg-white p-2.5 text-center text-[11.5px] ring-1 ring-zinc-200">
+            <div className="grid grid-cols-3 gap-2 rounded-lg bg-white p-2.5 text-center text-[11.5px] ring-1 ring-zinc-200">
               <div>
                 <div className="text-muted-foreground">Invoice</div>
                 <div className="font-semibold tnum">{money(invoiced)}</div>
@@ -218,15 +231,21 @@ export function SimulateDialog({ onDone, open: openProp, onOpenChange }: { onDon
             <p className="text-[11px] text-muted-foreground">Preview only. The server&apos;s deterministic checks decide whether a work item opens.</p>
           </div>
         ) : null}
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>
-            Cancel
-          </Button>
-          <Button onClick={submit} disabled={busy}>
-            {busy ? <LoaderCircle className="animate-spin" /> : null}
+        <div className="mt-7 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={submit}
+            disabled={busy}
+            className="inline-flex h-10 items-center gap-2 rounded-lg bg-zinc-900 px-4 text-[14px] font-medium text-white hover:bg-zinc-800 disabled:opacity-60"
+          >
             Send billing event
-          </Button>
-        </DialogFooter>
+            {busy ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowRight className="size-4" />}
+          </button>
+          <button type="button" onClick={() => setOpen(false)} className="h-10 rounded-lg px-3 text-[14px] text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
+            Cancel
+          </button>
+        </div>
+        </div>
       </DialogContent>
     </Dialog>
   );

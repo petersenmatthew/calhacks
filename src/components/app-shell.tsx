@@ -11,6 +11,7 @@ import type { DashboardData } from "@/server/queries";
 import { dashboardKey } from "./dashboard/dashboard";
 import { ResetButton } from "./dashboard/reset-button";
 import { SimulateDialog } from "./dashboard/simulate-dialog";
+import { FLOWER_COLORS, Flower } from "./landing/meadow";
 import { hasSeenOnboarding, Onboarding } from "./onboarding";
 
 type View = "board" | "canvas";
@@ -77,18 +78,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <ShellContext.Provider value={{ period, setPeriod, lastView }}>
       <div className="flex h-dvh flex-col overflow-hidden">
-        <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
-          <nav className="flex rounded-md bg-zinc-100 p-0.5">
+        <header className="flex h-14 shrink-0 items-center gap-4 border-b border-zinc-200/80 px-4">
+          <Link href="/welcome" className="flex items-center gap-1.5 pr-1 text-[17px] font-semibold tracking-[-0.03em] text-zinc-950">
+            <Flower petal={FLOWER_COLORS[2].petal} eye={FLOWER_COLORS[2].eye} size={14} />
+            moa
+          </Link>
+          <nav className="flex gap-0.5">
             {TABS.map((t) => (
               <Link
                 key={t.key}
                 href={t.href}
                 className={cn(
-                  "flex items-center gap-1.5 rounded px-2 py-0.5 text-[12px] font-medium",
-                  active === t.key ? "bg-white text-zinc-900 shadow-xs" : "text-zinc-500 hover:text-zinc-800",
+                  "flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium transition-colors",
+                  active === t.key ? "bg-zinc-100 text-zinc-900" : "text-zinc-500 hover:bg-zinc-50 hover:text-zinc-800",
                 )}
               >
-                <t.icon className="size-3.5" />
+                <t.icon className="size-4" />
                 {t.label}
               </Link>
             ))}

@@ -8,6 +8,7 @@ import { fetcher, postJson } from "@/lib/api";
 import { dateTimeUtc, money } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { AutonomyData } from "@/server/queries";
+import { FLOWER_COLORS, Flower } from "../landing/meadow";
 import { useLiveRefresh } from "../live-events";
 
 /** Shared fetch for the canvas sidebar: feeds, follow-ups, and the learned policy. */
@@ -51,7 +52,7 @@ export function LearnedPolicyRow({ data, refresh }: { data: AutonomyData; refres
     <div className={cn("rounded-lg", open && "bg-zinc-50 ring-1 ring-zinc-200/70")}>
       <button type="button" onClick={() => setOpen(!open)} className="group flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left hover:bg-zinc-100/80">
         <span className="grid size-3.5 shrink-0 place-items-center">
-          <span className="size-[7px] rounded-full bg-primary ring-[3px] ring-primary/25" />
+          <Flower petal={FLOWER_COLORS[2].petal} eye={FLOWER_COLORS[2].eye} size={10} />
         </span>
         <span className="min-w-0 flex-1 truncate text-[13px] text-zinc-800">Adopt learned policy</span>
         <span className="text-[12px] text-zinc-600 tnum">≤ {money(policy.rule.thresholdCents ?? 0, { cents: false })}</span>
@@ -76,7 +77,7 @@ export function LearnedPolicyRow({ data, refresh }: { data: AutonomyData; refres
               type="button"
               onClick={() => decide("APPROVED")}
               disabled={busy !== null}
-              className="flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-[12.5px] font-medium text-primary-foreground hover:opacity-90"
+              className="flex h-8 items-center gap-1.5 rounded-lg bg-zinc-900 px-3 text-[12.5px] font-medium text-white hover:bg-zinc-800"
             >
               {busy === "APPROVED" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} Approve
             </button>
@@ -115,8 +116,9 @@ export function RunningOnItsOwn({ data }: { data: AutonomyData }) {
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="mb-1 flex w-full items-center gap-1.5 px-2.5 text-[12px] font-medium text-zinc-500 hover:text-zinc-800"
+        className="mb-1 flex w-full items-center gap-2 px-2.5 text-[13px] font-medium text-zinc-500 hover:text-zinc-800"
       >
+        <Flower petal={FLOWER_COLORS[3].petal} eye={FLOWER_COLORS[3].eye} size={11} className="-mt-0.5" />
         Running on its own
         <ChevronDown className={cn("ml-auto size-3.5 transition-transform", !open && "-rotate-90")} />
       </button>
