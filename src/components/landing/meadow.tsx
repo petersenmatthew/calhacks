@@ -27,6 +27,15 @@ export const FLOWER_COLORS = [
   { petal: "#c9b6ff", eye: "#fff1a6" },
 ];
 
+/** Flowers that read on a white card (the white daisy only works on grass). */
+export const UI_FLOWERS = {
+  yellow: FLOWER_COLORS[1],
+  pink: FLOWER_COLORS[2],
+  purple: FLOWER_COLORS[3],
+  peach: { petal: "#ffb38a", eye: "#fff1a6" },
+  green: { petal: "#7cc95d", eye: "#fff1a6" },
+};
+
 /** Grass tufts and flowers, larger toward the front. */
 function meadow() {
   const r = rng(7);

@@ -160,7 +160,7 @@ function Highlight({ text, lang }: { text: string; lang: "sql" | "json" | "call"
               {part}
             </span>
           ) : (
-            <span key={i} className="text-[#e2ee8f]">
+            <span key={i} className="text-[#c4ebb2]">
               {part}
             </span>
           ),
@@ -173,7 +173,7 @@ function Highlight({ text, lang }: { text: string; lang: "sql" | "json" | "call"
   for (const m of text.matchAll(SQL_WORDS)) {
     if (m.index > last) out.push(text.slice(last, m.index));
     out.push(
-      <span key={m.index} className={m[2] ? "text-[#e2ee8f]" : "text-[#c6d600]"}>
+      <span key={m.index} className={m[2] ? "text-[#c4ebb2]" : "text-[#7cc95d]"}>
         {m[0]}
       </span>,
     );
