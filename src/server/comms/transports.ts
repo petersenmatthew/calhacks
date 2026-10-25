@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import type { AppContext } from "../context";
 import { PEOPLE } from "./directory";
 
@@ -20,7 +22,16 @@ export interface EmailMessage {
 }
 
 /** Set on every email we send, so the inbox poller never mistakes our own letters for vendor replies. */
-export const OUR_HEADER = "X-Atlas-Outbox";
+export const OUR_HEADER = "X-xAnthropenAI-Outbox";
+
+/** Letters reference the logo by this content id; sendEmail attaches the image inline. */
+export const LOGO_CID = "xanthropenai-logo";
+
+function inlineLogo(html: string | null | undefined) {
+  if (!html?.includes("cid:" + LOGO_CID)) return null;
+  const content = readFileSync(path.join(process.cwd(), "public", "logos", "xanthropenai-wordmark.png"));
+  return { filename: "xanthropenai.png", content, cid: LOGO_CID };
+}
 
 export type Delivery = { status: "sent"; id: string | null; channel?: string | null } | { status: "simulated" };
 
@@ -35,19 +46,23 @@ export function slackConfigured(ctx: AppContext) {
 export async function sendEmail(ctx: AppContext, m: EmailMessage): Promise<Delivery> {
   const c = ctx.config.comms;
   const headers = { ...(m.headers ?? {}), [OUR_HEADER]: "1" };
+  const logo = inlineLogo(m.html);
   if (c.resendApiKey) {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: "Bearer " + c.resendApiKey, "Content-Type": "application/json" },
       body: JSON.stringify({
-        from: c.emailFrom || "Atlas Research Accounts Payable <onboarding@resend.dev>",
+        from: c.emailFrom || "xAnthropenAI Accounts Payable <onboarding@resend.dev>",
         to: [m.to],
         subject: m.subject,
         text: m.text,
         ...(m.html ? { html: m.html } : {}),
         ...(c.replyTo ? { reply_to: c.replyTo } : {}),
         headers,
-        attachments: m.attachments.map((a) => ({ filename: a.filename, content: Buffer.from(a.content).toString("base64") })),
+        attachments: [
+          ...m.attachments.map((a) => ({ filename: a.filename, content: Buffer.from(a.content).toString("base64") })),
+          ...(logo ? [{ filename: logo.filename, content: logo.content.toString("base64"), content_type: "image/png", content_id: logo.cid }] : []),
+        ],
       }),
     });
     const body = (await res.json().catch(() => ({}))) as { id?: string; message?: string };
@@ -57,7 +72,7 @@ export async function sendEmail(ctx: AppContext, m: EmailMessage): Promise<Deliv
   if (c.smtpUrl) {
     const nodemailer = await import("nodemailer");
     const transport = nodemailer.createTransport(c.smtpUrl);
-    const from = c.emailFrom || "Atlas Research Accounts Payable <" + decodeURIComponent(new URL(c.smtpUrl).username) + ">";
+    const from = c.emailFrom || "xAnthropenAI Accounts Payable <" + decodeURIComponent(new URL(c.smtpUrl).username) + ">";
     const info = await transport.sendMail({
       from,
       to: m.to,
@@ -66,7 +81,10 @@ export async function sendEmail(ctx: AppContext, m: EmailMessage): Promise<Deliv
       ...(m.html ? { html: m.html } : {}),
       ...(c.replyTo ? { replyTo: c.replyTo } : {}),
       headers,
-      attachments: m.attachments.map((a) => ({ filename: a.filename, content: a.content, contentType: a.contentType })),
+      attachments: [
+        ...m.attachments.map((a) => ({ filename: a.filename, content: a.content as string | Buffer, contentType: a.contentType })),
+        ...(logo ? [{ filename: logo.filename, content: logo.content, contentType: "image/png", cid: logo.cid }] : []),
+      ],
     });
     return { status: "sent", id: info.messageId ?? null };
   }

@@ -5,7 +5,7 @@ import useSWR from "swr";
 import { toast } from "sonner";
 import { fetcher } from "@/lib/api";
 import { buildDecision, outcomeOf, shortTitle } from "@/lib/decision";
-import { buildFrames, type Frame } from "@/lib/frames";
+import { buildFrames, ruleTitle, type Frame } from "@/lib/frames";
 import type { DashboardData, WorkspaceData } from "@/server/queries";
 import { groupOf, Sidebar, type FrameChatTarget } from "../canvas/sidebar";
 import { useLiveRefresh } from "../live-events";
@@ -21,6 +21,42 @@ const RECENT = 8;
 /** Frames from several tasks share one canvas, so their ids carry the task id. */
 function tagged(w: WorkspaceData): Frame[] {
   return buildFrames(w).map((f) => ({ ...f, id: w.item.id + ":" + f.id, members: f.members?.map((m) => w.item.id + ":" + m) }));
+}
+
+/** The Controls Lead's standing frame on the all-work view: every rule the team follows. */
+function rulebookFrame(rules: DashboardData["rulebook"]): Frame | null {
+  // Company policies alone are not news; the frame appears once the team learned a rule or one is waiting for you.
+  if (!rules.some((r) => r.proposedBy.startsWith("agent.") || r.status === "PROPOSED")) return null;
+  const learned = rules.filter((r) => r.proposedBy.startsWith("agent.") && r.status === "APPROVED" && r.approvedAt);
+  const newest = learned.sort((a, b) => (b.approvedAt ?? "").localeCompare(a.approvedAt ?? ""))[0];
+  const from = (r: (typeof rules)[number]) =>
+    !r.proposedBy.startsWith("agent.") ? "company policy" : r.learnedFromWorkItemId ? "you on " + r.learnedFromWorkItemId : "AP history";
+  const live = rules.filter((r) => r.status === "APPROVED");
+  const at = rules.map((r) => r.approvedAt ?? r.createdAt).sort().at(-1)!;
+  return {
+    id: "rulebook",
+    node: "policy",
+    label: "Rulebook",
+    createdAt: at,
+    tone: rules.some((r) => r.status === "PROPOSED") ? "warn" : "ok",
+    spec: {
+      eyebrow: "Controls Lead · rulebook",
+      title: live.length + " rule" + (live.length === 1 ? "" : "s") + " the team follows",
+      rulebook: {
+        handled: live.reduce((s, r) => s + r.used, 0),
+        rules: [...rules]
+          .sort((a, b) => Number(b.status === "PROPOSED") - Number(a.status === "PROPOSED") || Number(b.id === newest?.id) - Number(a.id === newest?.id) || b.used - a.used)
+          .map((r) => ({
+            key: r.policyKey + " v" + r.version,
+            title: ruleTitle(r.policyKey, r.method, r),
+            from: from(r),
+            used: r.used,
+            isNew: r.id === newest?.id,
+            pending: r.status === "PROPOSED",
+          })),
+      },
+    },
+  };
 }
 
 async function fetchMany([, ...ids]: string[]) {
@@ -88,8 +124,10 @@ export function SystemCanvas({ data, initialTask = null, onChanged }: { data: Da
   }, [burst]);
   const frames = useMemo(() => {
     if (task) return w ? tagged(w) : [];
-    return (recent.data ?? []).flatMap(tagged).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  }, [task, w, recent.data]);
+    // Across all work, rules show once in the rulebook instead of on each case.
+    const book = rulebookFrame(data.rulebook);
+    return [...(recent.data ?? []).flatMap(tagged).filter((f) => !/:policy-/.test(f.id)), ...(book ? [book] : [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }, [task, w, recent.data, data.rulebook]);
 
   const current = task ? items.find((i) => i.id === task) : undefined;
   const seat = focus?.kind === "node" ? EMPLOYEES.find((e) => e.id === focus.id) : undefined;

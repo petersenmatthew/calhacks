@@ -45,7 +45,7 @@ export function stripQuoted(text: string) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const next = lines[i + 1] ?? "";
-    // "On Fri, Oct 24, 2026 at 9:14 AM Atlas <ap@...> wrote:" (sometimes wrapped over two lines)
+    // "On Fri, Oct 24, 2026 at 9:14 AM xAnthropenAI <ap@...> wrote:" (sometimes wrapped over two lines)
     if (/^On .+wrote:\s*$/.test(line) || (/^On .+/.test(line) && /wrote:\s*$/.test(next))) break;
     if (/^-{2,}\s*Original Message\s*-{2,}/i.test(line)) break;
     if (/^_{5,}$/.test(line) && /^From:/i.test(next)) break;
@@ -137,7 +137,7 @@ export function receiveVendorEmail(ctx: AppContext, m: InboundEmail): ReceiveRes
     const dup = ctx.db.select().from(vendorMessages).where(eq(vendorMessages.messageId, m.messageId)).get();
     if (dup) return { status: "duplicate", id: dup.id };
   }
-  // Our own letter, read back from a shared inbox (sent before the X-Atlas-Outbox header existed, or by a client that dropped it).
+  // Our own letter, read back from a shared inbox (sent before the X-xAnthropenAI-Outbox header existed, or by a client that dropped it).
   if (m.messageId && ctx.db.select({ id: outbox.id }).from(outbox).where(eq(outbox.providerMessageId, m.messageId)).get()) return { status: "unmatched" };
   const dispute = matchDispute(ctx, m);
   if (!dispute) return { status: "unmatched" };
@@ -236,7 +236,7 @@ export function disputeThread(ctx: AppContext, dispute: DisputeRow) {
       id: dispute.id,
       at: dispute.submittedAt,
       direction: "outbound",
-      from: "Atlas Research AP",
+      from: "xAnthropenAI AP",
       subject: dispute.letterSubject,
       body: dispute.letterBody.split("\n\nEVIDENCE\n")[0],
       status: "sent",
@@ -389,7 +389,7 @@ function checkQuotable(ctx: AppContext, item: WorkItemRow, dispute: DisputeRow, 
   }
 }
 
-/** Email the vendor in the same thread. Never commits Atlas to an amount the controller did not approve. */
+/** Email the vendor in the same thread. Never commits xAnthropenAI to an amount the controller did not approve. */
 export function replyToVendor(
   ctx: AppContext,
   item: WorkItemRow,

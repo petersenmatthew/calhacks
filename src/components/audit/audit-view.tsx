@@ -10,6 +10,7 @@ import { PROVIDER_SOURCE, SOURCE } from "@/lib/sources";
 import { cn } from "@/lib/utils";
 import type { AuditData } from "@/server/queries";
 import { JsonView } from "../json-view";
+import { RulesView } from "./rules-view";
 import { useLiveRefresh } from "../live-events";
 import { AgentAvatar } from "../status";
 import { Input } from "../ui/input";
@@ -32,12 +33,6 @@ const OUTCOME_TONE: Record<string, string> = {
   FAILED: "text-brand-ink",
 };
 
-const POLICY_TONE: Record<string, string> = {
-  APPROVED: "text-brand-ink",
-  PROPOSED: "text-brand-ink",
-  SUPERSEDED: "text-zinc-400",
-  REJECTED: "text-destructive",
-};
 
 function EventsTable({ data }: { data: AuditData }) {
   const [filter, setFilter] = useState<Filter>("all");
@@ -148,52 +143,6 @@ function EventsTable({ data }: { data: AuditData }) {
         </table>
         {rows.length === 0 ? <div className="px-4 py-10 text-center text-[12.5px] text-muted-foreground">No events match.</div> : null}
       </div>
-    </div>
-  );
-}
-
-function PoliciesList({ data }: { data: AuditData }) {
-  const keys = [...new Set(data.policies.map((p) => p.policyKey))];
-  return (
-    <div className="grid border-t lg:grid-cols-2 lg:divide-x">
-      {keys.map((key) => (
-        <div key={key} className="border-b">
-          <div className="border-b px-6 py-3">
-            <div className="text-[13px] font-semibold">{data.policies.find((p) => p.policyKey === key)?.title}</div>
-            <div className="font-mono text-[11px] text-muted-foreground">{key}</div>
-          </div>
-          <ol className="divide-y">
-            {data.policies
-              .filter((p) => p.policyKey === key)
-              .reverse()
-              .map((p) => (
-                <li key={p.id} className="space-y-1.5 px-6 py-3">
-                  <div className="flex items-center gap-2 text-[12px]">
-                    <span className="font-medium">v{p.version}</span>
-                    <span className="font-mono text-[11px] text-muted-foreground">{p.rule.method}</span>
-                    <span className={cn("ml-auto text-[11px] font-medium", POLICY_TONE[p.status])}>{p.status.toLowerCase()}</span>
-                  </div>
-                  <p className="text-[12px] leading-snug text-zinc-700">{p.statement}</p>
-                  <div className="text-[11px] text-muted-foreground">
-                    {p.approvedBy
-                      ? "Approved by " + (data.actors[p.approvedBy]?.name ?? p.approvedBy) + " on " + dateOnly(p.approvedAt) + (p.approvalId ? " (" + p.approvalId + ")" : " (historical)")
-                      : "Proposed by " + (data.actors[p.proposedBy]?.name ?? p.proposedBy) + ", awaiting decision"}
-                    {" · auto-post limit " + money(p.rule.autoPostLimitCents, { cents: false })}
-                  </div>
-                  {p.learnedFromWorkItemId ? (
-                    <div className="text-[11px] text-muted-foreground">
-                      Learned from{" "}
-                      <Link className="text-brand-ink hover:underline" href={"/canvas?task=" + p.learnedFromWorkItemId}>
-                        {p.learnedFromWorkItemId}
-                      </Link>{" "}
-                      · precedents {p.precedentIds.join(", ") || "none"} · {p.evidenceIds.length} evidence references
-                    </div>
-                  ) : null}
-                </li>
-              ))}
-          </ol>
-        </div>
-      ))}
     </div>
   );
 }
@@ -413,7 +362,7 @@ export function AuditView() {
                 value={v}
                 className="h-8 flex-none rounded-lg px-2.5 text-[13px] capitalize after:hidden data-active:bg-zinc-100! data-active:text-zinc-900"
               >
-                {v}
+                {v === "policies" ? "rules" : v}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -428,7 +377,7 @@ export function AuditView() {
               <EventsTable data={data} />
             </TabsContent>
             <TabsContent value="policies">
-              <PoliciesList data={data} />
+              <RulesView data={data} />
             </TabsContent>
             <TabsContent value="ledger">
               <Ledger data={data} />

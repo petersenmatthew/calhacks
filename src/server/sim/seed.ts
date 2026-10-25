@@ -225,7 +225,7 @@ function seedReferenceData(ctx: AppContext) {
     actorId: ACTOR.simulator,
     action: "environment.seed",
     category: "system",
-    details: { note: "Simulated Atlas Research environment loaded (projects, contracts, policies, precedents)." },
+    details: { note: "Simulated xAnthropenAI environment loaded (projects, contracts, policies, precedents)." },
   });
 }
 
@@ -266,7 +266,7 @@ export function seedEnvironment(ctx: AppContext, cases: "demo" | "all" | string[
     actorId: ACTOR.simulator,
     type: "SYSTEM",
     status: "info",
-    title: "Atlas Research sandbox loaded for the October 2026 close",
+    title: "xAnthropenAI sandbox loaded for the October 2026 close",
   });
   scheduleOnboarding(ctx);
 }

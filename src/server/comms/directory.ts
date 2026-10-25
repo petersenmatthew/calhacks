@@ -1,7 +1,7 @@
 import { ACTOR, controllerName } from "../security/actors";
 
 /*
- * Atlas Research's people and Slack channels. The handles are what the bot
+ * xAnthropenAI's people and Slack channels. The handles are what the bot
  * mentions; SLACK_USER_IDS maps them to real Slack user ids when a real
  * workspace is connected.
  */
@@ -23,14 +23,14 @@ export const PEOPLE: Person[] = [
       return controllerName();
     },
     title: "Controller",
-    email: "controller@atlas-research.ai",
+    email: "controller@xanthropenai.com",
     actorId: ACTOR.controller,
   },
-  { handle: "dana", name: "Dana Whitfield", title: "CFO", email: "dana@atlas-research.ai", actorId: ACTOR.cfo },
-  { handle: "maya", name: "Dr. Maya Chen", title: "Lead, Frontier Language Models", email: "maya@atlas-research.ai", projectId: "PRJ-FLM" },
-  { handle: "ravi", name: "Ravi Shah", title: "Lead, Multimodal Perception", email: "ravi@atlas-research.ai", projectId: "PRJ-MMP" },
-  { handle: "elena", name: "Elena Petrova", title: "Lead, RL and Agents", email: "elena@atlas-research.ai", projectId: "PRJ-RLA" },
-  { handle: "diego", name: "Diego Alvarez", title: "Lead, Inference Efficiency", email: "diego@atlas-research.ai", projectId: "PRJ-INF" },
+  { handle: "dana", name: "Dana Whitfield", title: "CFO", email: "dana@xanthropenai.com", actorId: ACTOR.cfo },
+  { handle: "maya", name: "Dr. Maya Chen", title: "Lead, Frontier Language Models", email: "maya@xanthropenai.com", projectId: "PRJ-FLM" },
+  { handle: "ravi", name: "Ravi Shah", title: "Lead, Multimodal Perception", email: "ravi@xanthropenai.com", projectId: "PRJ-MMP" },
+  { handle: "elena", name: "Elena Petrova", title: "Lead, RL and Agents", email: "elena@xanthropenai.com", projectId: "PRJ-RLA" },
+  { handle: "diego", name: "Diego Alvarez", title: "Lead, Inference Efficiency", email: "diego@xanthropenai.com", projectId: "PRJ-INF" },
 ];
 
 export const CHANNELS = [

@@ -86,12 +86,13 @@ describe("delivery", () => {
     const call = fetchMock.mock.calls.find(([u]) => String(u).includes("resend.com"))!;
     const sentBody = JSON.parse(String((call as unknown as [string, RequestInit])[1].body));
     expect(sentBody.to).toEqual([VENDOR]);
-    expect(sentBody.attachments).toHaveLength(1);
+    expect(sentBody.attachments).toHaveLength(2);
+    expect(sentBody.attachments[1].content_id).toBe("xanthropenai-logo");
     const slackCall = fetchMock.mock.calls.find(([u]) => String(u).includes("chat.postMessage"))!;
     expect(String((slackCall as unknown as [string, RequestInit])[1].body)).toContain("<@U01PRIYA>");
     expect(ctx.db.select().from(vendorDisputes).all()[0].emailStatus).toBe("sent");
     // Every email we send is marked, so the inbox poller never reads our own letter back as a vendor reply.
-    expect(sentBody.headers["X-Atlas-Outbox"]).toBe("1");
+    expect(sentBody.headers["X-xAnthropenAI-Outbox"]).toBe("1");
   });
 });
 

@@ -31,7 +31,7 @@ const ACTIVE_STATES: Record<string, Set<string>> = {
 
 function taskFor(agentId: string, trigger: Record<string, unknown>, workItemId: string) {
   const t = String(trigger.trigger ?? "");
-  if (t === "onboarding") return "Learn how Atlas resolves invoice variances from six months of AP history";
+  if (t === "onboarding") return "Learn how xAnthropenAI resolves invoice variances from six months of AP history";
   if (t === "dispute_follow_up") return "Follow up with the vendor on the open dispute for " + workItemId;
   if (t === "dispute_escalation") return "Escalate the unanswered vendor dispute on " + workItemId;
   if (agentId === ACTOR.capacity) {

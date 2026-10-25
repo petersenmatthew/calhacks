@@ -4,7 +4,7 @@ import { ACTOR } from "../security/actors";
 
 /*
  * Six months of simulated AP history exported from the ERP: every GPU invoice
- * line Atlas paid between April and September 2026, with what the contract
+ * line xAnthropenAI paid between April and September 2026, with what the contract
  * supported and how each variance was resolved. Nobody wrote the team's
  * materiality rule down; it only shows up in how the lines were handled.
  * The Controls Lead mines this at onboarding.

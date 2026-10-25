@@ -15,6 +15,7 @@ import { contractForProvider } from "./checks";
 import { buildDisputeEvidence, renderEvidenceCsv, renderEvidenceText } from "./dispute-evidence";
 import { CONTROLLER, leadFor } from "../comms/directory";
 import { mention, postSlack, queueEmail, reactSlack, taskLink, vendorEmail } from "../comms/outbox";
+import { LOGO_CID } from "../comms/transports";
 
 function escapeHtml(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -27,6 +28,7 @@ export function renderLetterHtml(text: string) {
   return (
     '<div style="font-family:-apple-system,Segoe UI,sans-serif;font-size:14px;line-height:1.5;color:#18181b">' +
     escapeHtml(letter).replace(/\n/g, "<br>") +
+    '<div style="margin-top:16px"><img src="cid:' + LOGO_CID + '" alt="xAnthropenAI" width="150" style="display:block;width:150px;height:auto"></div>' +
     (evidence
       ? '<h3 style="margin:24px 0 8px;font-size:13px;letter-spacing:.04em;color:#52525b">EVIDENCE</h3><pre style="font-family:ui-monospace,Menlo,monospace;font-size:12px;background:#f4f4f5;padding:12px;border-radius:8px;white-space:pre-wrap">' +
         escapeHtml(evidence) +
@@ -369,7 +371,7 @@ export function closeDispute(ctx: AppContext, item: WorkItemRow) {
       ? "Closed " + dispute.id + ": " + formatCents(credited) + " partial credit booked and the remaining " + formatCents(upheld) + " charged to " +
         (lead ? mention(lead.handle) + "'s team" : "the owning team") + " (" + entryId + "). " + taskLink(ctx, item.id)
       : accepted
-      ? "Closed " + dispute.id + ": " + formatCents(dispute.amountCents) + " credit booked (" + entryId + "). What Atlas owes the vendor dropped by that amount. " + taskLink(ctx, item.id)
+      ? "Closed " + dispute.id + ": " + formatCents(dispute.amountCents) + " credit booked (" + entryId + "). What xAnthropenAI owes the vendor dropped by that amount. " + taskLink(ctx, item.id)
       : "Closed " + dispute.id + ": the vendor upheld the charge, so " + formatCents(dispute.amountCents) + " was charged to " + (lead ? mention(lead.handle) + "'s team" : "the owning team") +
         " (" + entryId + "). " + mention(CONTROLLER) + " can reopen it with the vendor. " + taskLink(ctx, item.id),
   });

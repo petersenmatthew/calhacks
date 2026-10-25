@@ -63,7 +63,7 @@ export async function POST() {
   const ctx = getContext();
   tx(ctx, () => {
     ctx.db.update(outbox).set({ status: "pending", attempts: 0, lastError: null }).where(and(eq(outbox.status, "failed"), inArray(outbox.channel, ["slack", "email"]))).run();
-    postSlack(ctx, { channel: "finance-ops", event: "comms.test", text: "MOA is connected. Pings for Atlas Research finance will land in these channels. Controller: <@priya>. CFO: <@dana>. Team leads: <@maya> <@ravi> <@elena> <@diego>." });
+    postSlack(ctx, { channel: "finance-ops", event: "comms.test", text: "MOA is connected. Pings for xAnthropenAI finance will land in these channels. Controller: <@priya>. CFO: <@dana>. Team leads: <@maya> <@ravi> <@elena> <@diego>." });
     if (ctx.config.comms.vendorEmail) {
       queueEmail(ctx, {
         to: ctx.config.comms.vendorEmail,

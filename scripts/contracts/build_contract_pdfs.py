@@ -100,7 +100,7 @@ class Doc(BaseDocTemplate):
         if doc.page > 1:
             c.setFont("Helvetica", 7.5)
             c.setFillColor(GRAY)
-            c.drawString(self.leftMargin, h - 0.6 * inch, m["provider_legal"] + " / Atlas Research, Inc.")
+            c.drawString(self.leftMargin, h - 0.6 * inch, m["provider_legal"] + " / xAnthropenAI, Inc.")
             c.drawRightString(w - self.rightMargin, h - 0.6 * inch, m["name"])
             c.setStrokeColor(RULE)
             c.setLineWidth(0.5)
@@ -139,7 +139,7 @@ class NumberedCanvas(rl_canvas.Canvas):
 def parties(meta):
     return Paragraph(
         "This %s (the \"Agreement\") is entered into as of %s (the \"Effective Date\") by and between "
-        "<b>%s</b>, %s (\"Provider\"), and <b>Atlas Research, Inc.</b>, a Delaware corporation with offices at "
+        "<b>%s</b>, %s (\"Provider\"), and <b>xAnthropenAI, Inc.</b>, a Delaware corporation with offices at "
         "1200 Harbor Way, Suite 400, San Francisco, CA 94107 (\"Customer\"). Provider and Customer are each a \"Party\" and together the \"Parties.\""
         % (meta["name"], meta["effective_long"], meta["provider_legal"], meta["provider_desc"]),
         body,
@@ -148,11 +148,17 @@ def parties(meta):
 
 def head(meta):
     logo = ROOT / "public" / "logos" / meta["logo"]
+    ours = ROOT / "public" / "logos" / "xanthropenai-mark.png"
     out = []
-    if logo.exists():
-        img = Image(str(logo), width=0.42 * inch, height=0.42 * inch)
-        img.hAlign = "CENTER"
-        out += [img, Spacer(1, 10)]
+    if logo.exists() and ours.exists():
+        s = 0.42 * inch
+        pair = Table(
+            [[Image(str(logo), width=s, height=s), Paragraph("&times;", subtitle), Image(str(ours), width=s, height=s)]],
+            colWidths=[s + 8, 0.3 * inch, s + 8],
+        )
+        pair.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("ALIGN", (0, 0), (-1, -1), "CENTER"), ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
+        pair.hAlign = "CENTER"
+        out += [pair, Spacer(1, 10)]
     out += [
         Paragraph(meta["doc_title"], title),
         Paragraph("Agreement No. %s&nbsp;&nbsp;&middot;&nbsp;&nbsp;Effective %s" % (meta["id"], meta["effective_long"]), subtitle),
@@ -175,11 +181,13 @@ def seeded(table, ref):
 
 
 def signature_block(meta):
+    ours = Image(str(ROOT / "public" / "logos" / "xanthropenai-wordmark.png"), width=1.3 * inch, height=1.3 * inch * 540 / 1743)
+    ours.hAlign = "LEFT"
     sigs = [
-        [Paragraph("<b>%s</b>" % meta["provider_legal"], cell), Paragraph("<b>Atlas Research, Inc.</b>", cell)],
-        [Paragraph(meta["signer"], sig), Paragraph("Priya Natarajan", sig)],
+        [Paragraph("<b>%s</b>" % meta["provider_legal"], cell), [Paragraph("<b>xAnthropenAI, Inc.</b>", cell), Spacer(1, 4), ours]],
+        [Paragraph(meta["signer"], sig), Paragraph("Matthew Petersen", sig)],
         [Paragraph("Name: %s<br/>Title: %s<br/>Date: %s" % (meta["signer"], meta["signer_title"], meta["signed"]), cell),
-         Paragraph("Name: Priya Natarajan<br/>Title: Controller<br/>Date: %s" % meta["signed"], cell)],
+         Paragraph("Name: Matthew Petersen<br/>Title: Controller<br/>Date: %s" % meta["signed"], cell)],
     ]
     t = Table(sigs, colWidths=[3.1 * inch, 3.1 * inch])
     t.setStyle(TableStyle([

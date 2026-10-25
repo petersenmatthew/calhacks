@@ -936,8 +936,8 @@ function Toolbar({
             <ArrowLeft className="size-4" />
           </ToolButton>
         ) : null}
-        <button type="button" onClick={home} className={cn(link, !task && level === "all" && "font-medium text-zinc-900")}>
-          Atlas Research
+        <button type="button" onClick={home} className={link}>
+          xAnthropenAI
         </button>
         {task ? (
           <>

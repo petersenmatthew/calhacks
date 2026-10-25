@@ -378,7 +378,7 @@ function ownerDecision(w: WorkspaceData): Decision | null {
 
 const dollars = (cents: number) => "$" + (cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-/** The Vendor Liaison needs you to decide how to answer the vendor (an offer, or a question only Atlas can answer). */
+/** The Vendor Liaison needs you to decide how to answer the vendor (an offer, or a question only xAnthropenAI can answer). */
 function vendorDecision(w: WorkspaceData): Decision | null {
   const q = w.item.pendingQuestion;
   if (!q || !w.dispute) return null;
@@ -394,7 +394,7 @@ function vendorDecision(w: WorkspaceData): Decision | null {
     approvalId: null,
     askedBy: q.askedBy ?? q.agentId,
     context: prov + " · " + w.dispute.id,
-    title: offer ? prov + " offers " + dollars(offer) + " of " + dollars(disputed) : prov + " needs something from Atlas",
+    title: offer ? prov + " offers " + dollars(offer) + " of " + dollars(disputed) : prov + " needs something from xAnthropenAI",
     ask: msg ? "\u201c" + msg.body.replace(/\s+/g, " ").slice(0, 180) + (msg.body.length > 180 ? "\u2026\u201d" : "\u201d") : q.question,
     proof: null,
     choices: offer

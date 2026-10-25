@@ -565,7 +565,7 @@ export const vendorDisputes = sqliteTable("vendor_disputes", {
   /** What the vendor actually credited, when the controller accepted less than the disputed amount. */
   creditedCents: integer("credited_cents"),
   reason: text("reason").notNull(),
-  /** Atlas's case number for this dispute (e.g. LAMBDA-CASE-6001), quoted in every email. Never changes. */
+  /** xAnthropenAI's case number for this dispute (e.g. LAMBDA-CASE-6001), quoted in every email. Never changes. */
   vendorReference: text("vendor_reference"),
   /** The vendor's credit memo number, once they issue one (e.g. CM-88213). */
   creditMemoRef: text("credit_memo_ref"),
