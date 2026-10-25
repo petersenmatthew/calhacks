@@ -1,21 +1,23 @@
 # MOA (Mixture of Accountants)
 
-Autonomous finance operations for AI research labs. A team of six AI employees reconciles GPU invoices against what actually ran, disputes overcharges with cloud vendors, allocates shared cluster costs, watches research team budgets, and learns policy from the controller's corrections. They ask the controller when a decision needs a human. Every action is a typed tool call through an application gateway, written to an append-only audit log.
+Autonomous finance for AI research labs. Six AI agents check every GPU invoice line against what actually ran, dispute overcharges with the cloud provider, and chase the credit until it lands. The controller only makes the calls: on the canvas, or in Slack.
 
-| Employee | Job |
+**Live demo:** https://moa-accountants.fly.dev/welcome (each visitor gets their own copy).
+
+| Agent | Job |
 | --- | --- |
-| Compute Investigator | Figures out what actually ran behind an instance charge |
-| Capacity Planner | Reconstructs who used a shared GPU reservation and how much sat idle |
-| Cost Accountant | Charges costs to research teams under policy and drafts disputes |
-| Vendor Liaison | Sends approved disputes to the provider and closes the case on their reply |
-| Budget Analyst | Checks a team's burn against its budget after anything posts to it |
-| Policy Analyst | Turns controller corrections into reusable policy |
+| Compute Investigator | Checks a charge against shutdown records, the provider's meter, and job logs |
+| Cost Accountant | Reads the contract, decides what is owed, drafts disputes and team allocations |
+| Vendor Liaison | Emails the dispute with evidence, reads the reply, follows up, books the credit |
+| Capacity Planner | Works out who used a shared GPU reservation and how much sat idle |
+| Budget Analyst | Checks each research team's burn against its budget after anything posts |
+| Policy Analyst | Turns the controller's past decisions into reusable policies |
 
-**Seats it fills:** the GPU accounts-payable accountant who reconciles compute invoices against what actually ran, and the cost accountant who allocates shared cluster spend to research teams.
+**Agents decide, code guarantees.** Every agent action is a typed tool call through one gateway that enforces that agent's permissions, does all money math in code, and checks that cited contract clauses exist. Agents never approve or pay; disputes need the controller, and money stays owed until a credit memo arrives. Every step goes to an append-only audit log.
 
-The fictional lab is **Atlas Research**. All source systems (scheduler, infrastructure controller, provider meters, invoices, ERP) are simulated in SQLite. The agent decisions, approvals, postings, and audit trail are real application state.
+**Example:** Lambda bills 36 h. The job ran 22 h and the instance was shut down at 24 h. MOA disputes 12 h, not 14, because the contract says idle time on a running instance is billable.
 
-Work starts on its own: a scheduler syncs provider billing feeds on a cursor, follows up on approvals and vendor disputes as business days pass, and the Policy Analyst learned its first policy by mining six months of AP history. See [What runs on its own](#what-runs-on-its-own) and [Proof it works](#proof-it-works).
+The fictional lab is **Atlas Research**. Its source systems (scheduler, infrastructure controller, provider meters, invoices, ERP) are simulated in SQLite; agent decisions, approvals, postings, emails, and the audit trail are real application state. Work also starts on its own: a scheduler syncs billing feeds and follows up on approvals and disputes as business days pass. See [What runs on its own](#what-runs-on-its-own) and [Proof it works](#proof-it-works).
 
 ## Quick start
 
@@ -27,7 +29,7 @@ npm run dev
 # open http://localhost:3000
 ```
 
-The first request creates `data/moa.db`, loads the October 2026 sandbox, and starts the background worker. The sandbox seeds 35 invoice lines from `src/server/sim/cases.ts`: 13 clean lines auto-match, and 22 open work items for the agents (idle time, minimum-duration charges, billing past termination, rate mismatches, duplicate lines, missing experiment owners, and shared reservations). An existing database keeps its old seed until **Reset demo**.
+The landing page is at `/welcome`; the app itself at `/canvas`. The first request creates `data/moa.db`, loads the October 2026 sandbox (clean invoice lines that auto-match, so the app starts quiet), and starts the background worker. Click **Simulate billing event** to send in a case. `SEED=all` loads all 22 open cases from `src/server/sim/cases.ts` instead. An existing database keeps its old seed until **Reset demo**.
 
 Production build:
 
