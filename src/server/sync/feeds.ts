@@ -35,9 +35,9 @@ export interface SyncSummary {
 }
 
 const LABELS: Record<string, string> = {
-  "helios-billing-feed": "Helios Cloud billing feed",
-  "meridian-billing-feed": "Meridian Compute billing feed",
-  "stratus-billing-feed": "Stratus GPU billing feed",
+  "lambda-billing-feed": "Lambda billing feed",
+  "nebius-billing-feed": "Nebius billing feed",
+  "coreweave-billing-feed": "CoreWeave billing feed",
   "http-billing-feed": "HTTP billing feed",
 };
 

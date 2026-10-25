@@ -1,6 +1,6 @@
 # MOA (Mixture of Accountants)
 
-Autonomous finance for AI research labs. Six AI agents check every GPU invoice line against what actually ran, dispute overcharges with the cloud provider, and chase the credit until it lands. The controller only makes the calls: on the canvas, or in Slack.
+Autonomous finance for AI research labs. Six AI agents check every GPU invoice line against what actually ran, dispute overcharges with the cloud provider, and chase the credit until it lands. The controller only makes the calls, in the app; Slack and email keep everyone posted.
 
 **Live demo:** https://moa-accountants.fly.dev/welcome (each visitor gets their own copy).
 
@@ -55,13 +55,14 @@ Logs: `fly logs`. Redeploy after changes: `fly deploy`.
 
 The same Dockerfile also works on Railway (`railway.json`, volume at `/data`, same variables).
 
-Share `https://<your domain>/welcome` with judges: a landing page where the pixel team acts out a dispute, with one button that starts the sample case.
+Share `https://<app>.fly.dev/welcome`: the landing page, whose **Start** opens a short intro and then the billing-event picker. Nothing runs until the visitor picks an event.
 
 `PUBLIC_DEMO=1` makes the app safe to share:
 
 - Every visitor gets their own sandbox: a separate seeded database and agent team, picked by a cookie (`src/proxy.ts`). Nobody sees anyone else's cases, and **Reset demo** resets only your copy. Sandboxes idle for 45 minutes are deleted.
-- Visitors see a one-screen intro that opens the billing-event picker (reopen it with the ? in the top bar).
+- The intro can be reopened with the **?** in the top bar.
 - Slack and email are recorded on each task and never sent, whatever else is set.
+- The person using the app is called "You" (set `CONTROLLER_NAME` to change it).
 - Each visitor is limited per hour: 12 new billing events, 4 resets, 40 questions, 60 decisions, 20 pasted vendor replies.
 - Live model runs are capped at `MAX_LLM_RUNS_PER_HOUR` (default 120) across all sandboxes; past the cap, agents use the scripted replay instead of failing.
 
@@ -89,7 +90,10 @@ Copy `.env.example` to `.env.local`. All are optional.
 | `SLACK_BOT_TOKEN` | unset | Post to a real Slack workspace. Scopes: `chat:write`, `chat:write.public`, `channels:read`, `channels:manage`, `channels:join`, `users:read`, `reactions:write`; the bot creates and joins the channels below. |
 | `SLACK_WEBHOOK_URL` | unset | Or post everything to one channel through an incoming webhook. |
 | `SLACK_USERS` | unset | Who is who, by Slack username or member id: `controller=belinda, cfo=matthewpetersen, leads=matthewpetersen` (role keys `controller`, `cfo`, `leads`, `*`, or any handle). `SLACK_USER_IDS` (JSON or one id) still works. |
-| `PUBLIC_DEMO` | unset | `1` for a shared public deployment: intro screen, Slack and email recorded only, per-visitor rate limits, capped model runs. |
+| `PUBLIC_DEMO` | unset | `1` for a public deployment: a separate copy of the demo per visitor, Slack and email recorded only, per-visitor rate limits, capped model runs. |
+| `CONTROLLER_NAME` | `Matthew Petersen` (`You` on a public demo) | Display name of the person using the app. |
+| `SEED` | `demo` | `all` loads all 35 seeded cases on a new database instead of starting quiet. |
+| `RUN_MODE` | `one` | `one` works one case at a time (a newly simulated invoice goes first); `all` lets agents work every open case at once. |
 | `MAX_LLM_RUNS_PER_HOUR` | `120` | In a public demo, live agent runs per hour before agents fall back to replay. |
 | `APP_URL` | `http://localhost:3000` | Base for the links in Slack messages. |
 
@@ -98,26 +102,22 @@ Copy `.env.example` to `.env.local`. All are optional.
 - **LLM agents.** Each agent turn is an OpenAI Agents SDK run with typed Zod tools. The model chooses tools and writes findings; the run ends only when a terminal tool (handoff, approval request, posting request) succeeds.
 - **Deterministic replay.** A fixed, scripted decision policy calls the same tools through the same gateway, with the same permissions and audit. It exists for demos without credentials and for tests. Runs in this mode are labeled "Deterministic replay" everywhere in the UI and are never presented as LLM output.
 
-## Three-minute demo
+## Try it
 
-1. **Work** has two views. **Board** is a Kanban (Investigate, Propose, Needs you, Vendor, Done) where the card an agent is on shows its live steps. **Canvas** puts the six employees on a ring around you. Each one spawns a small frame per piece of work; click an employee to zoom to its frames, and click a frame to zoom in and replay it (the query it ran, the rows it got back, the rules it checked, the letter it wrote).
-2. Click **Simulate billing event**, keep **GPU overbilling**, and send it. Lambda bills 36 h at $100/h for an instance whose lifecycle shows 24 h. Deterministic checks open a work item and assign the GPU Auditor.
-3. Open the investigation. The **Flow** tab shows each agent's steps and what it gathered; **Log** has every tool call. Watch the GPU Auditor pull the lifecycle, scheduler log, provider meter, and contract, then hand off. The Cost Allocator cites the Lambda precedent and proposes a $1,200 dispute. The chart shows the 12 h billed after termination.
-4. **Approve** the dispute. The Vendor Liaison writes the letter and sends it; the ledger gateway submits it and posts only the supported $2,400. Accounts payable stays at $3,600 until you click **Vendor issues credit**, after which the Vendor Liaison reads the reply, books the credit, and closes the case. The Budget Analyst checks the team's burn after each posting.
-5. Simulate **Shared cluster allocation** ($12,400, two teams). The Capacity Planner reconstructs usage and idle capacity. The Cost Allocator follows written policy v1 (usage split: $6,975 / $5,425) and tries to post it. The ledger gateway denies the posting because v1 conflicts with the reservation terms (a red denied event in the timeline and audit), so the agent requests approval instead.
-6. **Reject** it with: "Reserved capacity must be charged to the team that owns the reservation, subject to company policy." The Controls Lead proposes reusable policy **ALLOC-SHARED v2** from your correction, and the Cost Allocator reworks the allocation ($8,060 / $4,340). Approve both.
-7. Simulate **Next month: similar reservation**. The agents apply the learned policy and the gateway posts it automatically, citing the policy approval. No new approval is needed.
-8. Open **Audit trail**: every tool call, decision, posting, and denied action, hash-chained, plus policy versions, journal entries, and a trial balance.
+The app opens on **Canvas**: the six agents on a ring around you, each spawning a small frame per piece of work (click a frame to replay it: the query it ran, the rows it got back, the rules it checked, the letter it wrote). **Board** shows the same work as a Kanban; **Audit trail** shows everything that happened.
 
-**Custom invoice line** lets you type any hours and rate to create a discrepancy that is not scripted. **Resend last billing event** proves idempotency. **Reset demo** reloads the sandbox.
+**The main case: GPU overbilling** (about two minutes)
 
-### Autonomy demo (no clicks needed for the work itself)
+1. Click **Simulate billing event** and send **GPU overbilling**. Lambda bills 36 h at $100/h for an instance that ran 24 h; the checks open a case.
+2. Watch the GPU Auditor pull the shutdown records, Lambda's meter, the job log and the contract. The job ended at 22 h, but idle time on a running instance is billable, so only the 12 h after shutdown are disputed. The Cost Allocator picks the contract clauses and proposes: pay $2,400, dispute $1,200.
+3. **Approve** in the sidebar. The Vendor Liaison emails the dispute with an evidence file; only the supported $2,400 posts, and $3,600 stays owed.
+4. Reply as Lambda: paste *"We've issued credit memo CM-1042 for $1,200.00"* on the task (or reply to the real email if one is set up). The Vendor Liaison books the credit, closes the case, and a summary card shows what was recovered.
 
-1. Open **Canvas**. On boot the Controls Lead read six months of AP history and proposed **VARIANCE-MATERIALITY v1**: variances up to $50 were always paid as billed, every dispute was $96 or more. Approve it. It is the first item under **Needs you** in the sidebar: expand it and approve. (It also appears on the board.) The sidebar's **Running on its own** list shows each feed's sync position and every follow-up as it fires.
-2. Wait two minutes, or use the clock in the top bar (**+1 hour**). The Helios and Meridian feeds publish new lines; the scheduler syncs them on a cursor and the agents work them: an exact match auto-posts, and a Helios A100 line billed $0.40/h over contract ($12) is accepted under the learned policy instead of disputed.
-3. **+3 days**: a Helios line billed 6 h after termination arrives and becomes a $600 dispute waiting for you. Approve it, and the Vendor Liaison writes the dispute letter and sends it.
-4. **+15 days**: Helios has not answered. The scheduler assigns the Vendor Liaison, which checks the dispute and sends a follow-up citing contract §7.2. **+16 days**: still nothing, so it escalates to the controller with a recommended next step. Leave an approval waiting and it is reminded after a day and escalated to the CFO after three.
-5. Open a disputed task: the letter and evidence exactly as emailed are on the task, and your Slack workspace shows each ping and who it mentioned.
+**More to try**
+
+- **Shared cluster allocation** ($12,400, two teams): the gateway refuses to post the written policy's split because it conflicts with the reservation terms. Reject it with *"Reserved capacity must be charged to the team that owns the reservation"*; the Controls Lead proposes policy v2 and the Cost Allocator reworks the split. Approve both, then send **Next month: similar reservation** and it posts on its own under the learned policy.
+- **Fast-forward time** with the clock in the top bar. New Lambda and Nebius lines arrive from the billing feeds and get worked; a $12 variance is accepted under the learned materiality policy instead of disputed (approve that policy first: it is waiting in the sidebar from onboarding). At +3 days a $600 dispute arrives; approve it, let the vendor stay silent, and it is chased at 14 days and escalated at 30. An approval left waiting is reminded after a day and escalated to the CFO after three.
+- **Custom invoice line** makes a discrepancy that isn't scripted. **Resend last billing event** shows a repeated event is ignored. **Reset demo** starts over.
 
 ## How it works
 
@@ -159,7 +159,7 @@ flowchart LR
 
 Everything the system tells a person or a vendor goes through an outbox table, written in the same transaction as the action that caused it and delivered by the scheduler. A message is never sent for an action that rolled back, and a failed send is retried. With no mail server or Slack configured, messages are kept in the outbox and marked "recorded" (letters still show on the dispute).
 
-**Vendor disputes.** When the controller approves a dispute, the Vendor Liaison writes the cover letter and the application attaches the evidence: the invoice line, the instance's PROVISIONED, STOP_REQUESTED and TERMINATED times with the provider's own API acknowledgment, the provider meter, the contract calculation, and the text of each cited clause with the reason it applies. Clauses are chosen by what is wrong with the line (billed after termination: termination and metering; wrong rate: rates; always the dispute-window clause), so a letter never cites one that does not apply. The letter, evidence, recipient, and delivery status are stored on the dispute record and shown on the task. The email carries a CSV of the same facts, and the subject carries the vendor case reference. Vendor follow-ups at 14 days go to the same address as replies.
+**Vendor disputes.** When the controller approves a dispute, the Vendor Liaison writes the cover letter and the application attaches the evidence: the invoice line, the instance's PROVISIONED, STOP_REQUESTED and TERMINATED times with the provider's own API acknowledgment, the provider meter, the contract calculation, and the text of each cited clause with the reason it applies. The Cost Allocator chooses the clauses by reading the contract text, each with a reason; the gateway rejects any section that is not in that provider's contract and adds the dispute-window clause if it was left out. The letter, evidence, recipient, and delivery status are stored on the dispute record and shown on the task. The email carries a CSV of the same facts, and the subject carries the vendor case reference. Vendor follow-ups at 14 days go to the same address as replies.
 
 **When the vendor writes back.** The scheduler reads the AP mailbox over IMAP every 30 seconds (Gmail: the same app password as SMTP). A reply is matched to its dispute by email thread or by the case reference in the subject, stored once by Message-ID with the quoted original stripped, posted to #vendor-disputes, and handed to the Vendor Liaison, who reads the whole thread and does one of five things:
 
@@ -196,7 +196,7 @@ Out-of-office and other automatic replies are stored on the thread but not acted
 | --- | --- |
 | GPU Auditor | `get_work_item`, `get_instance_lifecycle`, `get_gpu_job_logs`, `get_experiment`, `get_provider_usage`, `get_billing_terms`, `submit_compute_findings`, `handoff_to_finance`, `request_human_info` |
 | Capacity Planner | `get_work_item`, `find_related_experiments`, `get_experiment`, `get_billing_terms`, `submit_compute_findings`, `handoff_to_finance`, `request_human_info` |
-| Cost Allocator | `get_work_item`, `get_project_budget`, `get_allocation_policy`, `search_precedents`, `calculate_cost_allocation`, `propose_adjustment`, `propose_vendor_dispute`, `request_human_approval`, `submit_for_posting`, `request_more_info` (reads the learned materiality policy through `get_allocation_policy`) |
+| Cost Allocator | `get_work_item`, `get_project_budget`, `get_billing_terms`, `get_allocation_policy`, `search_precedents`, `calculate_cost_allocation`, `propose_adjustment`, `propose_vendor_dispute`, `request_human_approval`, `submit_for_posting`, `request_more_info` (reads the learned materiality policy through `get_allocation_policy`) |
 | Vendor Liaison | `get_work_item`, `get_dispute_package`, `get_billing_terms`, `send_vendor_dispute`, `close_dispute`, and for follow-ups `get_dispute_status`, `send_vendor_follow_up`, `escalate_dispute` |
 | Budget Analyst | `get_work_item`, `get_posted_charges`, `get_project_budget`, `forecast_project_burn`, `record_budget_note` |
 | Controls Lead | `get_work_item`, `get_allocation_policy`, `search_precedents`, `propose_policy`, `handoff_to_finance`, and at onboarding `query_ap_history`, `propose_materiality_policy`, `finish_onboarding` |
@@ -211,6 +211,7 @@ All arithmetic is application code: billable hours, expected charges, allocation
 - Guardrails reject findings that contradict the computed figures (for example, calling an overcharge "explained") and ownership claims not supported by retrieved records.
 - Journal entries must balance, use known accounts, and are idempotent. Postings, journal lines, and audit events are append-only (SQLite triggers). Proposal content is immutable; approval decisions are final.
 - Denied and failed actions are logged after the transaction rolls back, so they are never lost.
+- Cited contract clauses must exist in that provider's contract.
 - Repeated billing events are ignored without new work or postings.
 - A dispute never reduces accounts payable. Only a vendor credit does.
 
@@ -227,7 +228,8 @@ npm test
 ```
 
 - **Autonomy:** feed sync on a cursor with no duplicates, onboarding proposes the $50 threshold the history supports, the learned policy changes the outcome of a $12 variance, approval reminders and escalations fire once, waiting time is measured from the request, and an unanswered dispute is chased at 14 days and escalated at 30.
-- **Email and Slack:** a dispute cites only the clauses that apply and carries the lifecycle evidence, the letter is stored on the dispute and emailed with a CSV attachment, the controller is pinged in Slack, and delivery through Resend and a Slack bot token is exercised with a stubbed network.
+- **Contract clauses:** the Cost Allocator's clauses are accepted from a contract worded differently (where title matching finds nothing), made-up sections are rejected, and the dispute-window clause is added.
+- **Email and Slack:** a dispute carries the lifecycle evidence and the cited clauses, the letter is stored on the dispute and emailed with a CSV attachment, the controller is pinged in Slack, and delivery through Resend and a Slack bot token is exercised with a stubbed network.
 - **Arithmetic:** exact allocation sums and contract billable hours.
 - **Correct billing:** an instance whose job ended early is explained with no dispute.
 - **Scenario 1:** the Vendor Liaison sends the $1,200 dispute, and the liability stays unchanged until the Liaison books the vendor's credit.
@@ -264,8 +266,9 @@ src/server/sim         seed data, demo scenarios, feed schedule, AP history (sim
 src/server/sync        billing feed sync with cursors (simulated outbox and HTTP adapter)
 src/server/comms       people and channels, the outbox, email and Slack delivery, the AP mailbox reader
 src/server/scheduler.ts, clock.ts   what starts work on its own, and the business clock
-src/app                pages and API routes (SSE at /api/stream)
-src/components         dashboard, investigation workspace, autonomy page, audit trail
+src/app                pages and API routes (SSE at /api/stream); /welcome is the landing page
+src/proxy.ts           public demo: gives each browser its own sandbox id
+src/components         landing page and intro, canvas, board, investigation workspace, audit trail
 scripts/eval.ts        npm run eval (seeded-case harness)
 drizzle/               SQL migrations
 tests/                 Vitest suite
@@ -273,10 +276,9 @@ tests/                 Vitest suite
 
 ## Limitations
 
-- **LLM mode:** no OpenAI key was available while building, so LLM mode was verified through the SDK's scripted model, not live model calls. Deterministic replay is the default when no key is set.
-- **One demo user:** there is no login. Every human action is taken as the controller, Priya Natarajan.
-- **Simulated systems:** source systems, the ERP, AP history, the billing feeds, and the vendor portal are simulated, and vendor responses are triggered from the UI. Email and Slack are delivered only when a mail server or Slack is configured; otherwise they are recorded. Vendor replies are read from the mailbox when IMAP is set up (or pasted on the task); the "Simulate vendor" buttons still work without email.
-- **Investigation page:** the Flow tab on an investigation still shows only the GPU Auditor and the Cost Allocator. The Canvas shows all six.
-- **Existing databases:** actors are append-only, so a database created before the rename keeps the old names "Compute Agent" and "Finance Agent" until **Reset demo**. New employees are added automatically at startup.
-- **Runs while the server runs:** SQLite runs on one node, and the worker and scheduler run inside the Next.js server process, so nothing happens while it is stopped (queued jobs and due follow-ups resume on restart); restart the dev server after changing server code.
-- **Reset wipes everything:** Reset demo deletes the sandbox, including its audit log. It is a demo control, not a production feature.
+- **One user:** there is no login. Every human action is taken as the controller. In Slack and email the controller is Priya Natarajan, from the fictional Atlas Research directory (`src/server/comms/directory.ts`); map her to a real account with `SLACK_USERS`.
+- **Simulated systems:** the scheduler, infrastructure controller, provider meters, experiment tracker, ERP, AP history and billing feeds are simulated. Email and Slack are delivered only when configured; otherwise they are recorded on the task. Vendor replies are read from the mailbox when IMAP is set up, or pasted on the task; the **Simulate vendor** buttons work without email.
+- **LLM vs replay:** with `OPENAI_API_KEY` the agents run on the live model; without it, and past the public demo's hourly cap, they use the deterministic replay, which is labeled as such in the UI.
+- **Investigation page:** the Flow tab shows only the GPU Auditor and the Cost Allocator. The Canvas shows all six.
+- **One node:** SQLite, the worker and the scheduler run inside the Next.js server process, so nothing happens while it is stopped (queued jobs and due follow-ups resume on restart). Restart the dev server after changing server code.
+- **Reset wipes everything:** **Reset demo** deletes the sandbox, including its audit log. It is a demo control, not a production feature.
