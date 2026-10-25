@@ -35,7 +35,7 @@ function taskFor(agentId: string, trigger: Record<string, unknown>, workItemId: 
   if (t === "dispute_follow_up") return "Follow up with the vendor on the open dispute for " + workItemId;
   if (t === "dispute_escalation") return "Escalate the unanswered vendor dispute on " + workItemId;
   if (agentId === ACTOR.capacity) {
-    if (t === "finance_question") return "Answer the Cost Accountant's question on " + workItemId;
+    if (t === "finance_question") return "Answer the Cost Allocator's question on " + workItemId;
     return "Reconstruct reservation usage for " + workItemId;
   }
   if (agentId === ACTOR.policy) return "Turn the controller's correction on " + workItemId + " into policy";
@@ -47,7 +47,7 @@ function taskFor(agentId: string, trigger: Record<string, unknown>, workItemId: 
   }
   if (agentId === ACTOR.budget) return t === "controller_note" ? "Apply the controller's budget change from " + workItemId : "Check team burn after the posting on " + workItemId;
   if (agentId === ACTOR.compute) {
-    if (t === "finance_question") return "Answer the Cost Accountant's question on " + workItemId;
+    if (t === "finance_question") return "Answer the Cost Allocator's question on " + workItemId;
     if (t === "human_info") return "Continue the investigation of " + workItemId + " with controller input";
     return "Investigate compute evidence for " + workItemId;
   }

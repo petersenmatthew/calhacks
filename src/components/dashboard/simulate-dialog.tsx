@@ -104,7 +104,7 @@ export function SimulateDialog({ onDone, open: openProp, onOpenChange }: { onDon
       onDone();
       if (result.status === "work_item_created" && result.workItemId) {
         const id = result.workItemId;
-        toast.success("Discrepancy detected. Opened " + id + " and assigned the Compute Investigator.", {
+        toast.success("Discrepancy detected. Opened " + id + " and assigned the GPU Auditor.", {
           action: { label: "Open", onClick: () => router.push("/canvas?task=" + id) },
         });
       } else if (result.status === "auto_matched") {

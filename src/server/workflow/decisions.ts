@@ -78,7 +78,7 @@ export function executeDecision(ctx: AppContext, approvalId: string) {
         summary:
           approval.status === "APPROVED"
             ? "Executing approved " + proposal.kind.toLowerCase().replace("_", " ") + " through the ledger gateway."
-            : "Sending the controller's rationale on " + proposal.id + " to the Policy Analyst, then back to the Cost Accountant.",
+            : "Sending the controller's rationale on " + proposal.id + " to the Controls Lead, then back to the Cost Allocator.",
       });
       if (approval.status === "APPROVED") {
         executeApprovedProposal(ctx, item, proposal, approval);

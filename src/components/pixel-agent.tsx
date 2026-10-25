@@ -100,7 +100,7 @@ export const SPRITES: Record<string, Sprite> = {
     face: "#f7b3c2",
     tint: "#fbe6ec",
   },
-  // Policy analyst: graduation cap and a scroll of rules.
+  // Controls lead: graduation cap and a scroll of rules.
   "agent.policy": {
     rows: [
       "................",

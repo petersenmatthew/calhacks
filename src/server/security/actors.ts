@@ -34,7 +34,7 @@ export function controllerName() {
 export const ACTOR_SEED: ActorRow[] = [
   {
     id: ACTOR.compute,
-    name: "Compute Investigator",
+    name: "GPU Auditor",
     kind: "agent",
     role: "compute_agent",
     title: "Compute cost investigator",
@@ -42,7 +42,7 @@ export const ACTOR_SEED: ActorRow[] = [
   },
   {
     id: ACTOR.finance,
-    name: "Cost Accountant",
+    name: "Cost Allocator",
     kind: "agent",
     role: "finance_agent",
     title: "Research cost accountant",
@@ -74,7 +74,7 @@ export const ACTOR_SEED: ActorRow[] = [
   },
   {
     id: ACTOR.policy,
-    name: "Policy Analyst",
+    name: "Controls Lead",
     kind: "agent",
     role: "policy_analyst",
     title: "Finance policy",

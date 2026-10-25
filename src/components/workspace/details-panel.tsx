@@ -7,6 +7,7 @@ import { ChevronRight, FileSearch, LoaderCircle } from "lucide-react";
 import { postJson } from "@/lib/api";
 import { clockTime, dateOnly, dateTimeUtc, hours, money, periodLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { contractHref } from "@/lib/contracts";
 import type { InstanceChecks, ReservationChecks } from "@/server/db/schema";
 import type { WorkspaceData } from "@/server/queries";
 import { AgentAvatar, PRIORITY_LABEL } from "../status";
@@ -406,11 +407,16 @@ export function DetailsPanel() {
       ) : null}
 
       <Section title={"Contract " + contract.id} count={contract.clauses.length}>
+        <Link href={contractHref(contract.id)} className="mb-3 inline-flex items-center gap-1 text-[12px] text-zinc-600 underline decoration-zinc-300 underline-offset-2 hover:text-zinc-950">
+          Open {contract.name}
+        </Link>
         <ul className="space-y-2.5">
           {contract.clauses.map((c) => (
             <li key={c.ref} className={cn("text-[12px] leading-snug", cited.has(c.ref) && "border-l-2 border-primary/50 pl-2.5")}>
               <div className="flex items-center gap-1.5">
-                <span className="font-mono text-[10.5px] text-zinc-500">§{c.ref}</span>
+                <Link href={contractHref(contract.id, c.ref)} className="font-mono text-[10.5px] text-zinc-500 hover:text-zinc-900 hover:underline">
+                  §{c.ref}
+                </Link>
                 <span className="font-medium text-zinc-800">{c.title}</span>
                 {cited.has(c.ref) ? <span className="ml-auto text-[10.5px] text-brand-ink">cited</span> : null}
               </div>

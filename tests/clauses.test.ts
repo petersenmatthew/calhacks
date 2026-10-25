@@ -30,7 +30,7 @@ async function caseWithRewordedContract() {
   return { ctx, id, item, run, evidence: [finding.id] };
 }
 
-describe("clauses chosen by the Cost Accountant", () => {
+describe("clauses chosen by the Cost Allocator", () => {
   it("keyword matching finds no grounds in a contract worded differently", async () => {
     const { item } = await caseWithRewordedContract();
     if (item.checks.kind !== "instance") throw new Error("expected instance");
