@@ -167,6 +167,7 @@ function interpretCorrection(feedback: Json, rejectedMethod: string): Allocation
   const text = String(feedback.reason ?? "").toLowerCase();
   const mentionsOwner = /\bown(s|er|ers|ing)?\b|reserving team|reservation owner/.test(text);
   if (mentionsOwner && /entire|whole|all of (the )?reservation/.test(text)) return "owner_pays_all";
+  if (mentionsOwner && /(not|instead of|rather than)\s+(by\s+|based on\s+)?usage|not usage[- ]based/.test(text)) return "owner_pays_all";
   if (mentionsOwner && /idle|unused|reserved capacity|capacity/.test(text)) return "owner_pays_idle";
   if (/usage|proportional/.test(text) && !mentionsOwner) return "usage_proportional";
   return rejectedMethod === "usage_proportional" ? "owner_pays_idle" : "usage_proportional";
@@ -288,6 +289,37 @@ async function financePolicy(c: Caller) {
     summary:
       calc.method_label + ": " + calc.lines.map((l: Json) => l.project_name + " " + l.amount).join(", ") + "." +
       (feedback ? " Revised after controller feedback." : conflictText),
+  });
+}
+
+/** Controls Lead: read the note the controller left with a decision, and propose a rule if it sets one. */
+async function guidancePolicy(c: Caller, run: AgentRunContext) {
+  const note = String(run.trigger.note ?? "");
+  const text = note.toLowerCase();
+  // The replay only recognises rules about who pays for GPUs; the live model reads the note itself.
+  const aboutCharging = /\bown(s|er|ers|ing)?\b|usage|proportional|reserv|idle/.test(text) && /pay|charge|bill|allocat|split/.test(text);
+  if (!aboutCharging) {
+    await c.call("finish_guidance", { summary: "Your note is about this case only, so there is no new rule to propose." });
+    return;
+  }
+  const method = interpretCorrection({ reason: note }, "usage_proportional");
+  const precedents = await c.call("search_precedents", { query: "shared reservation allocation owner pays controller instruction" });
+  const proposed = await c.try("propose_policy", {
+    method,
+    statement:
+      method === "owner_pays_all"
+        ? "For shared GPU reservations, the project that owns the reservation pays for all of it, whoever used the GPUs."
+        : method === "owner_pays_idle"
+          ? "For shared GPU reservations, each project pays for the GPU-hours it used at the reservation rate, and unused reserved capacity is charged to the project that owns the reservation."
+          : "For shared GPU reservations, allocate the charge as follows: " + METHOD_LABELS[method] + ".",
+    rationale: "From the controller's note when approving on " + run.workItemId + ": " + note,
+    precedent_ids: (precedents.matches as Json[]).map((m) => m.id as string),
+    evidence_ids: [],
+  });
+  await c.call("finish_guidance", {
+    summary: proposed.ok
+      ? "You asked for a standing rule: " + METHOD_LABELS[method] + ". I proposed " + String(proposed.policy_id ?? "it") + " for your approval."
+      : "That is already the approved rule (" + METHOD_LABELS[method] + "), so nothing needs to change.",
   });
 }
 
@@ -570,6 +602,7 @@ export async function runDeterministicAgent(ctx: AppContext, run: AgentRunContex
   else if (run.agentId === ACTOR.vendorLiaison && (trigger === "vendor_message" || trigger === "human_info")) await vendorReplyPolicy(caller, run);
   else if (run.agentId === ACTOR.compute || run.agentId === ACTOR.capacity) await computePolicy(caller);
   else if (run.agentId === ACTOR.finance) await financePolicy(caller);
+  else if (run.agentId === ACTOR.policy && trigger === "controller_guidance") await guidancePolicy(caller, run);
   else if (run.agentId === ACTOR.policy) await policyAnalystPolicy(caller, run);
   else if (run.agentId === ACTOR.vendorLiaison) await vendorPolicy(caller);
   else if (run.agentId === ACTOR.budget && trigger === "controller_note") await budgetChangePolicy(caller, run);

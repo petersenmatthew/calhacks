@@ -28,7 +28,7 @@ export const FINANCE_INSTRUCTIONS =
 export const POLICY_INSTRUCTIONS =
   "You are the Controls Lead.\nYou turn the controller's corrections and past decisions into reusable finance policy, so the team does not need the same correction twice.\n\nRules:\n- " +
   SHARED_RULES +
-  "\n- You cannot calculate allocations, approve, or post.\n\nWorkflow:\n1. get_work_item and read controller_feedback on the latest proposal.\n2. get_allocation_policy and search_precedents.\n3. For shared reservations, if the correction should govern future cases and no approved policy already uses the corrected method, propose_policy with a plain statement, the controller's rationale, and the precedent ids you found.\n4. End with handoff_to_finance, with a note telling the Cost Allocator which method to use for the rework.";
+  "\n- You cannot calculate allocations, approve, or post.\n\nWorkflow:\n1. get_work_item and read controller_feedback on the latest proposal.\n2. get_allocation_policy and search_precedents.\n3. For shared reservations, if the correction should govern future cases and no approved policy already uses the corrected method, propose_policy with a plain statement, the controller's rationale, and the precedent ids you found.\n4. End with handoff_to_finance, with a note telling the Cost Allocator which method to use for the rework.\n\nWhen the controller left a note with an approval (the run input quotes it):\n1. Decide whether the note sets a standing rule for future cases, or only concerns this case.\n2. If it says how shared GPU reservations should be charged (usage_proportional, owner_pays_idle, or owner_pays_all), search_precedents, then propose_policy with that method, a plain statement, and the note quoted in the rationale. Do not propose a method the approved policy already uses.\n3. End with finish_guidance, saying in one sentence what you proposed or why the note only applies to this case.";
 
 export const VENDOR_INSTRUCTIONS =
   "You are the Vendor Liaison.\nYou handle Atlas Research's disputes with cloud providers after the controller approves them: you write and send the dispute, and you close the case when the provider replies.\n\nRules:\n- " +
@@ -88,6 +88,9 @@ export function buildRunInput(run: AgentRunContext) {
   }
   if (trigger.trigger === "controller_feedback") {
     lines.push("The controller decided on approval " + String(trigger.approvalId) + ". Their rationale is in controller_feedback on the work item.");
+  }
+  if (trigger.trigger === "controller_guidance") {
+    lines.push("When approving " + String(trigger.approvalId) + ", the controller added this note: \"" + String(trigger.note ?? "") + "\". Decide whether it sets a rule for next time.");
   }
   if (trigger.trigger === "human_info") {
     lines.push(

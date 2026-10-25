@@ -3,11 +3,13 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { ArrowUpRight, Check, LoaderCircle, Minus, X } from "lucide-react";
-import type { BurnSpec, Check as CheckRow, ContractPreview, DocSpec, FrameSpec, MatchSpec, StackSpec, ThreadSpec, TimelineSpec, Tone } from "@/lib/frames";
+import type { BurnSpec, Check as CheckRow, ContractPreview, PolicyChange, DocSpec, FrameSpec, MatchSpec, StackSpec, ThreadSpec, TimelineSpec, Tone } from "@/lib/frames";
 import { CONTRACT_ID, contractHref, contractThumb } from "@/lib/contracts";
 import { ContractLinked } from "../contract/contract-link";
 import { compactMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { postJson } from "@/lib/api";
+import { toast } from "sonner";
 
 /** Frames are laid out at this size, then scaled into the small card on the canvas. */
 export const DW = 640;
@@ -636,6 +638,61 @@ function ContractCard({ c, open, t, span }: { c: ContractPreview; open?: boolean
   );
 }
 
+/** A rule the Controls Lead learned: the words that taught it, the rule before and after, and the decision. */
+function PolicyChangeView({ c, open }: { c: PolicyChange; open?: boolean }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+  const decide = async (decision: "APPROVED" | "REJECTED") => {
+    if (!c.approvalId) return;
+    setBusy(decision);
+    try {
+      await postJson("/api/approvals/" + c.approvalId, { decision, reason: decision === "REJECTED" ? "Rejected from the canvas" : null });
+      setDone(decision === "APPROVED" ? "Approved. It applies from the next case." : "Rejected.");
+    } catch (error) {
+      toast.error((error as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <div className="animate-enter">
+      {c.quote ? (
+        <blockquote className="mt-4 border-l-2 border-zinc-300 pl-3 text-[14px] leading-snug text-zinc-600 italic">
+          &ldquo;{c.quote.text}&rdquo;
+          <div className="mt-0.5 text-[12px] text-zinc-400 not-italic">{c.quote.who}</div>
+        </blockquote>
+      ) : c.source ? (
+        <p className="mt-4 line-clamp-3 border-l-2 border-zinc-300 pl-3 text-[13px] leading-snug text-zinc-500">{c.source}</p>
+      ) : null}
+      <div className={cn("mt-4 overflow-hidden rounded-xl text-[13.5px] ring-1 ring-zinc-200", c.before && "grid grid-cols-2")}>
+        {c.before ? (
+          <div className="bg-red-50/60 p-3">
+            <div className="font-mono text-[11px] text-zinc-400">v{c.before.version}</div>
+            <div className="mt-1 line-clamp-6 leading-snug text-destructive line-through decoration-red-300">{c.before.text}</div>
+          </div>
+        ) : null}
+        <div className={cn("bg-accent/60 p-3", c.before && "border-l")}>
+          <div className="font-mono text-[11px] text-zinc-400">v{c.after.version}</div>
+          <div className="mt-1 line-clamp-6 leading-snug text-brand-ink">{c.after.text}</div>
+        </div>
+      </div>
+      <div className="mt-4 flex items-center justify-end gap-2">
+        <span className="mr-auto text-[12.5px] text-zinc-500">{done ?? c.status}</span>
+        {c.approvalId && open && !done ? (
+          <>
+            <button type="button" disabled={busy !== null} onClick={(e) => (e.stopPropagation(), decide("REJECTED"))} className="rounded-lg px-3 py-1.5 text-[13px] text-zinc-600 ring-1 ring-zinc-200 hover:ring-zinc-400">
+              Reject
+            </button>
+            <button type="button" disabled={busy !== null} onClick={(e) => (e.stopPropagation(), decide("APPROVED"))} className="flex items-center gap-1.5 rounded-lg bg-zinc-900 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-zinc-800">
+              {busy === "APPROVED" ? <LoaderCircle className="size-3.5 animate-spin" /> : null} Approve v{c.after.version}
+            </button>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 /** The contract PDF scrolling by while an employee reads it, with a scan line where it is reading. */
 function ContractReader({ c }: { c: ContractPreview }) {
   const pages = c.page?.of ?? 1;
@@ -731,6 +788,7 @@ export function FrameView({
       {spec.timeline ? <TimelineView spec={spec.timeline} at={tl.lanes} t={t} /> : null}
       {spec.match ? <MatchView m={spec.match} at={tl.match} result={tl.result} t={t} /> : null}
       {spec.reading ? <ContractReader c={spec.reading} /> : null}
+      {spec.policyChange ? <PolicyChangeView c={spec.policyChange} open={open} /> : null}
       {spec.match && spec.contract && tl.contract && t >= tl.contract[0] ? <ContractCard c={spec.contract} open={open} t={t} span={tl.contract} /> : null}
       {spec.stack ? <StackView s={spec.stack} at={tl.stack} legend={tl.legend} t={t} /> : null}
       {spec.burn ? <BurnView b={spec.burn} span={tl.burn} t={t} /> : null}

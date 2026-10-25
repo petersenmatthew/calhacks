@@ -1164,7 +1164,10 @@ const proposePolicy = defineTool({
     evidence_ids: z.array(z.string()),
   }),
   handler: ({ ctx, run, item }, args) => {
-    if (item.type !== "SHARED_ALLOCATION") fail("Allocation policies are proposed from shared-reservation work items.");
+    // A rule can come from a shared-reservation correction, or from a note the controller left on any approval.
+    if (item.type !== "SHARED_ALLOCATION" && run.trigger.trigger !== "controller_guidance") {
+      fail("Allocation policies are proposed from shared-reservation work items or from the controller's own note.");
+    }
     const current = getApprovedPolicy(ctx, POLICY_KEYS.sharedReservation);
     if (current && current.rule.method === args.method) fail("Approved policy " + current.id + " already uses " + args.method + ".", "POLICY_EXISTS");
     const pending = ctx.db
@@ -1231,7 +1234,7 @@ const proposePolicy = defineTool({
     });
     return {
       result: { policy_id: id, version, approval_id: approvalId },
-      title: "Cost Allocator proposed reusable policy " + POLICY_KEYS.sharedReservation + " v" + version,
+      title: (getActor(ctx, run.agentId)?.name ?? "Controls Lead") + " proposed reusable policy " + POLICY_KEYS.sharedReservation + " v" + version,
       summary: statement,
       activityType: "POLICY",
       changes: ["Policy " + id + " proposed", "Approval " + approvalId + " pending"],
@@ -2205,7 +2208,25 @@ const finishOnboarding = defineTool({
   }),
 });
 
+const finishGuidance = defineTool({
+  name: "finish_guidance",
+  agent: "policy",
+  permission: "policy:propose",
+  category: "write",
+  terminal: true,
+  description:
+    "End a run about a note the controller left with a decision. Say in one sentence what you did with it: the rule you proposed, or why it only applies to this case. Ends your run.",
+  schema: z.object({ work_item_id: workItemId, summary: z.string() }),
+  handler: (_tc, args) => ({
+    result: { done: true },
+    title: "Controls Lead read your note",
+    summary: args.summary.slice(0, 600),
+    terminal: { summary: "handled the controller's note" },
+  }),
+});
+
 export const TOOLS: ToolDefinition[] = [
+  finishGuidance,
   getWorkItemTool,
   getInstanceLifecycle,
   getGpuJobLogs,

@@ -422,10 +422,12 @@ function TaskView({
             {shortTitle({ ...w.item, resource: w.item.instanceId ?? w.item.reservationId }, w.providers)}
           </h2>
         </div>
-        {w.dispute?.letterBody ? <DisputeLetter dispute={w.dispute} /> : null}
+        {/* The whole conversation stays: the work, the email where it was sent, the replies, then how it ended. */}
+        <Feed w={w} />
+        {w.dispute?.letterBody && !letterInFeed(w) ? <DisputeLetter dispute={w.dispute} /> : null}
         <VendorThread w={w} />
         <DoneFinale w={w} justFinished={justFinished} />
-        <HowWeGotHere w={w} extra={record} letter={false} />
+        <div className="text-[12.5px] text-zinc-500">{record}</div>
         {chat.length || chatPending ? <Thread messages={chat} pending={chatPending} onTask={onTask} inset contractId={w.contract.id} /> : null}
       </div>
     );

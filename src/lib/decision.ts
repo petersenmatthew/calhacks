@@ -334,7 +334,7 @@ function ruleDecision(w: WorkspaceData, approval: WorkspaceData["approvals"][num
     kind: "rule",
     approvalId: approval.id,
     askedBy: approval.requestedBy,
-    context: "Learned from your correction",
+    context: w.approvals.some((a) => a.subjectType === "PROPOSAL" && (a.status === "REJECTED" || a.status === "CHANGES_REQUESTED")) ? "Learned from your correction" : "Learned from your note",
     title: METHOD_RULE[policy.rule.method] ?? policy.title,
     ask: "Make this the rule from now on?",
     proof: null,

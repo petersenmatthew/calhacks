@@ -137,7 +137,9 @@ export function buildFeed(w: WorkspaceData): FeedLine[] {
   for (const row of w.activity) {
     if (row.actorId.startsWith("human.")) {
       const name = w.actors[row.actorId]?.name ?? "";
-      out.push({ kind: "you", id: row.id, at: row.createdAt, text: name && row.title.startsWith(name) ? "You" + row.title.slice(name.length) : row.title });
+      const said = name && row.title.startsWith(name) ? "You" + row.title.slice(name.length) : row.title;
+      // Keep the controller's own words with the decision, so a note left with an approval is not lost.
+      out.push({ kind: "you", id: row.id, at: row.createdAt, text: row.summary ? said + ": \u201c" + row.summary.trim() + "\u201d" : said });
       continue;
     }
     const agent = row.actorId.startsWith("agent.");

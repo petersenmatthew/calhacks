@@ -235,7 +235,7 @@ export function getDashboard(ctx: AppContext, requestedPeriod?: string | null) {
     })),
     activity: ctx.db.select().from(activityEvents).orderBy(desc(activityEvents.id)).limit(30).all(),
     /** Open approval requests and which employee asked, so the canvas can show them waiting on you. */
-    openApprovals: pending.map((a) => ({ id: a.id, workItemId: a.workItemId, requestedBy: a.requestedBy, subjectType: a.subjectType, summary: a.summary })),
+    openApprovals: pending.map((a) => ({ id: a.id, workItemId: a.workItemId, requestedBy: a.requestedBy, subjectType: a.subjectType, subjectId: a.subjectId, summary: a.summary })),
     agents: getAgentStatuses(ctx),
     settings: getSettingsView(ctx),
     /** Policy proposals that are not tied to a work item (learned at onboarding). */

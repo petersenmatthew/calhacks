@@ -2,13 +2,14 @@ import { and, eq } from "drizzle-orm";
 import { recordActivity } from "../activity";
 import { appendAudit } from "../audit";
 import { nextId, nowIso, type AppContext } from "../context";
-import { approvalRequests, policies, precedents, projects, proposals } from "../db/schema";
+import { approvalRequests, policies, precedents, projects, proposals, workItems } from "../db/schema";
 import { METHOD_LABELS, type AllocationMethod } from "../domain/allocation";
 import { formatCents } from "../domain/money";
 import { ACTOR, getActor } from "../security/actors";
 import { authorize, guard } from "../security/authorize";
 import { ControlError } from "../security/errors";
 import { enqueueJob } from "./jobs";
+import { evaluateStandingAuthorization } from "./policies";
 import { CONTROLLER } from "../comms/directory";
 import { mention, postSlack, reactSlack, taskLink } from "../comms/outbox";
 
@@ -248,6 +249,15 @@ export function decideApproval(ctx: AppContext, input: DecisionInput) {
 
       if (approval.subjectType === "PROPOSAL") {
         enqueueJob(ctx, { workItemId: approval.workItemId, kind: "EXECUTE_DECISION", payload: { approvalId: approval.id } });
+        // A note left with an approval may set a rule for next time; the Controls Lead reads it and decides.
+        if (input.decision === "APPROVED" && reason && !input.budget) {
+          enqueueJob(ctx, {
+            workItemId: approval.workItemId,
+            kind: "AGENT_RUN",
+            agentId: ACTOR.policy,
+            payload: { trigger: "controller_guidance", approvalId: approval.id, note: reason },
+          });
+        }
         // Queued after the decision runs, so the Budget Analyst finds the item approved.
         if (input.budget) {
           enqueueJob(ctx, {
@@ -266,8 +276,56 @@ export function decideApproval(ctx: AppContext, input: DecisionInput) {
           summary: "Future cases matching this policy will use it. The previous version is superseded.",
           changes: ["Policy " + approval.subjectId + " APPROVED"],
         });
+        settleCoveredProposals(ctx, approval.workItemId, subjectLabel, input.actorId, ts);
       }
       return { approvalId: approval.id, decision: input.decision };
     },
   );
+}
+
+/**
+ * A proposal that was waiting only because its rule was not approved yet does not need a second sign-off:
+ * once the controller approves the rule, any pending proposal on the same case that the rule now covers
+ * is approved under it and posted.
+ */
+function settleCoveredProposals(ctx: AppContext, workItemId: string, policyLabel: string, actorId: string, ts: string) {
+  const item = ctx.db.select().from(workItems).where(eq(workItems.id, workItemId)).get();
+  if (!item) return;
+  const waiting = ctx.db
+    .select()
+    .from(approvalRequests)
+    .where(and(eq(approvalRequests.workItemId, workItemId), eq(approvalRequests.subjectType, "PROPOSAL"), eq(approvalRequests.status, "PENDING")))
+    .all();
+  for (const a of waiting) {
+    const proposal = ctx.db.select().from(proposals).where(eq(proposals.id, a.subjectId)).get();
+    if (!proposal || proposal.status !== "PENDING_APPROVAL") continue;
+    if (!evaluateStandingAuthorization(ctx, item, proposal).authorized) continue;
+    const reason = "Covered by " + policyLabel + ", which you just approved.";
+    ctx.db
+      .update(approvalRequests)
+      .set({ status: "APPROVED", decidedBy: actorId, decisionReason: reason, decidedAt: ts })
+      .where(eq(approvalRequests.id, a.id))
+      .run();
+    appendAudit(ctx, {
+      actorId,
+      action: "approval.decide",
+      category: "decision",
+      targetType: "proposal",
+      targetId: proposal.id,
+      workItemId,
+      approvalId: a.id,
+      rule: "SOD",
+      details: { decision: "APPROVED", reason, coveredBy: policyLabel },
+    });
+    recordActivity(ctx, {
+      workItemId,
+      actorId: ACTOR.orchestrator,
+      type: "APPROVAL_DECISION",
+      status: "ok",
+      title: proposal.id + " no longer needs your sign-off",
+      summary: reason,
+      changes: ["Approval " + a.id + ": APPROVED under " + policyLabel],
+    });
+    enqueueJob(ctx, { workItemId, kind: "EXECUTE_DECISION", payload: { approvalId: a.id } });
+  }
 }

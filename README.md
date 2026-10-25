@@ -115,7 +115,7 @@ The app opens on **Canvas**: the six agents on a ring around you, each spawning 
 
 **More to try**
 
-- **Shared cluster allocation** ($12,400, two teams): the gateway refuses to post the written policy's split because it conflicts with the reservation terms. Reject it with *"Reserved capacity must be charged to the team that owns the reservation"*; the Controls Lead proposes policy v2 and the Cost Allocator reworks the split. Approve both, then send **Next month: similar reservation** and it posts on its own under the learned policy.
+- **Shared cluster allocation** ($12,400, two teams): the gateway refuses to post the written policy's split because it conflicts with the reservation terms. Reject it with *"Reserved capacity must be charged to the team that owns the reservation"*; the Controls Lead proposes policy v2 and the Cost Allocator reworks the split. Approve the rule (the reworked split posts with it, no second sign-off), then send **Next month: similar reservation** and it posts on its own under the learned policy.
 - **Fast-forward time** with the clock in the top bar. New Lambda and Nebius lines arrive from the billing feeds and get worked; a $12 variance is accepted under the learned materiality policy instead of disputed (approve that policy first: it is waiting in the sidebar from onboarding). At +3 days a $600 dispute arrives; approve it, let the vendor stay silent, and it is chased at 14 days and escalated at 30. An approval left waiting is reminded after a day and escalated to the CFO after three.
 - **Custom invoice line** makes a discrepancy that isn't scripted. **Resend last billing event** shows a repeated event is ignored. **Reset demo** starts over.
 
