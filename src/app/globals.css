@@ -425,7 +425,16 @@
   100% { transform: scale(1, 1); }
 }
 .px-land { animation: px-land 0.36s ease-out both; animation-delay: var(--px-fall, 0s); transform-origin: 50% 100%; }
+/* Landing: a speech bubble pops up, holds, and fades. */
+@keyframes px-say {
+  0% { opacity: 0; transform: translateY(4px) scale(0.6); }
+  10% { opacity: 1; transform: translateY(-2px) scale(1.05); }
+  16%, 88% { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-4px) scale(0.95); }
+}
+.px-say { animation: px-say 2.8s ease-out both; transform-origin: 50% 100%; }
 @media (prefers-reduced-motion: reduce) {
   .px-held, .px-land, .px-held .px-kick { animation: none; }
+  .px-say { animation: none; }
 }
 

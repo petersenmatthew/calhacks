@@ -853,7 +853,7 @@ export function Orbit({
   );
 }
 
-/** The centre seat: you, drawn like the employees. A quest marker pops up when something waits on you. */
+/** The centre seat: you, on a plain white tile. A pink "!" appears when something waits on you. */
 function YouCard({ here, label, onClick }: { here: boolean; label: string; onClick?: () => void }) {
   return (
     <button
@@ -865,16 +865,10 @@ function YouCard({ here, label, onClick }: { here: boolean; label: string; onCli
       }}
       className="group relative flex size-full flex-col items-center justify-start pt-3 enabled:cursor-pointer"
     >
-      <span
-        className={cn(
-          "relative grid size-20 place-items-center rounded-[22px] border border-zinc-200 transition-[transform,border-color] duration-200 group-enabled:group-hover:-translate-y-0.5",
-          here && "border-primary ring-4 ring-primary/25",
-        )}
-        style={{ background: spriteTint("you") }}
-      >
+      <span className="relative grid size-20 place-items-center rounded-[22px] border border-zinc-200 bg-white transition-transform duration-200 group-enabled:group-hover:-translate-y-0.5">
         <PixelAgent actorId="you" size={58} working={here} />
         {here ? (
-          <span className="px-bob-fast absolute -top-3 -right-2 grid h-7 min-w-7 place-items-center rounded-md border-2 border-zinc-900 bg-primary px-1 font-mono text-[15px] leading-none font-bold text-zinc-900 shadow-[2px_2px_0_rgb(24_24_27)]">
+          <span className="absolute -top-2 -right-2 grid size-6 place-items-center rounded-full bg-[#e2558b] text-[13px] leading-none font-bold text-white shadow-[0_0_0_3px_#fbfaf7]">
             !
           </span>
         ) : null}

@@ -563,6 +563,21 @@ function Composer({ placeholder, onSend, disabled, focusKey = 0 }: { placeholder
 
 const SUGGESTIONS = ["What is blocking close?", "Where are we overbilled most?"];
 
+/** Suggested questions above the composer, one per row. */
+function Suggestions({ items, onPick }: { items: string[]; onPick: (s: string) => void }) {
+  return (
+    <div className="mb-2 px-0.5">
+      {items.map((s) => (
+        <button key={s} type="button" onClick={() => onPick(s)} className="group flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[13px] text-zinc-600 hover:bg-zinc-100/80 hover:text-zinc-950">
+          <span className="min-w-0 flex-1 truncate">{s}</span>
+          <ArrowUpRight className="size-3.5 text-zinc-300 group-hover:text-zinc-600" />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+
 /** The frame the controller opened, and the employee who made it. */
 export type FrameChatTarget = {
   /** Tagged frame id, unique across tasks; chats are kept per frame. */
@@ -646,18 +661,7 @@ function FrameChat({
       </div>
       <div className="shrink-0 px-3 pt-2 pb-3">
         {!messages.length ? (
-          <div className="mb-2 flex flex-wrap gap-1.5 px-0.5">
-            {frameSuggestions(f).map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => onAsk(s)}
-                className="rounded-full px-2.5 py-1 text-[12px] text-zinc-500 ring-1 ring-zinc-200 transition-colors hover:bg-zinc-50 hover:text-zinc-800"
-              >
-                {s}
-              </button>
-            ))}
-          </div>
+          <Suggestions items={frameSuggestions(f)} onPick={onAsk} />
         ) : null}
         <Composer placeholder={"Ask " + f.agentName + " about this"} onSend={onAsk} disabled={pending} />
       </div>
@@ -893,18 +897,7 @@ export function Sidebar({
 
           <div className="shrink-0 px-3 pt-2 pb-3">
             {mode === "home" && !chat.length ? (
-              <div className="mb-2 flex flex-wrap gap-1.5 px-0.5">
-                {SUGGESTIONS.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => ask(s)}
-                    className="rounded-full px-2.5 py-1 text-[12px] text-zinc-500 ring-1 ring-zinc-200 transition-colors hover:bg-zinc-50 hover:text-zinc-800"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
+              <Suggestions items={SUGGESTIONS} onPick={ask} />
             ) : null}
             {mode === "home" && chat.length ? (
               <button type="button" onClick={() => setChatOpen(true)} className="mb-2 px-1 text-[12px] text-zinc-500 hover:text-zinc-900">

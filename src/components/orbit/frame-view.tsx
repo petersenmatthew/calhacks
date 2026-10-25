@@ -403,18 +403,39 @@ function BurnView({ b, span, t }: { b: BurnSpec; span: [number, number]; t: numb
   const R = 8;
   const T = 18;
   const B = 22;
-  const max = Math.max(b.budget, b.projected, b.posted, 1) * 1.15;
+  const used = b.used ?? b.posted;
+  // Older runs have no daily series; fall back to a straight line.
+  const series = b.series && b.series.length === b.days + 1 ? b.series : null;
+  const max = Math.max(b.budget, b.projected, used, 1) * 1.15;
   const X = (d: number) => L + (d / Math.max(1, b.days)) * (w - L - R);
   const Y = (c: number) => T + (1 - c / max) * (h - T - B);
   const a = grow(t, span[0], span[1] * 0.55);
   const p = grow(t, span[0] + span[1] * 0.55, span[1] * 0.45);
   const color = TONE_STROKE[b.tone];
-  const x0 = X(0);
   const y0 = Y(0);
   const xe = X(b.elapsed);
-  const ye = Y(b.posted);
+  const ye = Y(used);
   const xEnd = X(b.days);
   const yEnd = Y(b.projected);
+  const actual: [number, number][] = series ? series.slice(0, b.elapsed + 1).map((c, d) => [X(d), Y(c)]) : [[X(0), y0], [xe, ye]];
+  const ahead: [number, number][] = series ? series.slice(b.elapsed).map((c, i) => [X(b.elapsed + i), Y(c)]) : [[xe, ye], [xEnd, yEnd]];
+  const clip = (pts: [number, number][], f: number) => {
+    // Reveal the line left to right as it animates in.
+    const limit = pts[0][0] + (pts[pts.length - 1][0] - pts[0][0]) * f;
+    const out: [number, number][] = [];
+    for (let i = 0; i < pts.length; i++) {
+      const [x, y] = pts[i];
+      if (x <= limit) out.push([x, y]);
+      else {
+        const [px, py] = pts[i - 1];
+        out.push([limit, py + ((y - py) * (limit - px)) / Math.max(1e-6, x - px)]);
+        break;
+      }
+    }
+    return out;
+  };
+  const path = (pts: [number, number][]) => pts.map(([x, y], i) => (i ? "L" : "M") + x + "," + y).join(" ");
+  const shown = clip(actual, a);
   const text = { fontSize: 11 };
   return (
     <svg width={w} height={h} className="mt-4 overflow-visible">
@@ -428,16 +449,18 @@ function BurnView({ b, span, t }: { b: BurnSpec; span: [number, number]; t: numb
         Budget {compactMoney(b.budget)}
       </text>
       <line x1={xe} x2={xe} y1={T} y2={y0} stroke="#d4d4d8" strokeDasharray="2 3" />
-      <path d={"M" + x0 + "," + y0 + " L" + xe + "," + ye + " L" + xe + "," + y0 + " Z"} fill={color} opacity={0.1 * a} />
-      <line x1={x0} y1={y0} x2={x0 + (xe - x0) * a} y2={y0 + (ye - y0) * a} stroke={color} strokeWidth={2.5} strokeLinecap="round" />
-      {p > 0 ? (
-        <line x1={xe} y1={ye} x2={xe + (xEnd - xe) * p} y2={ye + (yEnd - ye) * p} stroke={color} strokeWidth={2} strokeDasharray="6 5" strokeLinecap="round" />
+      {shown.length > 1 ? (
+        <>
+          <path d={path(shown) + " L" + shown[shown.length - 1][0] + "," + y0 + " L" + shown[0][0] + "," + y0 + " Z"} fill={color} opacity={0.1} />
+          <path d={path(shown)} fill="none" stroke={color} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+        </>
       ) : null}
+      {p > 0 ? <path d={path(clip(ahead, p))} fill="none" stroke={color} strokeWidth={2} strokeDasharray="6 5" strokeLinecap="round" strokeLinejoin="round" /> : null}
       {a >= 1 ? (
         <>
           <circle cx={xe} cy={ye} r={4.5} fill="white" stroke={color} strokeWidth={2.5} />
           <text x={xe - 8} y={ye - 10} textAnchor="end" className="fill-zinc-700" style={{ ...text, fontWeight: 600 }}>
-            {compactMoney(b.posted)} posted
+            {compactMoney(used)} {b.used === undefined ? "posted" : "used"}
           </text>
         </>
       ) : null}

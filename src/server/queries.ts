@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { verifyAuditChain } from "./audit";
+import { projectBurn } from "./burn";
 import type { AppContext } from "./context";
 import {
   activityEvents,
@@ -169,7 +170,7 @@ export function getDashboard(ctx: AppContext, requestedPeriod?: string | null) {
   const runs = ctx.sqlite
     .prepare("SELECT COUNT(*) AS n, COALESCE(SUM(CASE WHEN mode = 'llm' THEN 1 ELSE 0 END), 0) AS llm FROM agent_runs")
     .get() as { n: number; llm: number };
-  // Compute spend posted to each project this period, with a straight-line month-end projection.
+  // Compute spend posted to each project this period, with a usage-based month-end projection.
   const posted = ctx.sqlite
     .prepare(
       "SELECT p.id AS id, p.name AS name, p.monthly_budget_cents AS budget, COALESCE((SELECT SUM(l.debit_cents - l.credit_cents) FROM journal_lines l JOIN journal_entries e ON e.id = l.entry_id WHERE l.account_code = '6100' AND l.project_id = p.id AND e.period = ?), 0) AS posted FROM projects p ORDER BY p.name",
@@ -210,7 +211,7 @@ export function getDashboard(ctx: AppContext, requestedPeriod?: string | null) {
     budgets: {
       elapsed,
       daysInMonth,
-      projects: posted.map((p) => ({ ...p, projected: Math.round((p.posted / elapsed) * daysInMonth) })),
+      projects: posted.map((p) => ({ ...p, projected: projectBurn(ctx, p.id, period)?.projected ?? p.posted })),
     },
     workItems: items.map((i) => ({
       id: i.id,
