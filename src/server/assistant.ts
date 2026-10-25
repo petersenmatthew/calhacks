@@ -6,6 +6,7 @@ import { buildFrames, frameText, NODE_OF } from "@/lib/frames";
 import type { AppContext } from "./context";
 import { projects } from "./db/schema";
 import { getDashboard, getWorkspace } from "./queries";
+import { looksLikeRule } from "@/lib/rule-intent";
 
 export type ChatMessage = { role: "user" | "assistant"; content: string };
 
@@ -146,7 +147,14 @@ export async function askAboutFrame(ctx: AppContext, messages: ChatMessage[], ta
 /** A budget change the controller asked for alongside their decision. */
 export type BudgetChange = { projectId: string; projectName: string; monthlyCents: number; fromCents?: number };
 
-export type DecisionTurn = { reply: string; choiceId: string | null; note: string | null; budget: BudgetChange | null };
+export type DecisionTurn = {
+  reply: string;
+  choiceId: string | null;
+  note: string | null;
+  budget: BudgetChange | null;
+  /** The note sets a rule for future cases; the Controls Lead drafts it for approval. */
+  rule?: boolean;
+};
 
 const Turn = z.object({
   reply: z.string().describe("What you say to the controller."),
@@ -158,6 +166,11 @@ const Turn = z.object({
   budget_project_id: z.string().nullable().describe("If the controller asked to set a project's monthly budget, that project's id, else null."),
   budget_monthly_usd: z.number().nullable().describe("The new monthly budget in US dollars, only when the controller gave or agreed to a figure, else null."),
   waiting_on_detail: z.boolean().describe("True when your reply asks the controller for a detail you still need before they confirm, such as a budget amount."),
+  rule_for_next_time: z
+    .boolean()
+    .describe(
+      "True when the note says how things should be done in general from now on (who pays, how shared costs are split, what to dispute, limits or thresholds), even if they never say 'rule' or 'policy'. False when it is only about this case.",
+    ),
 });
 
 /** Opening messages, kept until the decision changes; one cache per database (each visitor's sandbox reuses the same ids). */
@@ -242,7 +255,8 @@ export async function discussDecision(ctx: AppContext, messages: ChatMessage[], 
           "If they gave no figure (for example 'lower it'), pick one yourself: about 10% below the current monthly budget when lowering, about 10% above when raising, rounded to the nearest $5,000.",
           "When a budget is involved, reply in two short sentences like: 'MoE routing ablation 07 runs on Frontier Language Models, so I'll take that budget from $520,000 to $470,000 a month. Confirm and I'll send the $1,200 dispute too.' Use the real experiment, project and figures. Do not ask them to confirm the amount; the Confirm button does that, and they can name another figure.",
           "Only set waiting_on_detail when you truly cannot tell which project they mean.",
-          "Say in one short sentence everything that will happen once they hit Confirm, including the extra part. If no one on the team can do the extra part, say so plainly.",
+          "Say in one short sentence everything that will happen once they hit Confirm, including the extra part.",
+          "If the extra part changes how things are done from now on (who pays, how shared costs are split, what gets disputed, limits or thresholds), it is a rule for next time: set rule_for_next_time, and say you will pass it to the Controls Lead, who drafts the rule for their approval. Never say you cannot do it; the Controls Lead owns rules.",
           "If they are asking or unsure, leave everything null.",
         ].join(" ")
       : "Write your opening message: under 25 words, like a quick note to a colleague. What happened in everyday words, then what you would do. No record ids, policy names or clause numbers. Do not list the options; they are shown as buttons. All other fields are null.",
@@ -301,5 +315,16 @@ export async function discussDecision(ctx: AppContext, messages: ChatMessage[], 
         (chosen ? " Confirm and I'll " + chosen.label.charAt(0).toLowerCase() + chosen.label.slice(1) + " too." : "")
       : reply;
   // The budget change says what the note said; keep the note only for anything else.
-  return { reply: finalReply, choiceId, note: budget && note && /budget/i.test(note) ? null : note, budget };
+  const kept = budget && note && /budget/i.test(note) ? null : note;
+  // A rule for next time goes to the Controls Lead; say so, and never that nobody can do it.
+  const rule = Boolean(kept && (out?.rule_for_next_time || looksLikeRule(kept)));
+  let spoken = finalReply;
+  if (rule) {
+    spoken = spoken
+      .split(/(?<=[.!?])\s+/)
+      .filter((s) => !/\b(can't|cannot|can not|unable to|not able to|would need a separate)\b/i.test(s))
+      .join(" ");
+    if (!/controls lead/i.test(spoken)) spoken = (spoken ? spoken + " " : "") + "I'll pass the rule for next time to the Controls Lead, who drafts it for your approval.";
+  }
+  return { reply: spoken, choiceId, note: kept, budget, rule };
 }

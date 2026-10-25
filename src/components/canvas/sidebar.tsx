@@ -786,7 +786,7 @@ export function Sidebar({
     let turn: TalkTurn;
     try {
       const r = await postJson<DecisionTurn>("/api/work-items/" + ready.item.id + "/discuss", { messages: next.map(({ role, content }) => ({ role, content })) });
-      turn = { role: "assistant", content: r.reply, choiceId: r.choiceId, note: r.note, budget: r.budget };
+      turn = { role: "assistant", content: r.reply, choiceId: r.choiceId, note: r.note, budget: r.budget, rule: r.rule };
     } catch (e) {
       turn = { role: "assistant", content: "Something went wrong: " + (e as Error).message };
     }

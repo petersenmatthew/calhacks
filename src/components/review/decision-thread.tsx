@@ -14,9 +14,10 @@ import { AgentAvatar } from "../status";
 import { ContractLinked } from "../contract/contract-link";
 import { doneMessage, submitDecision } from "./decision-card";
 import { ProofView, SplitBar, TONE_BG } from "./proof";
+import { looksLikeRule } from "@/lib/rule-intent";
 
 /** One message in a decision conversation. Agent replies may carry the option the controller picked in words. */
-export type TalkTurn = { role: "user" | "assistant"; content: string; choiceId?: string | null; note?: string | null; budget?: BudgetChange | null };
+export type TalkTurn = { role: "user" | "assistant"; content: string; choiceId?: string | null; note?: string | null; budget?: BudgetChange | null; rule?: boolean };
 
 function typing(t: EventTarget | null) {
   return t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName));
@@ -245,7 +246,13 @@ export function DecisionThread({
                         },
                       ]
                     : []),
-                  ...(t.choiceId && t.note ? [{ actorId: decision.askedBy, text: "Note", detail: t.note }] : []),
+                  ...(t.choiceId && t.note
+                    ? [
+                        t.rule || looksLikeRule(t.note)
+                          ? { actorId: "agent.policy", text: "Controls Lead drafts a rule for next time", detail: t.note + " You approve it before it applies." }
+                          : { actorId: decision.askedBy, text: "Note", detail: t.note },
+                      ]
+                    : []),
                 ]}
                 busy={busy !== null}
                 onConfirm={() =>

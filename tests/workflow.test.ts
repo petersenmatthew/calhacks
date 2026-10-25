@@ -58,6 +58,15 @@ describe("Scenario 1: suspected GPU overbilling", () => {
     expect(rule.proposed[0].learnedFromWorkItemId).toBe(rule.id);
     expect(pendingApprovals(rule.ctx, rule.id).map((a) => a.subjectId)).toEqual([rule.proposed[0].id]);
 
+    // Said without the word "rule" or "policy", and the way the controller actually phrased it in the chat.
+    for (const said of [
+      "Bill it to the team that owns the GPU, not split usage.",
+      "Dispute this, but let's make a rule going forward that we bill it to the team that owns the GPU and not by split usage.",
+    ]) {
+      const again = await run(said);
+      expect(again.proposed.map((p) => p.rule.method)).toEqual(["owner_pays_all"]);
+    }
+
     const once = await run("Send it today, please.");
     expect(once.proposed).toHaveLength(0);
   });

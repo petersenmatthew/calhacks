@@ -1,3 +1,4 @@
+import { looksLikeRule } from "@/lib/rule-intent";
 import { METHOD_LABELS, RESERVATION_METHODS, type AllocationMethod } from "../domain/allocation";
 import { formatCents } from "../domain/money";
 import { ACTOR } from "../security/actors";
@@ -167,7 +168,7 @@ function interpretCorrection(feedback: Json, rejectedMethod: string): Allocation
   const text = String(feedback.reason ?? "").toLowerCase();
   const mentionsOwner = /\bown(s|er|ers|ing)?\b|reserving team|reservation owner/.test(text);
   if (mentionsOwner && /entire|whole|all of (the )?reservation/.test(text)) return "owner_pays_all";
-  if (mentionsOwner && /(not|instead of|rather than)\s+(by\s+|based on\s+)?usage|not usage[- ]based/.test(text)) return "owner_pays_all";
+  if (mentionsOwner && /(not|instead of|rather than)\s+(by\s+|based on\s+)?(split\s+|splitting\s+)?(by\s+)?usage|not usage[- ]based|not (by )?split/.test(text)) return "owner_pays_all";
   if (mentionsOwner && /idle|unused|reserved capacity|capacity/.test(text)) return "owner_pays_idle";
   if (/usage|proportional/.test(text) && !mentionsOwner) return "usage_proportional";
   return rejectedMethod === "usage_proportional" ? "owner_pays_idle" : "usage_proportional";
@@ -292,14 +293,22 @@ async function financePolicy(c: Caller) {
   });
 }
 
+/** Whether a note says who should pay for shared GPU capacity, the kind of rule propose_policy can draft. */
+function aboutGpuCharging(note: string) {
+  const t = note.toLowerCase();
+  return /own(s|er|ers|ing)?|usage|proportional|reserv|idle|split/.test(t) && /pay|charge|bill|allocat|split/.test(t);
+}
+
 /** Controls Lead: read the note the controller left with a decision, and propose a rule if it sets one. */
 async function guidancePolicy(c: Caller, run: AgentRunContext) {
   const note = String(run.trigger.note ?? "");
-  const text = note.toLowerCase();
-  // The replay only recognises rules about who pays for GPUs; the live model reads the note itself.
-  const aboutCharging = /\bown(s|er|ers|ing)?\b|usage|proportional|reserv|idle/.test(text) && /pay|charge|bill|allocat|split/.test(text);
-  if (!aboutCharging) {
+  if (!looksLikeRule(note)) {
     await c.call("finish_guidance", { summary: "Your note is about this case only, so there is no new rule to propose." });
+    return;
+  }
+  // The replay can draft rules about who pays for shared GPUs; the live model reads anything else itself.
+  if (!aboutGpuCharging(note)) {
+    await c.call("finish_guidance", { summary: "That is a rule for next time. I logged it for you; I can only draft rules about who pays for shared GPUs so far." });
     return;
   }
   const method = interpretCorrection({ reason: note }, "usage_proportional");
@@ -317,7 +326,7 @@ async function guidancePolicy(c: Caller, run: AgentRunContext) {
     evidence_ids: [],
   });
   await c.call("finish_guidance", {
-    summary: proposed.ok
+    summary: proposed.ok && proposed.status !== "already_rule"
       ? "You asked for a standing rule: " + METHOD_LABELS[method] + ". I proposed " + String(proposed.policy_id ?? "it") + " for your approval."
       : "That is already the approved rule (" + METHOD_LABELS[method] + "), so nothing needs to change.",
   });
@@ -331,6 +340,28 @@ async function policyAnalystPolicy(c: Caller, run: AgentRunContext) {
     latest && (latest.status === "REJECTED" || latest.status === "CHANGES_REQUESTED")
       ? [...wi.controller_feedback].reverse().find((f: Json) => f.proposal_id === latest.id)
       : undefined;
+  // A correction on any case can still set who pays for shared GPUs from now on.
+  if (feedback && wi.work_item.type !== "SHARED_ALLOCATION" && looksLikeRule(feedback.reason) && aboutGpuCharging(String(feedback.reason))) {
+    const method = interpretCorrection({ reason: feedback.reason }, "usage_proportional");
+    const found = await c.call("search_precedents", { query: "shared reservation allocation owner pays controller instruction" });
+    const proposed = await c.try("propose_policy", {
+      method,
+      statement:
+        method === "owner_pays_all"
+          ? "For shared GPU reservations, the project that owns the reservation pays for all of it, whoever used the GPUs."
+          : "For shared GPU reservations, allocate the charge as follows: " + METHOD_LABELS[method] + ".",
+      rationale: "From the controller's correction on " + run.workItemId + ": " + feedback.reason,
+      precedent_ids: (found.matches as Json[]).map((m) => m.id as string),
+      evidence_ids: [],
+    });
+    await c.call("handoff_to_finance", {
+      note:
+        "Controller feedback on " + latest!.id + ": " + feedback.reason +
+        (proposed.ok && proposed.status !== "already_rule" ? " I proposed " + String(proposed.policy_id) + " for how shared GPUs are charged from now on." : "") +
+        " Rework this proposal.",
+    });
+    return;
+  }
   if (!feedback || wi.work_item.type !== "SHARED_ALLOCATION") {
     await c.call("handoff_to_finance", {
       note: feedback

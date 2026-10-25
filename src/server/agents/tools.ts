@@ -1165,11 +1165,19 @@ const proposePolicy = defineTool({
   }),
   handler: ({ ctx, run, item }, args) => {
     // A rule can come from a shared-reservation correction, or from a note the controller left on any approval.
-    if (item.type !== "SHARED_ALLOCATION" && run.trigger.trigger !== "controller_guidance") {
+    if (item.type !== "SHARED_ALLOCATION" && run.trigger.trigger !== "controller_guidance" && run.trigger.trigger !== "controller_feedback") {
       fail("Allocation policies are proposed from shared-reservation work items or from the controller's own note.");
     }
     const current = getApprovedPolicy(ctx, POLICY_KEYS.sharedReservation);
-    if (current && current.rule.method === args.method) fail("Approved policy " + current.id + " already uses " + args.method + ".", "POLICY_EXISTS");
+    // Asking for the rule that is already in force is not an error; say so and change nothing.
+    if (current && current.rule.method === args.method) {
+      return {
+        result: { policy_id: current.id, version: current.version, status: "already_rule" },
+        title: "Already the rule: " + current.policyKey + " v" + current.version,
+        summary: current.statement,
+        activityType: "POLICY",
+      };
+    }
     const pending = ctx.db
       .select()
       .from(policies)

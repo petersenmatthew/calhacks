@@ -1180,7 +1180,9 @@ export function buildFrames(w: WorkspaceData): Frame[] {
     // The Controls Lead's work shows as one rule frame per rule (policyFrames). A note that set no rule gets one line.
     if (tool === "propose_policy") continue;
     if (tool === "finish_guidance") {
-      const proposed = w.activity.some((r) => r.runId === row.runId && r.toolName === "propose_policy" && r.status === "ok");
+      const tried = w.activity.filter((r) => r.runId === row.runId && r.toolName === "propose_policy" && r.status === "ok");
+      const already = tried.some((r) => get(r.result, "status") === "already_rule" || get(r.result, "result.status") === "already_rule" || /^Already the rule/.test(r.title));
+      const proposed = tried.length > 0 && !already;
       // The note it read: the latest one the controller left with an approval on this case.
       const note = w.approvals.filter((a) => a.subjectType === "PROPOSAL" && a.status === "APPROVED" && a.decisionReason && !/^Covered by /.test(a.decisionReason) && (a.decidedAt ?? "") <= row.createdAt).at(-1)?.decisionReason ?? "";
       if (!proposed) {
@@ -1192,7 +1194,7 @@ export function buildFrames(w: WorkspaceData): Frame[] {
           tone: "ok",
           spec: {
             eyebrow: "Controls Lead · read your note on " + w.item.id,
-            title: "Just for this case",
+            title: already ? "That's already the rule" : "Just for this case",
             noteOnly: { note, reply: s(row.args, "summary") || row.summary || "This note only concerns this case." },
           },
         });
