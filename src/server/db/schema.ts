@@ -108,6 +108,8 @@ export interface ProposalPayload {
     invoicedCents: number;
     reason: string;
     clauseRefs: string[];
+    /** The clauses the Cost Accountant chose, each with its reason. Older disputes have only clauseRefs. */
+    clauses?: { ref: string; why: string }[];
   };
   policyFit?: { policyId: string | null; consistent: boolean; conflicts: string[] };
 }

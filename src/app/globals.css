@@ -400,3 +400,21 @@
 @media (prefers-reduced-motion: reduce) {
   .pxl-cloud-a, .pxl-cloud-b, .pxl-birds, .pxl-flap, .pxl-wheat, .pxl-leaf { animation: none; }
 }
+
+/* Landing: an agent picked up by the scruff squirms; dropped, it squashes and settles. */
+@keyframes px-squirm {
+  0%, 100% { transform: rotate(-11deg) translateX(-1px); }
+  25% { transform: rotate(4deg) translateY(-1px); }
+  50% { transform: rotate(12deg) translateX(1px); }
+  75% { transform: rotate(-3deg) translateY(1px); }
+}
+.px-held { animation: px-squirm 0.42s steps(4, end) infinite; transform-origin: 50% 8%; filter: drop-shadow(0 10px 6px rgb(30 60 20 / 0.25)); }
+@keyframes px-land {
+  0% { transform: scale(1.15, 0.82); }
+  45% { transform: scale(0.94, 1.08); }
+  100% { transform: scale(1, 1); }
+}
+.px-land { animation: px-land 0.36s ease-out both; animation-delay: var(--px-fall, 0s); transform-origin: 50% 100%; }
+@media (prefers-reduced-motion: reduce) {
+  .px-held, .px-land { animation: none; }
+}

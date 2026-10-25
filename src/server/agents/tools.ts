@@ -52,7 +52,7 @@ import { assignAgent, transitionWorkItem, type WorkItemRow } from "../workflow/w
 import { businessAgeMs, DAY_MS, formatDuration } from "../clock";
 import { followUpsFor, recordFollowUp } from "../workflow/follow-ups";
 import { MATERIALITY_POLICY_KEY, ONBOARDING_ID } from "../workflow/onboarding";
-import { buildDisputeEvidence, relevantClauses } from "../workflow/dispute-evidence";
+import { buildDisputeEvidence, checkCitedClauses } from "../workflow/dispute-evidence";
 import { CONTROLLER, leadFor } from "../comms/directory";
 import { dmSlack, mention, postSlack, queueEmail, taskLink } from "../comms/outbox";
 import { renderLetterHtml } from "../workflow/decisions";
@@ -436,7 +436,7 @@ const getProviderUsage = defineTool({
 
 const getBillingTerms = defineTool({
   name: "get_billing_terms",
-  agent: ["compute", "capacity", "vendor"],
+  agent: ["compute", "capacity", "vendor", "finance"],
   permission: "contract:read",
   category: "read",
   description:
@@ -1038,11 +1038,18 @@ const proposeVendorDispute = defineTool({
   permission: "dispute:propose",
   category: "write",
   description:
-    "Draft a vendor dispute for the amount not supported by the instance lifecycle and contract. The application computes the disputed amount, allocates the undisputed amount to the owner, and chooses the contract clauses that apply to what is wrong with the line (clauses you cite that do not apply are dropped). Requires compute findings that the charge is not explained.",
+    "Draft a vendor dispute for the amount not supported by the instance lifecycle and contract. The application computes the disputed amount and allocates the undisputed amount to the owner. You choose the contract clauses: read the clause text from get_billing_terms and cite the sections that make the extra charge unsupported, each with one sentence on how it applies to this line. Contracts word things differently, so go by what each clause says, not its title. The gateway rejects sections that are not in this provider's contract and adds the dispute-window clause if you leave it out. Requires compute findings that the charge is not explained.",
   schema: z.object({
     work_item_id: workItemId,
     rationale: z.string(),
-    clause_refs: z.array(z.string()),
+    clauses: z
+      .array(
+        z.object({
+          ref: z.string().describe("Section number exactly as in the contract, e.g. 4.2"),
+          why: z.string().describe("One sentence: how this clause makes the disputed charge unsupported"),
+        }),
+      )
+      .describe("The contract clauses this dispute relies on"),
     evidence_ids: z.array(z.string()),
   }),
   handler: ({ ctx, run, item }, args) => {
@@ -1065,9 +1072,18 @@ const proposeVendorDispute = defineTool({
     const rationale = args.rationale.trim().slice(0, 1200);
     const line = ctx.db.select().from(invoiceLines).where(eq(invoiceLines.id, item.invoiceLineId)).get();
     const issued = line ? ctx.db.select().from(invoices).where(eq(invoices.id, line.invoiceId)).get()?.issuedAt ?? null : null;
-    const applicable = relevantClauses(contractForProvider(ctx, item.providerId).clauses, checks, issued);
+    const contract = contractForProvider(ctx, item.providerId);
+    const check = checkCitedClauses(contract.clauses, args.clauses, issued);
+    if (!check.grounds) {
+      fail(
+        "None of the clauses you cited is a section of " + contract.name + " that supports the dispute" +
+          (check.dropped.length ? " (" + check.dropped.map((d) => d.ref + ": " + d.reason).join("; ") + ")" : "") +
+          ". Its sections are: " + contract.clauses.map((c) => c.ref + " " + c.title).join(", ") + ".",
+        "CLAUSE_NOT_FOUND",
+      );
+    }
+    const applicable = check.clauses;
     const clauseRefs = applicable.map((c) => c.ref);
-    const dropped = args.clause_refs.map((r) => r.replace(/^§\s*/, "")).filter((r) => !clauseRefs.includes(r));
     supersedeDrafts(ctx, item);
     const { version, previousId } = nextProposalVersion(ctx, item);
     const payload: ProposalPayload = {
@@ -1084,6 +1100,7 @@ const proposeVendorDispute = defineTool({
         invoicedCents: checks.invoicedCents,
         reason: rationale,
         clauseRefs,
+        clauses: applicable.map((c) => ({ ref: c.ref, why: c.why })),
       },
     };
     const id = nextId(ctx, "PR", 2001);
@@ -1114,8 +1131,9 @@ const proposeVendorDispute = defineTool({
         version,
         disputed_amount: formatCents(disputed),
         undisputed_amount: formatCents(undisputed),
+        clause_refs: clauseRefs,
         clauses_cited: applicable.map((c) => ({ ref: c.ref, title: c.title, why: c.why })),
-        clauses_dropped: dropped,
+        clauses_dropped: check.dropped,
         liability_note: "Accounts payable stays at " + formatCents(checks.invoicedCents) + " until the vendor issues a credit.",
         next_step: "request_human_approval",
       },
@@ -1357,6 +1375,7 @@ const getDisputePackage = defineTool({
     const provider = ctx.db.select().from(providers).where(eq(providers.id, d.providerId)).get();
     const contract = contractForProvider(ctx, d.providerId);
     const clauses = contract.clauses.filter((c) => d.clauseRefs.includes(c.ref));
+    const why = new Map((d.clauses ?? []).map((c) => [c.ref, c.why]));
     const record = ctx.db.select().from(vendorDisputes).where(eq(vendorDisputes.workItemId, item.id)).get() ?? null;
     const approver = getActor(ctx, approval.decidedBy ?? "")?.name ?? approval.decidedBy;
     return {
@@ -1370,7 +1389,7 @@ const getDisputePackage = defineTool({
         disputed_amount: formatCents(d.disputedCents),
         undisputed_amount: formatCents(d.undisputedCents),
         reason: d.reason,
-        clauses: clauses.map((c) => ({ ref: c.ref, title: c.title, text: c.text })),
+        clauses: clauses.map((c) => ({ ref: c.ref, title: c.title, text: c.text, why: why.get(c.ref) ?? null })),
         evidence_pack: item.checks.kind === "instance" ? (() => {
           const e = buildDisputeEvidence(ctx, item);
           return { grounds: e.grounds.map((g) => g.statement), calculation: e.calculation, instance: e.instance, invoice: e.invoice };

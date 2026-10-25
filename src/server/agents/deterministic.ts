@@ -40,6 +40,23 @@ function pickClauses(clauses: { ref: string; title: string }[], words: string[])
   return clauses.filter((c) => words.some((w) => c.title.toLowerCase().includes(w))).map((c) => c.ref);
 }
 
+/**
+ * The replay's stand-in for reading the contract: clauses picked by title,
+ * each with a stock reason. The live Cost Accountant reads the clause text instead.
+ */
+function replayClauses(all: { ref: string; title: string }[], anomalies: Json[]) {
+  const has = (code: string) => anomalies.some((a) => a.code === code);
+  const pick = (word: string, why: string) => all.filter((c) => c.title.toLowerCase().includes(word)).map((c) => ({ ref: c.ref, why }));
+  const out = has("DUPLICATE_LINE")
+    ? pick("metering", "Each metered hour of the instance can be billed once; these hours were already billed.")
+    : [
+        ...pick("termination", "Hours were billed after the instance's TERMINATED event."),
+        ...pick("metering", "Billable hours are the metered lifetime rounded to the billing increment."),
+      ];
+  if (has("RATE_MISMATCH")) out.push(...pick("rate", "The line uses a different rate than the contract rate card."));
+  return out;
+}
+
 async function computePolicy(c: Caller) {
   const wi = await c.call("get_work_item", {});
   const checks = wi.deterministic_checks;
@@ -198,12 +215,13 @@ async function financePolicy(c: Caller) {
       return;
     }
     if (compute?.assessment === "not_explained") {
+      const terms = await c.call("get_billing_terms", { provider_id: wi.provider.id });
       await c.call("search_precedents", { query: wi.provider.name + " billing after termination dispute credit" });
       const dispute = await c.call("propose_vendor_dispute", {
         rationale:
           "Instance lifecycle and contract terms support " + wi.amounts.contract_supported + " of the " + wi.amounts.invoiced +
           " invoice. The provider billed beyond the TERMINATED event; billing ends at termination under the contract.",
-        clause_refs: compute.data?.clause_refs ?? [],
+        clauses: replayClauses(terms.clauses, (compute.data?.anomalies ?? []) as Json[]),
         evidence_ids: c.ids,
       });
       await c.call("request_human_approval", {
