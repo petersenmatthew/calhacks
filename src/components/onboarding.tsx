@@ -24,7 +24,7 @@ function markSeen() {
 }
 
 const STEPS = [
-  { title: "Start a case", body: "A Lambda bill charged 12 GPU hours after the instance was shut down." },
+  { title: "Pick a billing event", body: "Try GPU overbilling: a Lambda bill that charges 12 GPU hours after the instance was shut down." },
   { title: "Watch, then decide", body: "The team digs in on the canvas and asks you to approve a $1,200 dispute." },
   { title: "Play the vendor", body: "On the task, paste \u201cWe\u2019ve issued credit memo CM-1042 for $1,200.00\u201d and watch it close." },
 ];
@@ -92,7 +92,7 @@ export function Onboarding({ open, publicDemo, onClose, onStart }: { open: boole
               onClick={start}
               className="inline-flex h-10 items-center gap-2 rounded-lg bg-zinc-900 px-4 text-[14px] font-medium text-white hover:bg-zinc-800"
             >
-              Start the sample case
+              Pick a billing event
               <ArrowRight className="size-4" />
             </button>
             <button type="button" onClick={close} className="h-10 rounded-lg px-3 text-[14px] text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">

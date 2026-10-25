@@ -2,11 +2,10 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { toast } from "sonner";
 import { createContext, useContext, useEffect, useState } from "react";
 import useSWR from "swr";
-import { CircleHelp, LoaderCircle, Network, ShieldCheck, SquareKanban } from "lucide-react";
-import { fetcher, postJson } from "@/lib/api";
+import { CircleHelp, Network, ShieldCheck, SquareKanban } from "lucide-react";
+import { fetcher } from "@/lib/api";
 import { periodLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { DashboardData } from "@/server/queries";
@@ -28,9 +27,6 @@ type Shell = {
 const ShellContext = createContext<Shell>({ period: null, setPeriod: () => {}, lastView: "canvas" });
 export const useShell = () => useContext(ShellContext);
 export const viewHref = (v: View) => (v === "board" ? "/board" : "/canvas");
-
-/** Seconds between leaving the intro and the sample invoice arriving. */
-const START_PAUSE_S = 3;
 
 const TABS = [
   { key: "canvas", href: "/canvas", label: "Canvas", icon: Network },
@@ -57,25 +53,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return () => cancelAnimationFrame(raf);
   }, [pathname]);
 
-  // After the intro, give people a moment to take in the canvas before the team starts moving.
+  // The intro hands off to the billing-event picker; nothing starts until one is chosen.
   const router = useRouter();
-  const [countdown, setCountdown] = useState<number | null>(null);
-  const startSample = async () => {
+  const [simulating, setSimulating] = useState(false);
+  const pickEvent = () => {
     setIntro(false);
     if (pathname !== "/canvas") router.push("/canvas");
-    for (let n = START_PAUSE_S; n > 0; n--) {
-      setCountdown(n);
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-    try {
-      const r = await postJson<{ status: string; workItemId?: string | null }>("/api/demo/simulate", { scenario: "overbilling" });
-      router.push(r.workItemId ? "/canvas?task=" + r.workItemId : "/canvas");
-      mutate();
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setCountdown(null);
-    }
+    setSimulating(true);
   };
 
   // Remember which work view was open last (adjusted during render, no effect needed).
@@ -140,21 +124,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <CircleHelp className="size-4" />
               </button>
               <ResetButton onDone={() => mutate()} />
-              <SimulateDialog onDone={() => mutate()} />
+              <SimulateDialog onDone={() => mutate()} open={simulating} onOpenChange={setSimulating} />
             </div>
           </div>
         </header>
         <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
-        <Onboarding open={intro} publicDemo={Boolean(data?.settings.publicDemo)} onClose={() => setIntro(false)} onStart={startSample} />
-        {countdown !== null ? (
-          <div
-            role="status"
-            className="animate-enter fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full bg-zinc-900 px-4 py-2 text-[13px] font-medium text-white shadow-lg"
-          >
-            <LoaderCircle className="size-4 animate-spin" />
-            A Lambda invoice arrives in {countdown}&hellip;
-          </div>
-        ) : null}
+        <Onboarding open={intro} publicDemo={Boolean(data?.settings.publicDemo)} onClose={() => setIntro(false)} onStart={pickEvent} />
       </div>
     </ShellContext.Provider>
   );

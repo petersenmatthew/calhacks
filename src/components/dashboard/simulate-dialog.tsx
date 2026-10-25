@@ -57,9 +57,12 @@ const PROVIDERS = {
 
 type ProviderId = keyof typeof PROVIDERS;
 
-export function SimulateDialog({ onDone }: { onDone: () => void }) {
+/** The header button and its dialog. Pass open/onOpenChange to open it from elsewhere (the intro). */
+export function SimulateDialog({ onDone, open: openProp, onOpenChange }: { onDone: () => void; open?: boolean; onOpenChange?: (open: boolean) => void }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [openState, setOpenState] = useState(false);
+  const open = openProp ?? openState;
+  const setOpen = (v: boolean) => (onOpenChange ? onOpenChange(v) : setOpenState(v));
   const [scenario, setScenario] = useState<Scenario>("overbilling");
   const [busy, setBusy] = useState(false);
   const [providerId, setProviderId] = useState<ProviderId>("PRV-HELIOS");
