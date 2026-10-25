@@ -11,7 +11,7 @@ describe("evidence citations", () => {
   it("accepts a finding id as a citation and records the finding's evidence", async () => {
     const { ctx, orchestrator } = setup(":memory:");
     await orchestrator.drain();
-    // Stop after the Compute Investigator hands off, so the Cost Accountant's call is ours.
+    // Stop after the GPU Auditor hands off, so the Cost Allocator's call is ours.
     setAgentSettings(ctx, ACTOR.controller, ACTOR.finance, { paused: true });
     const ingest = runScenario(ctx, "overbilling");
     const id = ingest.status === "work_item_created" ? ingest.workItemId : "";

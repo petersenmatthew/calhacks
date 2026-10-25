@@ -16,6 +16,7 @@ import type { DecisionTurn } from "@/server/assistant";
 import { DisputeLetter } from "../comms/dispute-letter";
 import { DoneFinale } from "./done-card";
 import { VendorThread } from "../comms/vendor-thread";
+import { ContractLinked } from "../contract/contract-link";
 import { FLOWER_COLORS, Flower, MeadowStrip, UI_FLOWERS } from "../landing/meadow";
 import { AgentAvatar } from "../status";
 import { LearnedPolicyRow, pendingLearnedPolicy, RunningOnItsOwn, useAutonomy } from "../autonomy/sidebar-parts";
@@ -242,7 +243,7 @@ function Home({ data, items, onOpen }: { data: DashboardData; items: Item[]; onO
 /* ------------------------------------------------------------------ task */
 
 /** Types a line out once, when it first arrives while the page is open. */
-function Typed({ text, on }: { text: string; on: boolean }) {
+function Typed({ text, on, contractId }: { text: string; on: boolean; contractId?: string | null }) {
   const [shown, setShown] = useState(on ? 0 : text.length);
   useEffect(() => {
     if (!on) return;
@@ -258,7 +259,7 @@ function Typed({ text, on }: { text: string; on: boolean }) {
   }, [on, text]);
   return (
     <>
-      {text.slice(0, shown)}
+      {shown >= text.length ? <ContractLinked text={text} contractId={contractId} /> : text.slice(0, shown)}
       {shown < text.length ? <span className="ml-0.5 inline-block h-[1em] w-[0.45em] translate-y-[0.15em] animate-pulse bg-zinc-400" /> : null}
     </>
   );
@@ -304,7 +305,7 @@ function Feed({ w, letter = true }: { w: WorkspaceData; letter?: boolean }) {
               </div>
             ) : null}
             <div className={cn("pl-[26px] text-[13.5px] leading-relaxed", l.tone === "bad" ? "text-destructive" : "text-zinc-800")}>
-              <Typed text={l.text} on={Date.parse(l.at) > openedAt - 3000} />
+              <Typed text={l.text} on={Date.parse(l.at) > openedAt - 3000} contractId={w.contract.id} />
             </div>
             {letter && l.tool === "send_vendor_dispute" && w.dispute?.letterBody ? (
               <div className="mt-2.5 pl-[26px]">
@@ -425,7 +426,7 @@ function TaskView({
         <VendorThread w={w} />
         <DoneFinale w={w} justFinished={justFinished} />
         <HowWeGotHere w={w} extra={record} letter={false} />
-        {chat.length || chatPending ? <Thread messages={chat} pending={chatPending} onTask={onTask} inset /> : null}
+        {chat.length || chatPending ? <Thread messages={chat} pending={chatPending} onTask={onTask} inset contractId={w.contract.id} /> : null}
       </div>
     );
   }
@@ -447,14 +448,14 @@ function TaskView({
       {w.dispute?.letterBody && !letterInFeed(w) ? <DisputeLetter dispute={w.dispute} /> : null}
       <VendorThread w={w} />
       <div className="text-[12.5px] text-zinc-500">{record}</div>
-      {chat.length || chatPending ? <Thread messages={chat} pending={chatPending} onTask={onTask} inset /> : null}
+      {chat.length || chatPending ? <Thread messages={chat} pending={chatPending} onTask={onTask} inset contractId={w.contract.id} /> : null}
     </div>
   );
 }
 
 /* ------------------------------------------------------------------ chat */
 
-function Linked({ text, onTask }: { text: string; onTask: (id: string) => void }) {
+function Linked({ text, onTask, contractId }: { text: string; onTask: (id: string) => void; contractId?: string | null }) {
   const parts = text.split(/(WI-\d{4})/g);
   return (
     <>
@@ -464,7 +465,9 @@ function Linked({ text, onTask }: { text: string; onTask: (id: string) => void }
             {p}
           </button>
         ) : (
-          <span key={i}>{p}</span>
+          <span key={i}>
+            <ContractLinked text={p} contractId={contractId} />
+          </span>
         ),
       )}
     </>
@@ -477,6 +480,7 @@ function Thread({
   onTask,
   speaker,
   inset,
+  contractId,
 }: {
   messages: ChatMessage[];
   pending: boolean;
@@ -485,6 +489,8 @@ function Thread({
   speaker?: { actorId: string; name: string };
   /** Inside a padded view: no padding of its own. */
   inset?: boolean;
+  /** The contract this conversation is about, so "contract" and clause numbers link to it. */
+  contractId?: string | null;
 }) {
   return (
     <div className={cn("space-y-4", inset ? "border-t border-zinc-100 pt-5" : "px-5 pt-5 pb-4")}>
@@ -501,7 +507,7 @@ function Thread({
                 {speaker.name}
               </div>
             ) : null}
-            <Linked text={m.content} onTask={onTask} />
+            <Linked text={m.content} onTask={onTask} contractId={contractId} />
           </div>
         ),
       )}
@@ -616,6 +622,7 @@ function FrameChat({
   onAsk,
   onClose,
   onTask,
+  contractId,
 }: {
   f: FrameChatTarget;
   messages: ChatMessage[];
@@ -623,6 +630,7 @@ function FrameChat({
   onAsk: (text: string) => void;
   onClose: () => void;
   onTask: (id: string) => void;
+  contractId?: string | null;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   useStickToBottom(scroller, f.key);
@@ -656,7 +664,7 @@ function FrameChat({
           </div>
         </div>
         {messages.length ? (
-          <Thread messages={messages} pending={pending} onTask={onTask} speaker={{ actorId: f.actorId, name: f.agentName }} />
+          <Thread messages={messages} pending={pending} onTask={onTask} speaker={{ actorId: f.actorId, name: f.agentName }} contractId={contractId} />
         ) : (
           <p className="px-5 pt-5 text-[13px] leading-relaxed text-zinc-500">Ask about this frame. {f.agentName.split(" ")[0]} answers from the records behind it.</p>
         )}
@@ -822,6 +830,7 @@ export function Sidebar({
       {mode === "frame" && frameChat ? (
         <FrameChat
           f={frameChat}
+          contractId={w && w.item.id === frameChat.taskId ? w.contract.id : null}
           messages={frameChats[frameChat.key] ?? []}
           pending={framePending === frameChat.key}
           onAsk={(t) => askFrame(frameChat, t)}
@@ -877,7 +886,7 @@ export function Sidebar({
             {mode === "home" ? (
               <Home data={data} items={items} onOpen={onTask} />
             ) : mode === "chat" ? (
-              <Thread messages={chat} pending={pending} onTask={(id) => { setChatOpen(false); onTask(id); }} />
+              <Thread messages={chat} pending={pending} onTask={(id) => { setChatOpen(false); onTask(id); }} contractId={ready?.contract.id} />
             ) : ready ? (
               <TaskView
                 w={ready}

@@ -42,7 +42,7 @@ function pickClauses(clauses: { ref: string; title: string }[], words: string[])
 
 /**
  * The replay's stand-in for reading the contract: clauses picked by title,
- * each with a stock reason. The live Cost Accountant reads the clause text instead.
+ * each with a stock reason. The live Cost Allocator reads the clause text instead.
  */
 function replayClauses(all: { ref: string; title: string }[], anomalies: Json[]) {
   const has = (code: string) => anomalies.some((a) => a.code === code);
@@ -291,7 +291,7 @@ async function financePolicy(c: Caller) {
   });
 }
 
-/** Policy Analyst: turn a controller correction into a reusable policy, then hand the rework to the Cost Accountant. */
+/** Controls Lead: turn a controller correction into a reusable policy, then hand the rework to the Cost Allocator. */
 async function policyAnalystPolicy(c: Caller, run: AgentRunContext) {
   const wi = await c.call("get_work_item", {});
   const latest = [...wi.proposals].reverse()[0] as Json | undefined;

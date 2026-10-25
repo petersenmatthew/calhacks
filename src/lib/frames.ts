@@ -4,9 +4,10 @@
  * message an agent drafted, a journal entry the gateway posted).
  * Everything shown comes from stored tool arguments and results.
  */
-import { agentSteps } from "./agent-steps";
+import { AGENT_STEPS, agentSteps } from "./agent-steps";
 import { dateTimeUtc, clockTime, compactMoney, dateOnly, hours, money } from "./format";
 import { sourceForTool, WRITE_TOOLS, type SourceId } from "./sources";
+import { contractPdf, contractThumb } from "./contracts";
 import type { ActivityRow, WorkspaceData } from "@/server/queries";
 
 /** Ring seats are employees (AI agents). Code they rely on (intake rules, ledger gateway, policy memory) shows up inside their work. */
@@ -87,7 +88,51 @@ export type FrameSpec = {
   evidence?: string[];
   /** Records the employee read on the way to this frame. */
   sources?: string[];
+  /** The provider contract this frame relied on, previewed with the clauses it cites. */
+  contract?: ContractPreview;
+  /** The employee is reading this contract right now: the frame is just the PDF scrolling by. */
+  reading?: ContractPreview;
 };
+
+export type ContractPreview = {
+  id: string;
+  name: string;
+  vendor: string;
+  effective: string;
+  rates: string;
+  /** True when these are the clauses the frame cites; otherwise the first few. */
+  cited: boolean;
+  clauses: { ref: string; title: string; text: string }[];
+  /** The PDF page holding the first clause shown, with a thumbnail of it. */
+  page?: { n: number; of: number; thumb: string };
+};
+
+/** Clause numbers a frame mentions ("Clauses 4.1, 4.2, 7.2", "clauses 4.1 and 4.2"). */
+function citedClauses(spec: FrameSpec) {
+  const text = JSON.stringify(spec);
+  const refs = [...text.matchAll(/(?:[Cc]lauses?|§)\s*((?:\d+\.\d+(?:,\s*|,?\s+and\s+)?)+)/g)].flatMap((m) => m[1].match(/\d+\.\d+/g) ?? []);
+  return [...new Set(refs)];
+}
+
+function contractPreview(w: WorkspaceData, spec: FrameSpec): ContractPreview {
+  const c = w.contract;
+  const cited = citedClauses(spec).filter((r) => c.clauses.some((x) => x.ref === r));
+  const clauses = (cited.length ? c.clauses.filter((x) => cited.includes(x.ref)) : c.clauses).slice(0, 3);
+  const pdf = contractPdf(c.id);
+  const n = (clauses[0] && pdf?.clausePages[clauses[0].ref]) || 1;
+  return {
+    id: c.id,
+    name: c.name,
+    vendor: w.providers[c.providerId]?.shortName ?? "",
+    effective: c.effectiveFrom,
+    rates: Object.entries(c.rateCard)
+      .map(([type, cents]) => type + " " + money(cents) + "/h")
+      .join(" · "),
+    cited: cited.length > 0,
+    clauses: clauses.map(({ ref, title, text }) => ({ ref, title, text })),
+    page: pdf ? { n, of: pdf.pages, thumb: contractThumb(c.id, n) } : undefined,
+  };
+}
 
 export type Frame = {
   id: string;
@@ -155,12 +200,12 @@ const LABELS: Record<string, string> = {
 };
 
 const AGENT_NAME: Record<string, string> = {
-  "agent.compute": "Compute Investigator",
-  "agent.finance": "Cost Accountant",
+  "agent.compute": "GPU Auditor",
+  "agent.finance": "Cost Allocator",
   "agent.capacity": "Capacity Planner",
   "agent.vendor": "Vendor Liaison",
   "agent.budget": "Budget Analyst",
-  "agent.policy": "Policy Analyst",
+  "agent.policy": "Controls Lead",
 };
 
 /** Which ring seat an employee's actor id maps to. */
@@ -347,11 +392,11 @@ function toolSpec(row: ActivityRow, w: WorkspaceData): FrameSpec {
       return { ...base, status, summary: s(a, "summary") };
     }
     case "handoff_to_finance":
-      return { ...base, draft: { to: "Cost Accountant", subject: "Handoff: " + w.item.id, body: s(a, "note") }, summary: undefined };
+      return { ...base, draft: { to: "Cost Allocator", subject: "Handoff: " + w.item.id, body: s(a, "note") }, summary: undefined };
     case "request_human_info":
       return { ...base, draft: { to: "Controller", subject: "Question on " + w.item.id, body: s(a, "question") }, summary: undefined };
     case "request_more_info":
-      return { ...base, draft: { to: "Compute Investigator", subject: "More evidence for " + w.item.id, body: s(a, "question") }, summary: undefined };
+      return { ...base, draft: { to: "GPU Auditor", subject: "More evidence for " + w.item.id, body: s(a, "question") }, summary: undefined };
     case "get_project_budget":
       return {
         ...base,
@@ -627,7 +672,6 @@ function intakeFrames(w: WorkspaceData): Frame[] {
 /* ------------------------------------------------------------- timeline and thread */
 
 const tickFmt = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-const tickHourFmt = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" });
 const LANE_ORDER = ["invoice", "meter", "life", "jobs"];
 
 /**
@@ -696,8 +740,15 @@ function timelineSpec(w: WorkspaceData, got: Set<string>): { spec: TimelineSpec;
   }
   lanes.sort((p, q2) => LANE_ORDER.indexOf(p.key) - LANE_ORDER.indexOf(q2.key));
 
-  const fmt = hi - lo < 4 * 86_400_000 ? tickHourFmt : tickFmt;
-  const ticks = [0.08, 0.36, 0.64, 0.92].map((f) => ({ at: f, label: fmt.format(new Date(lo + f * (hi - lo))) }));
+  // Ticks on round hours (or days): midnight shows the date, other ticks just the hour.
+  const H = 3_600_000;
+  const step = [1, 2, 3, 6, 12, 24, 48, 72, 168].map((h) => h * H).find((s) => (hi - lo) / s <= 5) ?? 336 * H;
+  const ticks: TimelineSpec["ticks"] = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
+    const d = new Date(v);
+    const label = step >= 24 * H || d.getUTCHours() === 0 ? tickFmt.format(d) : String(d.getUTCHours()).padStart(2, "0") + ":00";
+    ticks.push({ at: at(v), label });
+  }
   const overbilled = life && c.billedHours > c.lifecycleHours + 0.01;
   const title =
     meter && overHours > 0.5
@@ -872,23 +923,23 @@ function policyFrames(w: WorkspaceData): Frame[] {
 
 /* ------------------------------------------------------------- live frame */
 
+/** Only reading a contract gets a live frame; otherwise the agent's seat shows it is working and its real frames arrive as it produces them. */
 function liveFrame(w: WorkspaceData, agentId: string): Frame | null {
   const run = w.runs.filter((r) => r.agentId === agentId).at(-1);
   if (!run || run.status !== "running") return null;
   const tools = w.activity.filter((e) => e.runId === run.id && e.toolName).map((e) => e.toolName!);
-  const { steps, current } = agentSteps(agentId, tools, "running");
+  const { current } = agentSteps(agentId, tools, "running");
+  const eyebrow = AGENT_NAME[agentId] + " · " + (run.mode === "llm" ? "LLM run " : "replay ") + run.id;
+  const readingContract =
+    tools.includes("get_billing_terms") && Boolean(AGENT_STEPS[agentId]?.find((d) => d.label === current?.label)?.tools.includes("get_billing_terms"));
+  if (!readingContract) return null;
   return {
     id: "live-" + run.id,
     node: NODE_OF[agentId],
-    label: current?.verb ?? "Working",
+    label: current?.verb ?? "Reading contract",
     createdAt: "9999-12-31T23:59:59.999Z",
     tone: "live",
-    spec: {
-      eyebrow: AGENT_NAME[agentId] + " · " + (run.mode === "llm" ? "LLM run " : "replay ") + run.id,
-      title: (current?.verb ?? "Working") + "...",
-      checks: steps.map((st) => ({ label: st.label, ok: st.state === "done" ? true : undefined, detail: st.state === "active" ? "in progress" : st.state === "todo" ? "next" : "" })),
-      summary: run.task,
-    },
+    spec: { eyebrow, title: "Reading the " + (w.providers[w.contract.providerId]?.shortName ?? "provider") + " contract...", reading: contractPreview(w, { eyebrow, title: "" }) },
   };
 }
 
@@ -921,10 +972,14 @@ export function frameText(spec: FrameSpec): string {
   if (spec.draft) out.push("Draft to " + spec.draft.to + ": " + spec.draft.subject + ". " + spec.draft.body);
   if (spec.checks) out.push(...spec.checks.map((c) => (c.ok === true ? "[pass] " : c.ok === false ? "[fail] " : "[info] ") + c.label + (c.detail ? ": " + c.detail : "")));
   if (spec.summary) out.push("Summary: " + spec.summary);
+  if (spec.reading) out.push("Reading contract " + spec.reading.id + ": " + spec.reading.name);
   if (spec.evidence?.length) out.push("Evidence: " + spec.evidence.join("; "));
   if (spec.sources?.length) out.push("Records read first: " + spec.sources.join(", "));
   return out.join("\n");
 }
+
+/** Steps the canvas shows without a frame. */
+const NO_FRAME_TOOLS = new Set(["handoff_to_finance", "request_human_approval"]);
 
 /** Reads that become source tags on the employee's next frame instead of frames of their own. */
 const TAG_TOOLS = new Set([
@@ -972,6 +1027,7 @@ export function buildFrames(w: WorkspaceData): Frame[] {
     if (!reads?.length) return;
     const labels = reads.map((r) => LABELS[r.toolName!] ?? r.toolName!);
     f.spec.sources = [...new Set([...(f.spec.sources ?? []), ...labels])];
+    if (reads.some((r) => r.toolName === "get_billing_terms")) f.spec.contract = contractPreview(w, f.spec);
     fold(f, reads);
     pending.delete(actorId);
   };
@@ -1021,6 +1077,9 @@ export function buildFrames(w: WorkspaceData): Frame[] {
     }
     const tool = row.toolName;
     if (!tool) continue;
+    // Handoffs and approval requests already show on the canvas: the runner carries
+    // the work to the next employee, and the approval appears at your seat.
+    if (NO_FRAME_TOOLS.has(tool)) continue;
     if (TAG_TOOLS.has(tool)) {
       if (tool === "get_dispute_package") dispute.pkg = row;
       pending.set(row.actorId, [...(pending.get(row.actorId) ?? []), row]);

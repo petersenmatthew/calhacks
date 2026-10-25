@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
-import { Check, LoaderCircle, Minus, X } from "lucide-react";
-import type { BurnSpec, Check as CheckRow, DocSpec, FrameSpec, MatchSpec, StackSpec, ThreadSpec, TimelineSpec, Tone } from "@/lib/frames";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
+import { ArrowUpRight, Check, LoaderCircle, Minus, X } from "lucide-react";
+import type { BurnSpec, Check as CheckRow, ContractPreview, DocSpec, FrameSpec, MatchSpec, StackSpec, ThreadSpec, TimelineSpec, Tone } from "@/lib/frames";
+import { CONTRACT_ID, contractHref, contractThumb } from "@/lib/contracts";
+import { ContractLinked } from "../contract/contract-link";
 import { compactMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -29,6 +32,8 @@ type Timeline = {
   draftBody?: [number, number];
   checks: number[];
   summary: number;
+  /** The contract card scrolls through the PDF over this span, then settles on the cited page. */
+  contract?: [number, number];
   total: number;
 };
 
@@ -75,7 +80,13 @@ function timeline(spec: FrameSpec): Timeline {
     t += 300;
   }
   if (spec.match) {
+    const start = t;
     each(spec.match.rows.length + 1, 300, tl.match);
+    // The contract scrolls while the rows fill in; the verdict lands once it reaches the cited page.
+    if (spec.contract?.page) {
+      tl.contract = [start, 900 + spec.contract.page.of * 450];
+      t = Math.max(t, start + tl.contract[1]);
+    }
     tl.result = t;
     t += 400;
   }
@@ -114,7 +125,12 @@ function timeline(spec: FrameSpec): Timeline {
   }
   each(spec.checks?.length ?? 0, 360, tl.checks);
   tl.summary = t;
-  tl.total = t + 500;
+  t += 300;
+  if (spec.contract?.page && !tl.contract) {
+    tl.contract = [t, 700 + spec.contract.page.of * 450];
+    t += tl.contract[1];
+  }
+  tl.total = t + 200;
   return tl;
 }
 
@@ -281,25 +297,29 @@ function TimelineView({ spec, at, t }: { spec: TimelineSpec; at: number[]; t: nu
   return (
     <div className={cn("mt-4", spec.marks.length > 1 ? "pt-9" : "pt-5")}>
       <div className="relative">
-        {spec.lanes.map((l, i) =>
-          t >= at[i] ? (
+        {spec.lanes.map((l, i) => {
+          // Each lane fills left to right, in time order, so later spans never appear before earlier ones.
+          const sweep = grow(t, at[i] + 100, 900);
+          return t >= at[i] ? (
             <div key={l.key} className="animate-enter flex items-center gap-3 py-1.5">
               <div style={{ width: LANE_LABEL }} className="shrink-0">
                 <div className="text-[13px] font-medium text-zinc-700">{l.label}</div>
                 <div className={cn("text-[12px] tnum", l.tone === "bad" ? "text-destructive" : "text-zinc-500")}>{l.value}</div>
               </div>
               <div className="relative h-6 flex-1 rounded-md bg-zinc-50 ring-1 ring-zinc-100">
-                {l.spans.map((s, j) => (
-                  <div
-                    key={j}
-                    className={cn("absolute inset-y-1 rounded-sm", TONE_BG[s.tone ?? l.tone])}
-                    style={{ left: s.from * 100 + "%", width: Math.max(0.5, (s.to - s.from) * 100) * grow(t, at[i] + 100, 600) + "%" }}
-                  />
-                ))}
+                {l.spans.map((s, j) =>
+                  sweep > s.from ? (
+                    <div
+                      key={j}
+                      className={cn("absolute inset-y-1 rounded-sm", TONE_BG[s.tone ?? l.tone])}
+                      style={{ left: s.from * 100 + "%", width: Math.max(0.5, (Math.min(s.to, sweep) - s.from) * 100) + "%" }}
+                    />
+                  ) : null,
+                )}
               </div>
             </div>
-          ) : null,
-        )}
+          ) : null;
+        })}
         {t >= marksAt ? (
           <div className="pointer-events-none absolute inset-y-0 right-0" style={{ left: LANE_LABEL + 12 }}>
             {spec.marks.map((m, i) => (
@@ -331,7 +351,7 @@ function MatchView({ m, at, result, t }: { m: MatchSpec; at: number[]; result: n
   return (
     <div className="mt-4 overflow-hidden rounded-xl ring-1 ring-zinc-200">
       {t >= at[0] ? (
-        <div className="animate-enter flex items-center gap-3 bg-zinc-50 px-4 py-2.5">
+        <div className="animate-enter flex items-center gap-3 bg-zinc-50 px-4 py-2">
           <div className="min-w-0 flex-1">
             <div className="text-[14px] font-semibold">{m.head.label}</div>
             <div className="truncate text-[12px] text-zinc-500">{m.head.detail}</div>
@@ -341,11 +361,11 @@ function MatchView({ m, at, result, t }: { m: MatchSpec; at: number[]; result: n
       ) : null}
       {m.rows.map((r, i) =>
         t >= at[i + 1] ? (
-          <div key={i} className="animate-enter flex items-center gap-3 border-t px-4 py-2">
+          <div key={i} title={r.detail} className="animate-enter flex items-center gap-3 border-t px-4 py-1.5">
             <span className={cn("size-2 shrink-0 rounded-full", TONE_BG[r.tone])} />
-            <div className="min-w-0 flex-1">
-              <div className="text-[13.5px] text-zinc-800">{r.label}</div>
-              {r.detail ? <div className="truncate text-[12px] text-zinc-500">{r.detail}</div> : null}
+            <div className="flex min-w-0 flex-1 items-baseline gap-2">
+              <span className="shrink-0 text-[13.5px] text-zinc-800">{r.label}</span>
+              {r.detail ? <span className="truncate text-[12px] text-zinc-400">{r.detail}</span> : null}
             </div>
             {r.delta ? <span className={cn("rounded-full px-2 py-0.5 text-[11.5px] whitespace-nowrap tnum", TONE_PILL[deltaTone(r)])}>{r.delta}</span> : null}
             <span className="w-[88px] shrink-0 text-right text-[14px] tnum">{r.value}</span>
@@ -353,7 +373,7 @@ function MatchView({ m, at, result, t }: { m: MatchSpec; at: number[]; result: n
         ) : null,
       )}
       {t >= result ? (
-        <div className={cn("animate-enter flex items-center justify-between gap-3 px-4 py-2.5 text-[14px] font-semibold", TONE_PILL[m.result.tone])}>
+        <div className={cn("animate-enter flex items-center justify-between gap-3 px-4 py-2 text-[14px] font-semibold", TONE_PILL[m.result.tone])}>
           <span className="truncate">{m.result.label}</span>
           <span className="tnum">{m.result.value}</span>
         </div>
@@ -554,6 +574,113 @@ function EmailCard({ m, reply, scroll }: { m: ThreadSpec["messages"][number]; re
   );
 }
 
+const ease = (x: number) => (x < 0.5 ? 2 * x * x : 1 - (-2 * x + 2) ** 2 / 2);
+
+/** Which page the thumbnail shows (fractional while scrolling): down through every page, then back to the cited one. */
+function scrollPage(t: number, span: [number, number] | undefined, pages: number, cited: number) {
+  if (!span || t === Infinity) return cited - 1;
+  const p = Math.min(1, Math.max(0, (t - span[0]) / span[1]));
+  const down = 0.72;
+  if (p <= down) return (pages - 1) * ease(p / down);
+  return pages - 1 + (cited - pages) * ease((p - down) / (1 - down));
+}
+
+/** A compact look at the signed contract PDF. While the frame builds, the page scrolls through the PDF and lands on the cited clauses. */
+function ContractCard({ c, open, t, span }: { c: ContractPreview; open?: boolean; t: number; span?: [number, number] }) {
+  const page = c.page;
+  const at = page ? scrollPage(t, span, page.of, page.n) : 0;
+  const reading = Boolean(page && span && t !== Infinity && t < span[0] + span[1]);
+  return (
+    <Link
+      href={contractHref(c.id, c.cited ? c.clauses[0]?.ref : null)}
+      onClick={(e) => e.stopPropagation()}
+      tabIndex={open ? 0 : -1}
+      className={cn("animate-enter group mt-4 flex items-center gap-3.5 rounded-xl bg-[#fcfbf8] p-3 ring-1 ring-zinc-200 transition-shadow hover:ring-zinc-400", !open && "pointer-events-none")}
+    >
+      {page ? (
+        <div className="relative aspect-[8.5/11] w-[64px] shrink-0 overflow-hidden rounded-[3px] bg-white shadow-[0_1px_2px_rgb(0_0_0/0.08),0_4px_10px_rgb(0_0_0/0.06)] ring-1 ring-zinc-200">
+          <div className="absolute inset-x-0 top-0" style={{ transform: "translateY(" + (-at * 100) / page.of + "%)" }}>
+            {Array.from({ length: page.of }, (_, i) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img key={i} src={contractThumb(c.id, i + 1)} alt={i + 1 === page.n ? "Page " + page.n + " of " + c.id : ""} className="aspect-[8.5/11] w-full object-cover" />
+            ))}
+          </div>
+          <span className="absolute top-1 left-1 rounded-[2px] bg-[#c4302b] px-0.5 text-[8px] font-bold tracking-wide text-white">PDF</span>
+        </div>
+      ) : null}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5 text-[12px] text-zinc-500">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logos/ironclad.png" alt="" className="size-4 rounded-full object-cover" />
+          <span className="truncate font-mono text-[11.5px] text-zinc-400">
+            {c.id}.pdf{page ? " · p. " + (reading ? Math.round(at) + 1 : page.n) + " of " + page.of : ""}
+          </span>
+          <span className="ml-auto flex shrink-0 items-center gap-0.5 group-hover:text-zinc-900">
+            Open <ArrowUpRight className="size-3.5" />
+          </span>
+        </div>
+        <div className="mt-0.5 truncate text-[14px] leading-snug font-semibold text-zinc-900">{c.name}</div>
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {reading ? (
+            <span className="text-[12px] text-zinc-400">Reading the contract...</span>
+          ) : (
+            c.clauses.map((cl) => (
+              <span key={cl.ref} title={cl.text} className="animate-enter rounded-md bg-white px-1.5 py-0.5 text-[11.5px] text-zinc-700 ring-1 ring-zinc-200">
+                <span className="font-mono text-zinc-400">§{cl.ref}</span> {cl.title}
+              </span>
+            ))
+          )}
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+/** The contract PDF scrolling by while an employee reads it, with a scan line where it is reading. */
+function ContractReader({ c }: { c: ContractPreview }) {
+  const pages = c.page?.of ?? 1;
+  const strip = useRef<HTMLDivElement>(null);
+  // Scroll down through every page and back up, for as long as the employee is reading.
+  useEffect(() => {
+    const el = strip.current;
+    if (!el) return;
+    const period = pages * 2400;
+    const start = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const travel = Math.max(0, el.offsetHeight - 300);
+      const phase = ((now - start) % (2 * period)) / period;
+      const p = phase <= 1 ? phase : 2 - phase;
+      el.style.transform = "translateY(" + -travel * ease(p) + "px)";
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [pages]);
+  return (
+    <div className="mt-4 flex flex-col">
+      <div className="relative h-[300px] overflow-hidden rounded-xl bg-zinc-100 ring-1 ring-zinc-200">
+        <div ref={strip} className="mx-auto w-[300px] space-y-3 py-4">
+          {Array.from({ length: pages }, (_, i) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img key={i} src={contractThumb(c.id, i + 1)} alt={i === 0 ? c.id + " page 1" : ""} className="aspect-[8.5/11] w-full rounded-[3px] bg-white shadow-[0_1px_2px_rgb(0_0_0/0.08),0_6px_16px_rgb(0_0_0/0.08)]" />
+          ))}
+        </div>
+        <div className="pointer-events-none absolute inset-x-0 top-1/2 h-10 -translate-y-1/2 animate-pulse border-y border-primary/50 bg-primary/10" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-8 bg-gradient-to-b from-zinc-100 to-transparent" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-zinc-100 to-transparent" />
+      </div>
+      <div className="mt-2.5 flex items-center gap-1.5 text-[12px] text-zinc-500">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/logos/ironclad.png" alt="" className="size-4 rounded-full object-cover" />
+        <span className="font-mono text-[11.5px] text-zinc-400">{c.id}.pdf</span>
+        <span className="truncate text-zinc-600">{c.name}</span>
+        <span className="ml-auto shrink-0 text-zinc-400 tnum">{pages} pages</span>
+      </div>
+    </div>
+  );
+}
+
 /** `fit` grows the frame to its content (the card clips it when small); otherwise it scrolls within a fixed box when `scroll` is set. */
 export function FrameView({
   spec,
@@ -582,7 +709,7 @@ export function FrameView({
   return (
     <div
       style={fit ? { width: DW, minHeight: DH } : { width: DW, height: DH }}
-      className={cn("flex flex-col bg-white p-7 text-zinc-800 [&>*]:shrink-0", fit ? "" : scroll ? "overflow-y-auto overscroll-contain" : "overflow-hidden")}
+      className={cn("flex flex-col bg-white p-6 text-zinc-800 [&>*]:shrink-0", fit ? "" : scroll ? "overflow-y-auto overscroll-contain" : "overflow-hidden")}
     >
       <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1 truncate font-mono text-[12px] tracking-wider text-zinc-400 uppercase">{spec.eyebrow}</div>
@@ -603,6 +730,8 @@ export function FrameView({
       {spec.doc ? <DocView doc={spec.doc} at={tl.doc} t={t} /> : null}
       {spec.timeline ? <TimelineView spec={spec.timeline} at={tl.lanes} t={t} /> : null}
       {spec.match ? <MatchView m={spec.match} at={tl.match} result={tl.result} t={t} /> : null}
+      {spec.reading ? <ContractReader c={spec.reading} /> : null}
+      {spec.match && spec.contract && tl.contract && t >= tl.contract[0] ? <ContractCard c={spec.contract} open={open} t={t} span={tl.contract} /> : null}
       {spec.stack ? <StackView s={spec.stack} at={tl.stack} legend={tl.legend} t={t} /> : null}
       {spec.burn ? <BurnView b={spec.burn} span={tl.burn} t={t} /> : null}
       {spec.thread ? <ThreadView th={spec.thread} steps={tl.steps} messages={tl.messages} t={t} scroll={scroll || open} /> : null}
@@ -703,26 +832,58 @@ export function FrameView({
 
       {spec.checks?.length ? <CheckList checks={spec.checks} at={tl.checks} t={t} /> : null}
 
-      {spec.summary && t >= tl.summary ? <p className="animate-enter mt-4 text-[14px] leading-relaxed text-zinc-600">{spec.summary}</p> : null}
+      {spec.summary && t >= tl.summary ? (
+        <p title={spec.summary} className={cn("animate-enter mt-3 line-clamp-2 text-[13.5px] leading-relaxed text-zinc-600", !open && "[&_a]:pointer-events-none")}>
+          <ContractLinked text={spec.summary} contractId={spec.contract?.id} />
+        </p>
+      ) : null}
+
+      {spec.contract && !spec.match && t >= (tl.contract?.[0] ?? tl.summary) ? <ContractCard c={spec.contract} open={open} t={t} span={tl.contract} /> : null}
 
       {spec.evidence?.length && t >= tl.summary ? (
-        <div className="animate-enter mt-3 flex flex-wrap gap-1.5">
-          {spec.evidence.map((e) => (
-            <span key={e} className="rounded-md bg-zinc-100 px-2 py-0.5 font-mono text-[11px] text-zinc-500">
-              {e}
-            </span>
-          ))}
+        <div className="animate-enter mt-2.5 flex h-[22px] flex-wrap gap-1.5 overflow-hidden">
+          {spec.evidence.map((e) => {
+            const id = e.match(CONTRACT_ID)?.[0];
+            if (id && spec.contract) return null;
+            return id ? (
+              <Link
+                key={e}
+                href={contractHref(id)}
+                onClick={(ev) => ev.stopPropagation()}
+                tabIndex={open ? 0 : -1}
+                className={cn("rounded-md bg-zinc-100 px-2 py-0.5 font-mono text-[11px] text-zinc-600 underline decoration-zinc-300 underline-offset-2 hover:bg-zinc-200/70 hover:text-zinc-900", !open && "pointer-events-none")}
+              >
+                {e}
+              </Link>
+            ) : (
+              <span key={e} className="rounded-md bg-zinc-100 px-2 py-0.5 font-mono text-[11px] text-zinc-500">
+                {e}
+              </span>
+            );
+          })}
         </div>
       ) : null}
 
-      {spec.sources?.length && t >= tl.summary ? (
+      {spec.sources?.length && !spec.contract && t >= tl.summary ? (
         <div className="animate-enter mt-3 flex flex-wrap items-center gap-1.5">
           <span className="text-[11.5px] text-zinc-400">Read</span>
-          {spec.sources.map((s) => (
-            <span key={s} className="rounded-full bg-white px-2 py-0.5 text-[11.5px] text-zinc-600 ring-1 ring-zinc-200">
-              {s}
-            </span>
-          ))}
+          {spec.sources.map((s) =>
+            s === "Contract" && spec.contract ? (
+              <Link
+                key={s}
+                href={contractHref(spec.contract.id)}
+                onClick={(e) => e.stopPropagation()}
+                tabIndex={open ? 0 : -1}
+                className={cn("flex items-center gap-0.5 rounded-full bg-white px-2 py-0.5 text-[11.5px] text-zinc-700 ring-1 ring-zinc-300 hover:ring-zinc-500", !open && "pointer-events-none")}
+              >
+                {s} <ArrowUpRight className="size-3" />
+              </Link>
+            ) : (
+              <span key={s} className="rounded-full bg-white px-2 py-0.5 text-[11.5px] text-zinc-600 ring-1 ring-zinc-200">
+                {s}
+              </span>
+            ),
+          )}
         </div>
       ) : null}
     </div>

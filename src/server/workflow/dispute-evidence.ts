@@ -10,7 +10,7 @@ import type { WorkItemRow } from "./work-items";
  * from a system of record (the invoice line, the infrastructure controller's
  * lifecycle events and the provider's own API acknowledgment, the provider
  * meter, and the contract) and every number is computed here, not written by
- * an agent. The Cost Accountant chooses the clauses by reading the contract;
+ * an agent. The Cost Allocator chooses the clauses by reading the contract;
  * the gateway (checkCitedClauses) only lets through sections that exist in
  * that provider's contract. relevantClauses is the fixed fallback for disputes
  * drafted before agents chose their own clauses, and for the deterministic replay.
@@ -120,7 +120,7 @@ export function relevantClauses(clauses: ContractClause[], checks: InstanceCheck
   return out;
 }
 
-/** The clauses on the latest live dispute proposal for this item, as the Cost Accountant chose them. */
+/** The clauses on the latest live dispute proposal for this item, as the Cost Allocator chose them. */
 function chosenClauses(ctx: AppContext, item: WorkItemRow, contract: ContractClause[]): CitedClause[] | null {
   const proposal = ctx.db
     .select()

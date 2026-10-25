@@ -70,11 +70,11 @@ function say(row: ActivityRow, w: WorkspaceData): string {
     case "submit_compute_findings":
       return s(a, "summary");
     case "handoff_to_finance":
-      return "Handing this to the Cost Accountant. " + cap(s(a, "note"), 200);
+      return "Handing this to the Cost Allocator. " + cap(s(a, "note"), 200);
     case "request_human_info":
       return "I need you on this one: " + s(a, "question");
     case "request_more_info":
-      return "Asking the Compute Investigator: " + s(a, "question");
+      return "Asking the GPU Auditor: " + s(a, "question");
     case "get_project_budget":
       return s(r, "project.name") + " has posted " + s(r, "posted_to_date") + " of its " + s(r, "monthly_budget") + " budget.";
     case "get_allocation_policy":

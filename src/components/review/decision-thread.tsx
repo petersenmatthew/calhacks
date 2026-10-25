@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import type { WorkspaceData } from "@/server/queries";
 import type { BudgetChange, DecisionTurn } from "@/server/assistant";
 import { AgentAvatar } from "../status";
+import { ContractLinked } from "../contract/contract-link";
 import { doneMessage, submitDecision } from "./decision-card";
 import { ProofView, SplitBar, TONE_BG } from "./proof";
 
@@ -21,7 +22,7 @@ function typing(t: EventTarget | null) {
   return t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName));
 }
 
-function Typed({ text, onDone }: { text: string; onDone?: () => void }) {
+function Typed({ text, onDone, contractId }: { text: string; onDone?: () => void; contractId?: string | null }) {
   const [shown, setShown] = useState(0);
   const done = useRef(onDone);
   useEffect(() => {
@@ -39,7 +40,8 @@ function Typed({ text, onDone }: { text: string; onDone?: () => void }) {
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [text]);
-  return <>{text.slice(0, shown)}</>;
+  // Links appear once the line has finished typing.
+  return shown >= text.length ? <ContractLinked text={text} contractId={contractId} /> : <>{text.slice(0, shown)}</>;
 }
 
 function Dots() {
@@ -145,7 +147,7 @@ export function DecisionThread({
 
       <div className="text-[13.5px] leading-relaxed text-zinc-800">
         {speaker}
-        {opener ? <Typed text={opener} onDone={() => setTyped(true)} /> : <Dots />}
+        {opener ? <Typed text={opener} onDone={() => setTyped(true)} contractId={w.contract.id} /> : <Dots />}
       </div>
 
       {!done && typed ? (
@@ -219,7 +221,9 @@ export function DecisionThread({
         ) : (
           <div key={i} className="animate-enter text-[13.5px] leading-relaxed text-zinc-800">
             {speaker}
-            <span className="whitespace-pre-wrap">{t.content}</span>
+            <span className="whitespace-pre-wrap">
+              <ContractLinked text={t.content} contractId={w.contract.id} />
+            </span>
             {!done && i === lastAgent && !dismissed.includes(i) && (t.choiceId || t.note) ? (
               <ConfirmRow
                 items={[
