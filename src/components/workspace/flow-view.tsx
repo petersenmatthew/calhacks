@@ -107,7 +107,7 @@ function took(data: WorkspaceData, agentId: string) {
 }
 
 function FlowStrip({ data }: { data: WorkspaceData }) {
-  // A shared reservation is investigated by the Capacity Planner, a billing line by the Compute Investigator.
+  // A shared reservation is investigated by the Capacity Planner, a billing line by the GPU Auditor.
   const investigator = data.item.type === "SHARED_ALLOCATION" ? "agent.capacity" : "agent.compute";
   const compute = runFor(data, investigator);
   const finance = runFor(data, "agent.finance");
