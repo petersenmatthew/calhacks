@@ -189,6 +189,17 @@ export function MeadowScene() {
 
 const CREW = ["agent.capacity", "agent.compute", "agent.finance", "you", "agent.vendor", "agent.budget", "agent.policy"] as const;
 
+/** Short things each one says now and then. */
+const LINES: Record<(typeof CREW)[number], string[]> = {
+  "agent.capacity": ["so many GPUs...", "is that cluster idle?", "I counted twice!"],
+  "agent.compute": ["found a sneaky charge!", "those hours look funny", "beep boop, receipts"],
+  "agent.finance": ["books are balanced :)", "debit, credit, nap", "every cent counts"],
+  you: ["hi team!", "nice day for audits", "who wants snacks?"],
+  "agent.vendor": ["I'll email them nicely", "refund incoming!", "let's talk, vendor"],
+  "agent.budget": ["under budget, yay!", "saving for a GPU", "forecast: sunny"],
+  "agent.policy": ["rules are cozy", "I wrote that down", "that's in the policy!"],
+};
+
 type Walker = {
   x: number;
   y: number;
@@ -230,6 +241,29 @@ export function Roamers() {
   const settle = useRef(0);
   const still = useRef(false);
   const stepRef = useRef<(i: number) => void>(() => {});
+  const [say, setSay] = useState<{ i: number; text: string; n: number } | null>(null);
+
+  // Every so often one of them says something short.
+  useEffect(() => {
+    let t = 0;
+    let n = 0;
+    const next = (wait: number) => {
+      t = window.setTimeout(() => {
+        const free = CREW.map((_, i) => i).filter((i) => !cur.current[i].held);
+        if (free.length) {
+          const i = free[Math.floor(Math.random() * free.length)];
+          const lines = LINES[CREW[i]];
+          setSay({ i, text: lines[Math.floor(Math.random() * lines.length)], n: ++n });
+          t = window.setTimeout(() => {
+            setSay(null);
+            next(2500 + Math.random() * 4000);
+          }, 2800);
+        } else next(1500);
+      }, wait);
+    };
+    next(1800);
+    return () => window.clearTimeout(t);
+  }, []);
 
   const update = (i: number, patch: (w: Walker) => Walker) => {
     cur.current = cur.current.map((w, j) => (j === i ? patch(w) : w));
@@ -328,6 +362,14 @@ export function Roamers() {
               transition: w.dur ? `left ${w.dur}s ${w.ease}, top ${w.dur}s ${w.ease}` : "none",
             }}
           >
+            {say?.i === i && !w.held && (
+              <div key={say.n} className="pointer-events-none absolute bottom-full left-1/2 mb-1 -translate-x-1/2 whitespace-nowrap">
+                <div className="px-say relative rounded-lg border-2 border-[#1f3b5a] bg-white px-2 py-1 text-[12px] leading-none font-semibold text-[#1f3b5a] shadow-[0_2px_0_rgb(31_59_90/0.2)]">
+                  {say.text}
+                  <span className="absolute top-full left-1/2 -mt-px size-2 -translate-x-1/2 -translate-y-1/2 rotate-45 border-r-2 border-b-2 border-[#1f3b5a] bg-white" />
+                </div>
+              </div>
+            )}
             <div className="px-lean" style={{ transform: "rotate(" + w.lean + "deg)" }}>
               <div
                 key={w.landed}

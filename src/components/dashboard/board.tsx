@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { Check, Layers, LoaderCircle, Receipt, ScrollText } from "lucide-react";
+import { Check, LoaderCircle } from "lucide-react";
 import { agentSteps, AGENT_SHORT, BOARD_STAGES, boardStage, type BoardStage } from "@/lib/agent-steps";
 import { money } from "@/lib/format";
+import { PROVIDER_SOURCE, SOURCE } from "@/lib/sources";
 import { cn } from "@/lib/utils";
 import type { DashboardData } from "@/server/queries";
 import { StepList } from "../agent-steps";
@@ -42,31 +43,30 @@ function Tag({ stage, item, agent }: { stage: BoardStage; item: Item; agent?: Ag
 }
 
 function Card({ item, stage, data, agent }: { item: Item; stage: BoardStage; data: DashboardData; agent?: Agent }) {
-  const Icon = item.type === "BILLING_VARIANCE" ? Receipt : Layers;
   const working = agent?.status === "working";
   const variance = item.type === "BILLING_VARIANCE" && item.discrepancyCents >= 100 ? item.discrepancyCents : 0;
   const steps = working ? agentSteps(agent.agentId, agent.runTools, "running").steps : null;
+  const sid = PROVIDER_SOURCE[item.providerId];
+  const logo = sid ? SOURCE[sid].logo : null;
+  const kind = item.type === "BILLING_VARIANCE" ? "Invoice" : "Shared cost";
   return (
     <Link
       href={"/canvas?task=" + item.id}
       className={cn("card-soft mx-auto block w-full max-w-[260px] p-3.5 transition-transform hover:-translate-y-px animate-enter", working && "outline-2! outline-primary!", stage === "done" && "opacity-60 hover:opacity-100")}
     >
-      <div className="flex items-start gap-3">
-        <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-accent">
-          <Icon className="size-4 text-brand-ink" />
+      <div className="flex items-center gap-1.5 text-[11.5px] text-zinc-500">
+        {logo ? <img src={logo} alt="" className="size-3.5 shrink-0 rounded-[3px]" /> : null}
+        <span className="truncate">
+          {data.providers[item.providerId]?.shortName} · {kind}
         </span>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-[14px] font-medium text-zinc-900">
-            {data.providers[item.providerId]?.shortName} · {item.resource}
-          </div>
-          <div className="mt-0.5 flex items-center justify-between gap-2">
-            <span className="text-[12.5px] text-zinc-500 tnum">
-              {money(item.amountCents, { cents: false })}
-              {variance ? <span className="text-destructive"> {money(variance, { sign: true, cents: false })}</span> : null}
-            </span>
-            <Tag stage={stage} item={item} agent={agent} />
-          </div>
-        </div>
+        <span className="ml-auto">
+          <Tag stage={stage} item={item} agent={agent} />
+        </span>
+      </div>
+      <div className="mt-2 truncate text-[14px] font-medium text-zinc-900">{item.resource}</div>
+      <div className="mt-0.5 text-[12.5px] text-zinc-500 tnum">
+        {money(item.amountCents, { cents: false })}
+        {variance ? <span className="text-destructive"> {money(variance, { sign: true, cents: false })}</span> : null}
       </div>
       {steps ? (
         <div className="mt-3 rounded-xl bg-zinc-50 px-3 py-2.5">
@@ -84,18 +84,13 @@ function Card({ item, stage, data, agent }: { item: Item; stage: BoardStage; dat
 function PolicyCard({ p }: { p: DashboardData["policyApprovals"][number] }) {
   return (
     <Link href="/canvas" className="card-soft mx-auto block w-full max-w-[260px] p-3.5 transition-transform hover:-translate-y-px animate-enter">
-      <div className="flex items-start gap-3">
-        <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#ffe7f0]">
-          <ScrollText className="size-4 text-[#b4366a]" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-[14px] font-medium text-zinc-900">{p.title}</div>
-          <div className="mt-0.5 flex items-center justify-between gap-2">
-            <span className="truncate text-[12.5px] text-zinc-500">Learned at onboarding</span>
-            <span className="inline-flex shrink-0 items-center rounded-full bg-[#ffe7f0] px-2 py-0.5 text-[11px] font-medium text-[#b4366a]">Your turn</span>
-          </div>
-        </div>
+      <div className="flex items-center gap-1.5 text-[11.5px] text-zinc-500">
+        <Flower petal={UI_FLOWERS.pink.petal} eye={UI_FLOWERS.pink.eye} size={12} />
+        <span className="truncate">Policy</span>
+        <span className="ml-auto inline-flex shrink-0 items-center rounded-full bg-[#ffe7f0] px-2 py-0.5 text-[11px] font-medium text-[#b4366a]">Your turn</span>
       </div>
+      <div className="mt-2 truncate text-[14px] font-medium text-zinc-900">{p.title}</div>
+      <div className="mt-0.5 truncate text-[12.5px] text-zinc-500">Learned at onboarding</div>
     </Link>
   );
 }
@@ -116,7 +111,7 @@ export function Board({ data }: { data: DashboardData }) {
                 <span className="text-[14px] font-medium text-zinc-900">{label}</span>
                 <span className="text-[13px] text-zinc-400 tnum">{items.length + policyCards.length}</span>
               </div>
-              <div className="flex flex-1 flex-col justify-center gap-5 py-6">
+              <div className="flex flex-1 flex-col gap-4 pt-2">
                 {policyCards.map((p) => (
                   <PolicyCard key={p.approvalId} p={p} />
                 ))}
@@ -124,9 +119,6 @@ export function Board({ data }: { data: DashboardData }) {
                   <Card key={item.id} item={item} stage={key} data={data} agent={agentFor(item.id)} />
                 ))}
                 {items.length > shown.length ? <div className="px-1 text-[11.5px] text-zinc-400">+{items.length - shown.length} more</div> : null}
-                {items.length + policyCards.length === 0 ? (
-                  <div className="grid h-20 place-items-center rounded-2xl border border-dashed border-zinc-200 text-[12.5px] text-zinc-400">Nothing here</div>
-                ) : null}
               </div>
             </div>
           );

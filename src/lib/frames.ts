@@ -35,7 +35,8 @@ export type MatchSpec = {
 export type StackSpec = { total: string; parts: { label: string; share: number; display: string; tone?: Tone }[] };
 
 /** Month-to-date spend, its straight-line projection, and the budget. Amounts in cents. */
-export type BurnSpec = { days: number; elapsed: number; budget: number; posted: number; projected: number; tone: Tone };
+/** posted is billed so far; used is capacity actually consumed; series is cumulative spend per day (actual through today, forecast after). */
+export type BurnSpec = { days: number; elapsed: number; budget: number; posted: number; used?: number; projected: number; series?: number[]; tone: Tone };
 
 /** A case with an outside party: where it stands and the messages so far. */
 export type ThreadSpec = {
@@ -514,7 +515,9 @@ function toolSpec(row: ActivityRow, w: WorkspaceData): FrameSpec {
           elapsed: n(r, "days_elapsed"),
           budget: cents("monthly_budget"),
           posted: cents("posted_to_date"),
+          used: get(r, "used_to_date") === undefined ? undefined : cents("used_to_date"),
           projected: cents("projected_month_end"),
+          series: list(r, "daily_cumulative_cents").length ? list(r, "daily_cumulative_cents").map(Number) : undefined,
           tone,
         },
       };
@@ -906,7 +909,7 @@ export function frameText(spec: FrameSpec): string {
     out.push("Result: " + spec.match.result.label + " " + spec.match.result.value);
   }
   if (spec.stack) out.push("Split of " + spec.stack.total + ": " + spec.stack.parts.map((p) => p.label + " " + p.display + " (" + Math.round(p.share * 100) + "%)").join("; "));
-  if (spec.burn) out.push("Burn: posted " + money(spec.burn.posted) + " by day " + spec.burn.elapsed + " of " + spec.burn.days + "; projected " + money(spec.burn.projected) + " vs budget " + money(spec.burn.budget));
+  if (spec.burn) out.push("Burn: billed " + money(spec.burn.posted) + (spec.burn.used === undefined ? "" : ", used " + money(spec.burn.used)) + " by day " + spec.burn.elapsed + " of " + spec.burn.days + "; projected " + money(spec.burn.projected) + " vs budget " + money(spec.burn.budget));
   if (spec.thread) {
     out.push("Steps: " + spec.thread.steps.map((s) => s.label + " (" + s.state + ")").join("; "));
     for (const m of spec.thread.messages) out.push("Message from " + m.from + " to " + m.to + ": " + (m.subject ? m.subject + ". " : "") + m.body);

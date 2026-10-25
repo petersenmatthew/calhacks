@@ -31,6 +31,7 @@ import {
   RESERVATION_METHODS,
   type AllocationMethod,
 } from "../domain/allocation";
+import { projectBurn as computeBurn } from "../burn";
 import { hoursBetween } from "../domain/billing";
 import { formatCents, round2 } from "../domain/money";
 import { ACTOR, getActor } from "../security/actors";
@@ -1466,30 +1467,11 @@ const closeVendorDispute = defineTool({
 /* Budget Analyst                                                      */
 /* ------------------------------------------------------------------ */
 
-type BurnStatus = "on_track" | "watch" | "at_risk" | "over";
-
-/** Month-to-date compute expense for a project and a straight-line projection to month end. */
+/** Usage-based compute burn for a project; see server/burn.ts. */
 function projectBurn(ctx: AppContext, projectId: string, period: string) {
-  const project = ctx.db.select().from(projects).where(eq(projects.id, projectId)).get();
-  if (!project) fail("Unknown project " + projectId, "NOT_FOUND");
-  const row = ctx.sqlite
-    .prepare(
-      "SELECT COALESCE(SUM(l.debit_cents - l.credit_cents), 0) AS total FROM journal_lines l JOIN journal_entries e ON e.id = l.entry_id WHERE l.account_code = '6100' AND l.project_id = ? AND e.period = ?",
-    )
-    .get(project.id, period) as { total: number };
-  const [y, m] = period.split("-").map(Number);
-  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  const now = new Date();
-  const nowKey = now.getUTCFullYear() * 12 + now.getUTCMonth();
-  const periodKey = y * 12 + (m - 1);
-  const elapsed = nowKey > periodKey ? daysInMonth : nowKey < periodKey ? 1 : Math.max(1, now.getUTCDate());
-  const perDay = row.total / elapsed;
-  const projected = Math.round(perDay * daysInMonth);
-  const budget = project.monthlyBudgetCents;
-  const remaining = budget - row.total;
-  const status: BurnStatus = row.total > budget ? "over" : projected > budget ? "at_risk" : projected > budget * 0.9 ? "watch" : "on_track";
-  const daysLeft = perDay > 0 ? Math.max(0, Math.floor(remaining / perDay)) : null;
-  return { project, posted: row.total, budget, remaining, projected, daysInMonth, elapsed, status, daysLeft };
+  const b = computeBurn(ctx, projectId, period);
+  if (!b) fail("Unknown project " + projectId, "NOT_FOUND");
+  return b;
 }
 
 const getPostedCharges = defineTool({
@@ -1522,7 +1504,7 @@ const forecastProjectBurn = defineTool({
   permission: "budget:read",
   category: "read",
   description:
-    "Month-to-date compute spend for a research project, a straight-line projection to month end, days of budget left at this rate, and the computed status (on_track, watch, at_risk, over).",
+    "Compute burn for a research project: charges billed this month, how much of that capacity has actually been used so far, a month-end projection (billed charges plus on-demand usage at its current pace), days of budget left if it runs out before month end, and the computed status (on_track, watch, at_risk, over).",
   schema: z.object({ project_id: z.string() }),
   handler: ({ ctx, item }, args) => {
     const b = projectBurn(ctx, args.project_id, item.period);
@@ -1532,12 +1514,14 @@ const forecastProjectBurn = defineTool({
         period: item.period,
         monthly_budget: formatCents(b.budget),
         posted_to_date: formatCents(b.posted),
+        used_to_date: formatCents(b.spent),
         days_elapsed: b.elapsed,
         days_in_month: b.daysInMonth,
         projected_month_end: formatCents(b.projected),
         projected_pct_of_budget: Math.round((b.projected / b.budget) * 1000) / 10,
-        days_of_budget_left: b.daysLeft,
+        days_of_budget_left: b.daysLeft ?? "budget lasts past month end",
         status: b.status,
+        daily_cumulative_cents: b.daily,
       },
       evidence: [
         {
@@ -1549,7 +1533,7 @@ const forecastProjectBurn = defineTool({
       ],
       title: "Forecast " + b.project.name + " burn for " + item.period,
       summary:
-        formatCents(b.posted) + " posted after " + b.elapsed + " of " + b.daysInMonth + " days; on pace for " + formatCents(b.projected) +
+        formatCents(b.posted) + " billed, " + formatCents(b.spent) + " used after " + b.elapsed + " of " + b.daysInMonth + " days; on pace for " + formatCents(b.projected) +
         " against " + formatCents(b.budget) + " (" + b.status.replace("_", " ") + ").",
     };
   },
