@@ -123,7 +123,7 @@ export function SystemCanvas({ data, initialTask = null, onChanged }: { data: Da
 
   return (
     <div className="flex h-full min-h-0">
-      <div className="bg-dots relative min-w-0 flex-1">
+      <div className="bg-canvas relative min-w-0 flex-1">
         <Orbit
           overview={data}
           frames={frames}

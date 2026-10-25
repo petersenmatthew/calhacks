@@ -147,6 +147,11 @@ export function Flower({ petal, eye, size = 20, className }: { petal: string; ey
   );
 }
 
+/** The moa logo: the pink pixel flower. */
+export function LogoFlower({ size = 14, className }: { size?: number; className?: string }) {
+  return <Flower petal={FLOWER_COLORS[2].petal} eye={FLOWER_COLORS[2].eye} size={size} className={className} />;
+}
+
 /** A thin strip of meadow: grass, a few flowers, for the top of a card. */
 export function MeadowStrip({ seed = 3, className }: { seed?: number; className?: string }) {
   const r = rng(seed);

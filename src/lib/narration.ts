@@ -7,7 +7,7 @@ import { dateTimeUtc, hours } from "./format";
 import type { ActivityRow, WorkspaceData } from "@/server/queries";
 
 export type FeedLine =
-  | { kind: "agent"; id: number; actorId: string; at: string; text: string; tone?: "warn" | "bad" }
+  | { kind: "agent"; id: number; actorId: string; at: string; text: string; tone?: "warn" | "bad"; tool?: string }
   | { kind: "you"; id: number; at: string; text: string }
   | { kind: "event"; id: number; at: string; text: string; tone?: "bad" };
 
@@ -151,7 +151,7 @@ export function buildFeed(w: WorkspaceData): FeedLine[] {
     } else if (agent && row.toolName) {
       const text = row.toolName === "get_work_item" && opened ? "Catching up on the task and what the team found so far." : say(row, w);
       if (row.toolName === "get_work_item") opened = true;
-      out.push({ kind: "agent", id: row.id, actorId: row.actorId, at: row.createdAt, text });
+      out.push({ kind: "agent", id: row.id, actorId: row.actorId, at: row.createdAt, text, tool: row.toolName });
     } else if (row.type === "DISPUTE" || row.type === "POLICY") {
       out.push({ kind: "event", id: row.id, at: row.createdAt, text: row.title });
     }
