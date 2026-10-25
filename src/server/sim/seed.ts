@@ -234,11 +234,14 @@ export function isSeeded(ctx: AppContext) {
   return row.n > 0;
 }
 
-/** Add actors introduced after a database was seeded. Actors are append-only, so existing rows are left as they are. */
+/** Add actors introduced after a database was seeded, and bring existing ones' names and descriptions up to date. */
 export function ensureActors(ctx: AppContext) {
   ctx.db.insert(actors).values(ACTOR_SEED).onConflictDoNothing().run();
+  // Names and job descriptions follow the current seed, so a database from before a rename catches up without a reset.
   // The controller's name follows the environment (CONTROLLER_NAME, or "You" on a public demo).
-  ctx.db.update(actors).set({ name: controllerName() }).where(eq(actors.id, ACTOR.controller)).run();
+  for (const a of ACTOR_SEED) {
+    ctx.db.update(actors).set({ name: a.id === ACTOR.controller ? controllerName() : a.name, title: a.title, description: a.description }).where(eq(actors.id, a.id)).run();
+  }
 }
 
 /**
@@ -247,13 +250,17 @@ export function ensureActors(ctx: AppContext) {
  * starts quiet and the presenter triggers the one case to watch live. "all"
  * loads every case in cases.ts for the eval and tests.
  */
-export function seedEnvironment(ctx: AppContext, cases: "demo" | "all" = "all") {
+export function seedEnvironment(ctx: AppContext, cases: "demo" | "all" | string[] = "all") {
   tx(ctx, () => {
     seedReferenceData(ctx);
     seedApHistory(ctx);
     seedFeedSchedule(ctx);
   });
-  const seeded = cases === "all" ? SEED_CASES : SEED_CASES.filter((c) => c.category === "clean");
+  const seeded = Array.isArray(cases)
+    ? SEED_CASES.filter((c) => cases.includes(c.id))
+    : cases === "all"
+      ? SEED_CASES
+      : SEED_CASES.filter((c) => c.category === "clean");
   for (const c of seeded) ingestCase(ctx, c.data);
   recordActivity(ctx, {
     actorId: ACTOR.simulator,
