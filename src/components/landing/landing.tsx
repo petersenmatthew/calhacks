@@ -1,8 +1,6 @@
 "use client";
 
-import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { toast } from "sonner";
 import { MeadowScene, Roamers } from "./scene";
 
 /*
@@ -11,24 +9,8 @@ import { MeadowScene, Roamers } from "./scene";
 
 export function Landing() {
   const router = useRouter();
-  const [busy, setBusy] = useState(false);
-  const start = async () => {
-    setBusy(true);
-    try {
-      const r = await fetch("/api/demo/simulate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scenario: "overbilling" }) });
-      const body = (await r.json().catch(() => ({}))) as { workItemId?: string | null; error?: string };
-      if (!r.ok) throw new Error(body.error ?? "Could not start");
-      try {
-        window.localStorage.setItem("moa-onboarded-v1", "1");
-      } catch {
-        /* fine */
-      }
-      router.push(body.workItemId ? "/canvas?task=" + body.workItemId : "/canvas");
-    } catch (e) {
-      toast.error((e as Error).message);
-      setBusy(false);
-    }
-  };
+  // Start goes to the app with the intro open; the sample case starts from there.
+  const start = () => router.push("/canvas?intro=1");
 
   return (
     <div className="relative h-dvh overflow-hidden bg-[#45b4ee]">
@@ -45,10 +27,9 @@ export function Landing() {
         <button
           type="button"
           onClick={start}
-          disabled={busy}
           className="pointer-events-auto mt-8 rounded-xl bg-white px-7 py-3 text-[15px] font-semibold text-[#1f3b5a] shadow-[0_4px_0_rgb(31_59_90/0.18)] transition-transform hover:-translate-y-0.5 active:translate-y-0.5 disabled:opacity-70"
         >
-          {busy ? "Starting\u2026" : "Start \u2192"}
+          Start {"\u2192"}
         </button>
       </main>
     </div>

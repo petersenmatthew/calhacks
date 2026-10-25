@@ -1,10 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { toast } from "sonner";
-import { ArrowRight, LoaderCircle, X } from "lucide-react";
-import { postJson } from "@/lib/api";
+import { ArrowRight, X } from "lucide-react";
 import { FLOWER_COLORS, Flower, MeadowStrip } from "./landing/meadow";
 import { PixelAgent } from "./pixel-agent";
 
@@ -39,28 +35,16 @@ const CREW = ["agent.capacity", "agent.compute", "agent.finance", "you", "agent.
  * A one-screen intro for first-time visitors (judges): a little meadow with the
  * team in it, three flower-bulleted steps, and a button that starts the sample case.
  */
-export function Onboarding({ open, publicDemo, onClose, onStarted }: { open: boolean; publicDemo: boolean; onClose: () => void; onStarted: () => void }) {
-  const router = useRouter();
-  const [busy, setBusy] = useState(false);
+export function Onboarding({ open, publicDemo, onClose, onStart }: { open: boolean; publicDemo: boolean; onClose: () => void; onStart: () => void }) {
   if (!open) return null;
 
   const close = () => {
     markSeen();
     onClose();
   };
-  const start = async () => {
-    setBusy(true);
-    try {
-      const r = await postJson<{ status: string; workItemId?: string | null }>("/api/demo/simulate", { scenario: "overbilling" });
-      markSeen();
-      onStarted();
-      onClose();
-      router.push(r.workItemId ? "/canvas?task=" + r.workItemId : "/canvas");
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+  const start = () => {
+    markSeen();
+    onStart();
   };
 
   return (
@@ -106,12 +90,10 @@ export function Onboarding({ open, publicDemo, onClose, onStarted }: { open: boo
             <button
               type="button"
               onClick={start}
-              disabled={busy}
-              className="inline-flex h-10 items-center gap-2 rounded-lg bg-zinc-900 px-4 text-[14px] font-medium text-white hover:bg-zinc-800 disabled:opacity-60"
+              className="inline-flex h-10 items-center gap-2 rounded-lg bg-zinc-900 px-4 text-[14px] font-medium text-white hover:bg-zinc-800"
             >
-              {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
               Start the sample case
-              {!busy ? <ArrowRight className="size-4" /> : null}
+              <ArrowRight className="size-4" />
             </button>
             <button type="button" onClick={close} className="h-10 rounded-lg px-3 text-[14px] text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
               Look around first

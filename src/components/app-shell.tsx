@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { createContext, useContext, useEffect, useState } from "react";
 import useSWR from "swr";
-import { CircleHelp, Network, ShieldCheck, SquareKanban } from "lucide-react";
-import { fetcher } from "@/lib/api";
+import { CircleHelp, LoaderCircle, Network, ShieldCheck, SquareKanban } from "lucide-react";
+import { fetcher, postJson } from "@/lib/api";
 import { periodLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { DashboardData } from "@/server/queries";
@@ -28,6 +29,9 @@ const ShellContext = createContext<Shell>({ period: null, setPeriod: () => {}, l
 export const useShell = () => useContext(ShellContext);
 export const viewHref = (v: View) => (v === "board" ? "/board" : "/canvas");
 
+/** Seconds between leaving the intro and the sample invoice arriving. */
+const START_PAUSE_S = 3;
+
 const TABS = [
   { key: "canvas", href: "/canvas", label: "Canvas", icon: Network },
   { key: "board", href: "/board", label: "Board", icon: SquareKanban },
@@ -43,10 +47,34 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [intro, setIntro] = useState(false);
   useEffect(() => {
     // Read after mount (storage is browser-only), then open on the next frame.
-    if (hasSeenOnboarding()) return;
+    // Coming from the landing page's Start: always show it. Otherwise only the first time.
+    const fromLanding = new URLSearchParams(window.location.search).get("intro") === "1";
+    if (fromLanding) window.history.replaceState(null, "", window.location.pathname);
+    if (!fromLanding && hasSeenOnboarding()) return;
     const raf = requestAnimationFrame(() => setIntro(true));
     return () => cancelAnimationFrame(raf);
   }, []);
+
+  // After the intro, give people a moment to take in the canvas before the team starts moving.
+  const router = useRouter();
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const startSample = async () => {
+    setIntro(false);
+    if (pathname !== "/canvas") router.push("/canvas");
+    for (let n = START_PAUSE_S; n > 0; n--) {
+      setCountdown(n);
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    try {
+      const r = await postJson<{ status: string; workItemId?: string | null }>("/api/demo/simulate", { scenario: "overbilling" });
+      router.push(r.workItemId ? "/canvas?task=" + r.workItemId : "/canvas");
+      mutate();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setCountdown(null);
+    }
+  };
 
   // Remember which work view was open last (adjusted during render, no effect needed).
   const here: View | null = pathname === "/board" ? "board" : pathname === "/canvas" ? "canvas" : null;
@@ -115,7 +143,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
         <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
-        <Onboarding open={intro} publicDemo={Boolean(data?.settings.publicDemo)} onClose={() => setIntro(false)} onStarted={() => mutate()} />
+        <Onboarding open={intro} publicDemo={Boolean(data?.settings.publicDemo)} onClose={() => setIntro(false)} onStart={startSample} />
+        {countdown !== null ? (
+          <div
+            role="status"
+            className="animate-enter fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full bg-zinc-900 px-4 py-2 text-[13px] font-medium text-white shadow-lg"
+          >
+            <LoaderCircle className="size-4 animate-spin" />
+            A Lambda invoice arrives in {countdown}&hellip;
+          </div>
+        ) : null}
       </div>
     </ShellContext.Provider>
   );
