@@ -19,15 +19,9 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning className={GeistSans.variable + " " + GeistMono.variable + " h-full antialiased"}>
+    <html lang="en" className={GeistSans.variable + " " + GeistMono.variable + " h-full antialiased"}>
       <head>
         <meta name="darkreader-lock" />
-        {/* Draft background picker for review: ?bg=plain|warm|grid|fine|glow|paper */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: "try{var b=new URLSearchParams(location.search).get('bg');if(b)document.documentElement.dataset.bg=b}catch(e){}",
-          }}
-        />
       </head>
       <body className="h-full overflow-hidden bg-background text-foreground">
         <TooltipProvider delayDuration={150}>
