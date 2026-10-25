@@ -37,7 +37,7 @@ export function ResetButton({ onDone }: { onDone?: () => void }) {
         <DialogHeader>
           <DialogTitle>Reset the sandbox?</DialogTitle>
           <DialogDescription>
-            Deletes all work items, postings, audit events, and learned policies, then reloads the seeded Atlas Research month. Use this to
+            Deletes all work items, postings, audit events, and learned policies, then reloads the seeded xAnthropenAI month. Use this to
             repeat the demo.
           </DialogDescription>
         </DialogHeader>

@@ -1819,7 +1819,7 @@ const getVendorThread = defineTool({
   permission: "dispute:read",
   category: "read",
   description:
-    "The email conversation with the provider on your dispute, oldest first: the letter, follow-ups, the vendor's replies, and Atlas's answers. Lists the replies still waiting for you, the evidence you may quote back, and any answer the controller gave you.",
+    "The email conversation with the provider on your dispute, oldest first: the letter, follow-ups, the vendor's replies, and xAnthropenAI's answers. Lists the replies still waiting for you, the evidence you may quote back, and any answer the controller gave you.",
   schema: z.object({ work_item_id: workItemId }),
   handler: ({ ctx, item }) => {
     const dispute = disputeFor(ctx, item);
@@ -1885,7 +1885,7 @@ const replyToVendorTool = defineTool({
   category: "write",
   terminal: true,
   description:
-    "Email the provider in the same thread: answer their question, send the records they asked for, or restate Atlas's position. Set attach_evidence to resend the evidence CSV. You may only quote amounts already in the approved dispute; anything else needs ask_controller. Ends your run.",
+    "Email the provider in the same thread: answer their question, send the records they asked for, or restate xAnthropenAI's position. Set attach_evidence to resend the evidence CSV. You may only quote amounts already in the approved dispute; anything else needs ask_controller. Ends your run.",
   schema: z.object({
     work_item_id: workItemId,
     answering: z.array(messageId).describe("The vendor message ids this reply answers."),
@@ -1924,7 +1924,7 @@ const recordVendorDecisionTool = defineTool({
     decision: z.enum(["credited", "partial_credit", "denied"]),
     credit_reference: z.string().nullable().describe("The vendor's credit memo number, if they gave one."),
     credit_amount_cents: z.number().int().nullable().describe("Only for partial_credit: the credit the controller accepted, in cents."),
-    confirmation_message: z.string().nullable().describe("A short note to the vendor confirming what Atlas booked, or null to send nothing."),
+    confirmation_message: z.string().nullable().describe("A short note to the vendor confirming what xAnthropenAI booked, or null to send nothing."),
     summary: z.string().describe("One or two sentences on what the vendor decided and why."),
   }),
   handler: ({ ctx, run, item }, args) => {
@@ -1957,7 +1957,7 @@ const askControllerTool = defineTool({
   category: "write",
   terminal: true,
   description:
-    "The vendor proposed something the approval does not cover (a partial credit, a different amount, a payment plan) or asked for something only Atlas staff know (a PO number, a contact, a signature). Ask the controller, with your recommendation. The case stays open with the vendor; you resume when the controller answers. Ends your run.",
+    "The vendor proposed something the approval does not cover (a partial credit, a different amount, a payment plan) or asked for something only xAnthropenAI staff know (a PO number, a contact, a signature). Ask the controller, with your recommendation. The case stays open with the vendor; you resume when the controller answers. Ends your run.",
   schema: z.object({
     work_item_id: workItemId,
     message_id: messageId,

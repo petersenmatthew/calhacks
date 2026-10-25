@@ -17,7 +17,7 @@ Autonomous finance for AI research labs. Six AI agents check every GPU invoice l
 
 **Example:** Lambda bills 36 h. The job ran 22 h and the instance was shut down at 24 h. MOA disputes 12 h, not 14, because the contract says idle time on a running instance is billable.
 
-The fictional lab is **Atlas Research**. Its source systems (scheduler, infrastructure controller, provider meters, invoices, ERP) are simulated in SQLite; agent decisions, approvals, postings, emails, and the audit trail are real application state. Work also starts on its own: a scheduler syncs billing feeds and follows up on approvals and disputes as business days pass. See [What runs on its own](#what-runs-on-its-own) and [Proof it works](#proof-it-works).
+The fictional lab is **xAnthropenAI**. Its source systems (scheduler, infrastructure controller, provider meters, invoices, ERP) are simulated in SQLite; agent decisions, approvals, postings, emails, and the audit trail are real application state. Work also starts on its own: a scheduler syncs billing feeds and follows up on approvals and disputes as business days pass. See [What runs on its own](#what-runs-on-its-own) and [Proof it works](#proof-it-works).
 
 ## Quick start
 
@@ -171,11 +171,11 @@ Everything the system tells a person or a vendor goes through an outbox table, w
 | Offered a partial credit, or asked for something only staff know (PO, signature) | Asks the controller, with its recommendation, in Slack and on the task (Accept / Hold out / write an answer); the case stays open | A partial credit can only be booked after the controller answers, and is split: credit for what the vendor gave, the rest to the team |
 | Only acknowledged | Notes it and keeps waiting | |
 
-Out-of-office and other automatic replies are stored on the thread but not acted on. A bounce marks the dispute's email "Bounced" and pings the controller, since the vendor has not seen it. Attachment names (a credit memo PDF, say) are noted in the reply the liaison reads, and HTML-only replies are converted to text. Our own outgoing mail carries an `X-Atlas-Outbox` header so it is never read back as a reply, a reply cannot predate its letter, and once the vendor has answered the 14-day chase stops. A reply that arrived some other way can be pasted on the task.
+Out-of-office and other automatic replies are stored on the thread but not acted on. A bounce marks the dispute's email "Bounced" and pings the controller, since the vendor has not seen it. Attachment names (a credit memo PDF, say) are noted in the reply the liaison reads, and HTML-only replies are converted to text. Our own outgoing mail carries an `X-xAnthropenAI-Outbox` header so it is never read back as a reply, a reply cannot predate its letter, and once the vendor has answered the 14-day chase stops. A reply that arrived some other way can be pasted on the task.
 
 **Slack threads and reactions.** Each approval request and each dispute is one message; everything after it goes in its thread. A decided approval gets a reaction on the request (✅ approved, ❌ rejected, ↩️ changes requested) and a thread reply with who decided and what happens next. A dispute's thread collects the vendor's replies, the liaison's answers and questions, follow-ups and the close; the close (and a bounce) also show in the channel, and the letter gets ✅ (credited), 🤝 (partial credit) or ❌ (denied). Replies and reactions wait until the message they belong to is posted, and a Slack rate limit pauses delivery for as long as Slack asks without counting as a failed attempt.
 
-**Who gets pinged** (Atlas Research Slack workspace):
+**Who gets pinged** (xAnthropenAI Slack workspace):
 
 | Event | Where | Who |
 | --- | --- | --- |

@@ -94,19 +94,50 @@ export type FrameSpec = {
   reading?: ContractPreview;
   /** A rule the Controls Lead learned: what taught it, the rule before and after, and the approval waiting on it. */
   policyChange?: PolicyChange;
+  /** Every rule the team follows (the Controls Lead's standing frame). */
+  rulebook?: { handled: number; rules: { key: string; title: string; from: string; used: number; isNew?: boolean; pending?: boolean }[] };
+  /** A note from the controller that concerns only this case. */
+  noteOnly?: { note: string; reply: string };
 };
 
+/** One split of a charge between teams, for showing what a rule changes. */
+export type SplitPart = { label: string; cents: number; owner?: boolean };
+
+/** A rule the Controls Lead learned on this case: what you said, what it changes, and where it stands. */
 export type PolicyChange = {
+  key: string;
+  statement: string;
   /** The controller's own words that taught the rule. */
   quote?: { text: string; who: string };
-  /** Where the rule came from when nobody said it ("6 months of AP history"). */
-  source?: string;
-  before?: { version: number; text: string };
-  after: { version: number; text: string };
+  /** The rule it replaces, in a few words. */
+  replaces?: string;
+  /** The same real charge split the old way and the new way. */
+  example?: { label: string; totalCents: number; before: SplitPart[]; after: SplitPart[] };
+  state: "pending" | "live" | "rejected" | "replaced";
   /** Pending approval the controller can decide from the frame. */
   approvalId?: string;
-  status: string;
+  /** When it went live, and the agents it was handed to. */
+  liveAt?: string;
+  handedTo?: string[];
+  /** Cases that posted under it since. */
+  usedBy?: { workItemId: string; label: string; amountCents: number }[];
 };
+
+const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
+
+/** A short plain-language name for a rule. */
+export function ruleTitle(policyKey: string, method: string, rule?: { thresholdCents?: number; autoPostLimitCents?: number }) {
+  if (policyKey === "ALLOC-SHARED") {
+    return (
+      ({ owner_pays_all: "Owners pay for shared GPUs", owner_pays_idle: "Owners pay for idle reserved GPUs", usage_proportional: "Split shared GPUs by hours used" } as Record<string, string>)[method] ??
+      "Shared reservation allocation"
+    );
+  }
+  if (policyKey === "VARIANCE-MATERIALITY") return "Pay variances under " + money(rule?.thresholdCents ?? 0, { cents: false }) + " without a dispute";
+  if (policyKey === "AUTO-MATCH") return "Book invoices that match the contract exactly";
+  if (policyKey === "RECON-EXPLAINED") return "Book charges the contract supports, up to " + money(rule?.autoPostLimitCents ?? 0, { cents: false });
+  return policyKey;
+}
 
 export type ContractPreview = {
   id: string;
@@ -806,10 +837,11 @@ function threadSpec(w: WorkspaceData, send: ActivityRow, close?: ActivityRow, pk
   const when = (iso?: string | null) => (iso ? dateOnly(iso) + ", " + clockTime(iso).slice(0, 5) : undefined);
   const messages: ThreadSpec["messages"] = [
     {
-      from: "Atlas Research Finance",
+      from: "xAnthropenAI Finance",
       to: d?.sentTo ?? provider + " billing",
       subject: s(send.args, "subject"),
       body: s(send.args, "message"),
+      logo: "/logos/xanthropenai-mark.png",
       at: when(d?.submittedAt ?? send.createdAt),
     },
   ];
@@ -818,7 +850,7 @@ function threadSpec(w: WorkspaceData, send: ActivityRow, close?: ActivityRow, pk
     const inbound = w.vendorMessages.find((m) => m.direction === "inbound");
     messages.push({
       from: provider + " billing",
-      to: "Atlas Research Finance",
+      to: "xAnthropenAI Finance",
       body: credited ? "We reviewed the dispute and issued a credit memo for " + amount + ref + "." : "We reviewed the dispute and are upholding the charge" + ref + ".",
       tone: credited ? "ok" : "bad",
       logo: vendorLogo,
@@ -917,8 +949,10 @@ function vendorReplyFrames(w: WorkspaceData): Frame[] {
 }
 
 function policyFrames(w: WorkspaceData): Frame[] {
-  return w.policies.map((p) => {
-    const approver = p.approvedBy ? (w.actors[p.approvedBy]?.name ?? p.approvedBy) : null;
+  // Only rules this case taught get a frame here; standing rules live in the rulebook on the all-work view.
+  return w.policies
+    .filter((p) => p.learnedFromWorkItemId === w.item.id && p.proposedBy.startsWith("agent."))
+    .map((p) => {
     const prior = w.policies.find((x) => x.id === p.supersedesId) ?? w.policies.filter((x) => x.policyKey === p.policyKey && x.version < p.version).at(-1);
     // What taught it: the controller's latest note on a proposal of the case it learned from (a correction, or a note left with an approval).
     const correction = p.learnedFromWorkItemId
@@ -926,26 +960,46 @@ function policyFrames(w: WorkspaceData): Frame[] {
           .filter((a) => a.subjectType === "PROPOSAL" && a.decisionReason && !/^Covered by /.test(a.decisionReason) && a.decidedAt && a.decidedAt <= p.createdAt)
           .at(-1)
       : undefined;
-    const learned = p.proposedBy.startsWith("agent.");
     const pending = w.approvals.find((a) => a.subjectType === "POLICY" && a.subjectId === p.id && a.status === "PENDING");
-    const status =
-      p.status === "APPROVED" ? "Approved" + (approver ? " by " + approver : "") : p.status === "PROPOSED" ? "Waiting for your approval" : p.status === "REJECTED" ? "Rejected" : "Replaced by a newer version";
+    const view = w.ruleViews[p.id];
+    const was = prior ?? view?.prior ?? null;
+    const name = (projectId: string) => w.projects[projectId]?.name ?? projectId;
+    const parts = (split: { projectId: string; cents: number }[], owner: string) =>
+      split.filter((s) => s.cents > 0).map((s) => ({ label: name(s.projectId), cents: s.cents, owner: s.projectId === owner }));
+    const ex = view?.example;
+    const state = p.status === "APPROVED" ? "live" : p.status === "PROPOSED" ? "pending" : p.status === "REJECTED" ? "rejected" : "replaced";
+    const title = ruleTitle(p.policyKey, p.rule.method, p.rule);
     return {
       id: "policy-" + p.id,
       node: "policy" as const,
-      label: p.policyKey + " v" + p.version,
+      label: state === "pending" ? "New rule" : state === "live" ? "Rule live" : "Rule",
       createdAt: p.createdAt,
       tone: p.status === "PROPOSED" ? ("warn" as const) : p.status === "REJECTED" ? ("denied" as const) : ("ok" as const),
       spec: {
-        eyebrow: learned ? "Controls Lead · " + (correction ? (correction.status === "APPROVED" ? "from your note" : "from your correction") : p.learnedFromWorkItemId ? "from " + p.learnedFromWorkItemId : "from AP history") : "Company policy",
-        title: (prior ? "New rule: " : learned ? "Learned: " : "") + p.title,
+        eyebrow: "Controls Lead · " + (correction ? (correction.status === "APPROVED" ? "from your note" : "from your correction") : "learned") + " on " + w.item.id,
+        title,
         policyChange: {
+          key: p.policyKey + " v" + p.version,
+          statement: p.statement,
           quote: correction ? { text: correction.decisionReason!, who: (correction.decidedBy ? (w.actors[correction.decidedBy]?.name ?? "You") : "You") + ", on " + correction.workItemId } : undefined,
-          source: correction ? undefined : p.rationale,
-          before: prior ? { version: prior.version, text: prior.statement } : undefined,
-          after: { version: p.version, text: p.statement },
+          replaces: was ? lowerFirst(ruleTitle(was.policyKey, was.rule.method, was.rule)) : undefined,
+          example: ex
+            ? {
+                label: ex.reservationId + " · " + (w.providers[ex.providerId]?.shortName ?? ex.providerId),
+                totalCents: ex.totalCents,
+                before: parts(ex.before, ex.ownerProjectId),
+                after: parts(ex.after, ex.ownerProjectId),
+              }
+            : undefined,
+          state,
           approvalId: pending?.id,
-          status,
+          liveAt: p.approvedAt ?? undefined,
+          handedTo: state === "live" ? Object.keys(AGENT_NAME).filter((a) => a !== "agent.policy") : undefined,
+          usedBy: (view?.usedBy ?? []).slice(0, 3).map((c) => ({
+            workItemId: c.workItemId ?? c.entryId,
+            label: c.charged.map((x) => name(x.projectId)).join(", ") || c.entryId,
+            amountCents: c.totalCents,
+          })),
         },
       },
     };
@@ -1007,11 +1061,15 @@ export function frameText(spec: FrameSpec): string {
   const pc = spec.policyChange;
   if (pc) {
     if (pc.quote) out.push("Learned from: " + pc.quote.who + ' said "' + pc.quote.text + '"');
-    if (pc.source) out.push("Learned from: " + pc.source);
-    if (pc.before) out.push("Before (v" + pc.before.version + "): " + pc.before.text);
-    out.push("Now (v" + pc.after.version + "): " + pc.after.text);
-    out.push("Status: " + pc.status);
+    out.push("Rule " + pc.key + ": " + pc.statement);
+    if (pc.replaces) out.push("Replaces: " + pc.replaces);
+    const fmt = (s: SplitPart[]) => s.map((x) => x.label + " " + money(x.cents)).join(", ");
+    if (pc.example) out.push("On " + pc.example.label + " (" + money(pc.example.totalCents) + "): before " + fmt(pc.example.before) + "; with this rule " + fmt(pc.example.after));
+    out.push("Status: " + pc.state);
+    if (pc.usedBy?.length) out.push("Used since on: " + pc.usedBy.map((u) => u.workItemId).join(", "));
   }
+  if (spec.rulebook) out.push(...spec.rulebook.rules.map((r) => "Rule: " + r.title + " (" + r.key + ", from " + r.from + ", used " + r.used + " times)"));
+  if (spec.noteOnly) out.push('Controller note: "' + spec.noteOnly.note + '". Reply: ' + spec.noteOnly.reply);
   if (spec.evidence?.length) out.push("Evidence: " + spec.evidence.join("; "));
   if (spec.sources?.length) out.push("Records read first: " + spec.sources.join(", "));
   return out.join("\n");
@@ -1119,6 +1177,29 @@ export function buildFrames(w: WorkspaceData): Frame[] {
     // Handoffs and approval requests already show on the canvas: the runner carries
     // the work to the next employee, and the approval appears at your seat.
     if (NO_FRAME_TOOLS.has(tool)) continue;
+    // The Controls Lead's work shows as one rule frame per rule (policyFrames). A note that set no rule gets one line.
+    if (tool === "propose_policy") continue;
+    if (tool === "finish_guidance") {
+      const proposed = w.activity.some((r) => r.runId === row.runId && r.toolName === "propose_policy" && r.status === "ok");
+      // The note it read: the latest one the controller left with an approval on this case.
+      const note = w.approvals.filter((a) => a.subjectType === "PROPOSAL" && a.status === "APPROVED" && a.decisionReason && !/^Covered by /.test(a.decisionReason) && (a.decidedAt ?? "") <= row.createdAt).at(-1)?.decisionReason ?? "";
+      if (!proposed) {
+        frames.push({
+          id: "act-" + row.id,
+          node: agent,
+          label: "Your note",
+          createdAt: row.createdAt,
+          tone: "ok",
+          spec: {
+            eyebrow: "Controls Lead · read your note on " + w.item.id,
+            title: "Just for this case",
+            noteOnly: { note, reply: s(row.args, "summary") || row.summary || "This note only concerns this case." },
+          },
+        });
+      }
+      pending.delete(row.actorId);
+      continue;
+    }
     if (TAG_TOOLS.has(tool)) {
       if (tool === "get_dispute_package") dispute.pkg = row;
       pending.set(row.actorId, [...(pending.get(row.actorId) ?? []), row]);
@@ -1190,7 +1271,8 @@ export function buildFrames(w: WorkspaceData): Frame[] {
   // its next frame; otherwise show what was read.
   const running = new Set(w.runs.filter((r) => r.status === "running").map((r) => r.agentId));
   for (const [actorId, reads] of pending) {
-    if (running.has(actorId) || !NODE_OF[actorId]) continue;
+    // The Controls Lead's reads belong to the rule frame it produced.
+    if (running.has(actorId) || !NODE_OF[actorId] || actorId === "agent.policy") continue;
     const last = reads.at(-1)!;
     frames.push({
       id: "act-" + reads[0].id,

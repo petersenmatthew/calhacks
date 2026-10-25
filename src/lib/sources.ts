@@ -1,5 +1,5 @@
 /**
- * Atlas Research's systems of record, shown as logos inside the canvas ring.
+ * xAnthropenAI's systems of record, shown as logos inside the canvas ring.
  * Each tool an employee calls reads from (or writes to) one of them.
  */
 export type SourceId = "lambda" | "coreweave" | "nebius" | "kubernetes" | "wandb" | "netsuite" | "ironclad";

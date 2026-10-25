@@ -43,6 +43,104 @@ import { followUps } from "./db/schema";
 import { feedStatus } from "./sync/feeds";
 import { FOLLOW_UP_RULES } from "./workflow/follow-ups";
 import { ONBOARDING_ID } from "./workflow/onboarding";
+import { allocateReservation, type AllocationMethod } from "./domain/allocation";
+import { reservations } from "./db/schema";
+
+type PolicyRow = typeof policies.$inferSelect;
+
+/** Cases that posted under a rule, newest first, with who was charged. */
+function casesUnder(ctx: AppContext, policyId: string) {
+  const rows = ctx.db.select().from(journalEntries).where(eq(journalEntries.policyId, policyId)).orderBy(desc(journalEntries.postedAt)).all();
+  const lines = rows.length ? ctx.db.select().from(journalLines).where(inArray(journalLines.entryId, rows.map((e) => e.id))).all() : [];
+  return rows.map((e) => ({
+    entryId: e.id,
+    workItemId: e.workItemId,
+    invoiceLineId: e.invoiceLineId,
+    postedAt: e.postedAt,
+    totalCents: e.totalCents,
+    charged: lines.filter((l) => l.entryId === e.id && l.accountCode === "6100" && l.debitCents > 0 && l.projectId).map((l) => ({ projectId: l.projectId!, cents: l.debitCents })),
+  }));
+}
+
+/**
+ * For each rule version: the controller's own words that taught it (a correction or a note left with an approval),
+ * and every case that posted under it.
+ */
+function ruleStories(ctx: AppContext, rows: PolicyRow[]) {
+  return Object.fromEntries(
+    rows.map((p) => {
+      let quote: { text: string; who: string; workItemId: string; kind: "note" | "correction"; at: string } | null = null;
+      if (p.learnedFromWorkItemId && p.proposedBy.startsWith("agent.")) {
+        const said = ctx.db
+          .select()
+          .from(approvalRequests)
+          .where(and(eq(approvalRequests.workItemId, p.learnedFromWorkItemId), eq(approvalRequests.subjectType, "PROPOSAL")))
+          .all()
+          .filter((a) => a.decisionReason && a.decidedAt && a.decidedAt <= p.createdAt && !/^Covered by /.test(a.decisionReason) && !/^Set the .+ budget to /.test(a.decisionReason))
+          .sort((a, b) => (a.decidedAt ?? "").localeCompare(b.decidedAt ?? ""))
+          .at(-1);
+        if (said) {
+          quote = {
+            text: said.decisionReason!,
+            who: (said.decidedBy ? ctx.db.select().from(actors).where(eq(actors.id, said.decidedBy)).get()?.name : null) ?? "You",
+            workItemId: said.workItemId,
+            kind: said.status === "APPROVED" ? "note" : "correction",
+            at: said.decidedAt!,
+          };
+        }
+      }
+      return [p.id, { quote, cases: casesUnder(ctx, p.id) }];
+    }),
+  );
+}
+
+/**
+ * What a shared-reservation rule changes, in dollars: one real reservation split the old way and the new way.
+ * Uses this case's reservation, else the latest shared-reservation case, else any reservation more than one team used.
+ */
+function ruleExample(ctx: AppContext, item: typeof workItems.$inferSelect, p: PolicyRow, prior: PolicyRow | undefined) {
+  if (p.policyKey !== POLICY_KEYS.sharedReservation) return null;
+  const latest = ctx.db.select().from(workItems).where(eq(workItems.type, "SHARED_ALLOCATION")).orderBy(desc(workItems.createdAt)).get();
+  const candidates = [item.reservationId, latest?.reservationId, ...ctx.db.select({ id: reservations.id }).from(reservations).all().map((r) => r.id)].filter(Boolean) as string[];
+  for (const rid of [...new Set(candidates)]) {
+    const u = reservationUsage(ctx, rid);
+    const used = u.usageByProject.filter((x) => x.projectId !== "UNATTRIBUTED" && x.gpuHours > 0);
+    if (used.length < 2 && rid !== item.reservationId) continue;
+    const usage = { totalCents: u.reservation.committedCents, ownerProjectId: u.reservation.ownerProjectId, usageByProject: used, idleGpuHours: u.idleGpuHours };
+    const split = (m: string) => allocateReservation(m as AllocationMethod, usage).map((l) => ({ projectId: l.projectId, cents: l.amountCents }));
+    return {
+      reservationId: rid,
+      providerId: u.reservation.providerId,
+      ownerProjectId: u.reservation.ownerProjectId,
+      totalCents: usage.totalCents,
+      before: split(prior?.rule.method ?? "usage_proportional"),
+      after: split(p.rule.method),
+    };
+  }
+  return null;
+}
+
+/** Every rule the team follows or is waiting to adopt, with how often it has been used. */
+export function getRulebook(ctx: AppContext) {
+  const rows = ctx.db.select().from(policies).where(inArray(policies.status, ["APPROVED", "PROPOSED"])).orderBy(asc(policies.policyKey)).all();
+  return rows.map((p) => ({
+    id: p.id,
+    policyKey: p.policyKey,
+    version: p.version,
+    title: p.title,
+    statement: p.statement,
+    method: p.rule.method,
+    thresholdCents: p.rule.thresholdCents,
+    autoPostLimitCents: p.rule.autoPostLimitCents,
+    status: p.status,
+    proposedBy: p.proposedBy,
+    learnedFromWorkItemId: p.learnedFromWorkItemId,
+    rationale: p.rationale,
+    createdAt: p.createdAt,
+    approvedAt: p.approvedAt,
+    used: ctx.db.select({ id: journalEntries.id }).from(journalEntries).where(eq(journalEntries.policyId, p.id)).all().length,
+  }));
+}
 
 function lookups(ctx: AppContext) {
   const projectRows = ctx.db.select().from(projects).all();
@@ -235,6 +333,8 @@ export function getDashboard(ctx: AppContext, requestedPeriod?: string | null) {
     })),
     activity: ctx.db.select().from(activityEvents).orderBy(desc(activityEvents.id)).limit(30).all(),
     /** Open approval requests and which employee asked, so the canvas can show them waiting on you. */
+    /** Every rule the team follows, for the Controls Lead's rulebook on the canvas. */
+    rulebook: getRulebook(ctx),
     openApprovals: pending.map((a) => ({ id: a.id, workItemId: a.workItemId, requestedBy: a.requestedBy, subjectType: a.subjectType, subjectId: a.subjectId, summary: a.summary })),
     agents: getAgentStatuses(ctx),
     settings: getSettingsView(ctx),
@@ -328,6 +428,14 @@ export function getWorkspace(ctx: AppContext, id: string) {
     ? ctx.db.select().from(journalLines).where(inArray(journalLines.entryId, entries.map((e) => e.id))).orderBy(asc(journalLines.lineNo)).all()
     : [];
   const apOutstanding = entryLines.filter((l) => l.accountCode === "2000").reduce((s, l) => s + l.creditCents - l.debitCents, 0);
+  // For each rule on this case: what it changes in dollars, and the cases that have posted under it since.
+  const ruleViews = Object.fromEntries(
+    relatedPolicies.map((p) => {
+      const all = ctx.db.select().from(policies).where(eq(policies.policyKey, p.policyKey)).all();
+      const prior = all.find((x) => x.id === p.supersedesId) ?? all.filter((x) => x.version < p.version).sort((a, b) => b.version - a.version)[0];
+      return [p.id, { prior: prior ? { policyKey: prior.policyKey, version: prior.version, rule: prior.rule } : null, example: ruleExample(ctx, item, p, prior), usedBy: casesUnder(ctx, p.id).filter((c) => c.workItemId !== id) }];
+    }),
+  );
 
   return {
     item,
@@ -347,6 +455,7 @@ export function getWorkspace(ctx: AppContext, id: string) {
     proposals: proposalRows,
     approvals,
     policies: relatedPolicies,
+    ruleViews,
     runs: ctx.db.select().from(agentRuns).where(eq(agentRuns.workItemId, id)).orderBy(asc(agentRuns.startedAt)).all(),
     transitions: ctx.db.select().from(workItemTransitions).where(eq(workItemTransitions.workItemId, id)).orderBy(asc(workItemTransitions.id)).all(),
     activity: ctx.db.select().from(activityEvents).where(eq(activityEvents.workItemId, id)).orderBy(asc(activityEvents.id)).all(),
@@ -362,6 +471,7 @@ export function getWorkspace(ctx: AppContext, id: string) {
 }
 
 export function getAuditView(ctx: AppContext) {
+  const allPolicies = ctx.db.select().from(policies).orderBy(asc(policies.policyKey), asc(policies.version)).all();
   const events = ctx.db.select().from(auditEvents).orderBy(desc(auditEvents.id)).limit(600).all();
   const entries = ctx.db.select().from(journalEntries).orderBy(desc(journalEntries.postedAt)).limit(200).all();
   const lines = entries.length
@@ -379,7 +489,9 @@ export function getAuditView(ctx: AppContext) {
     events,
     chain: verifyAuditChain(ctx),
     counts: Object.fromEntries(counts.map((c) => [c.outcome, c.n])),
-    policies: ctx.db.select().from(policies).orderBy(asc(policies.policyKey), asc(policies.version)).all(),
+    policies: allPolicies,
+    /** Per rule version: what taught it, and the cases that posted under it. */
+    ruleStories: ruleStories(ctx, allPolicies),
     journal: entries.map((e) => ({ ...e, lines: lines.filter((l) => l.entryId === e.id) })),
     trialBalance: trial,
     accounts: ctx.db.select().from(ledgerAccounts).all(),

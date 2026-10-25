@@ -72,7 +72,7 @@ export function Onboarding({ open, publicDemo, onClose, onStart }: { open: boole
           <h1 id="onboarding-title" className="text-[24px] leading-[1.15] font-semibold tracking-[-0.02em] text-zinc-950">
             Meet your tiny finance team
           </h1>
-          <p className="mt-1.5 text-[14px] leading-relaxed text-zinc-600">Six AI accountants run GPU payables for Atlas Research. You&rsquo;re the controller: you just make the calls.</p>
+          <p className="mt-1.5 text-[14px] leading-relaxed text-zinc-600">Six AI accountants run GPU payables for xAnthropenAI. You&rsquo;re the controller: you just make the calls.</p>
 
           <ol className="mt-5 space-y-3.5">
             {STEPS.map((s, i) => (

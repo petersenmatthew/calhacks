@@ -41,12 +41,12 @@ describe("AP mailbox", () => {
     const date = new Date(Date.now() + 60_000).toUTCString();
     mailbox.push(
       // Our own letter, delivered to the same Gmail inbox because VENDOR_EMAIL is the AP address.
-      { uid: 1, source: eml({ From: "ap@gmail.test", To: "ap@gmail.test", Subject: dispute.letterSubject!, "Message-ID": "<ours@x>", "X-Atlas-Outbox": "1", Date: date }, "Atlas Research disputes $1,200.00") },
+      { uid: 1, source: eml({ From: "ap@gmail.test", To: "ap@gmail.test", Subject: dispute.letterSubject!, "Message-ID": "<ours@x>", "X-xAnthropenAI-Outbox": "1", Date: date }, "xAnthropenAI disputes $1,200.00") },
       {
         uid: 2,
         source: eml(
           { From: "Helios Billing <billing@helios.test>", To: "ap@gmail.test", Subject: "Re: " + dispute.letterSubject, "Message-ID": "<reply-1@helios.test>", Date: date },
-          "We have denied this request; the charge stands.\r\n\r\nOn Fri, Oct 24, 2026 at 9:14 AM AP <ap@gmail.test> wrote:\r\n> Atlas Research disputes",
+          "We have denied this request; the charge stands.\r\n\r\nOn Fri, Oct 24, 2026 at 9:14 AM AP <ap@gmail.test> wrote:\r\n> xAnthropenAI disputes",
         ),
       },
     );

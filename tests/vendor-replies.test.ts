@@ -20,7 +20,7 @@ async function openDispute() {
   const dispute = ctx.db.select().from(vendorDisputes).where(eq(vendorDisputes.workItemId, id)).get()!;
   expect(dispute.status).toBe("SUBMITTED");
   // Pretend the letter went out over SMTP with this Message-ID, so a reply can thread to it.
-  ctx.db.update(outbox).set({ status: "sent", providerMessageId: "<letter-1@atlas.test>" }).where(and(eq(outbox.channel, "email"), eq(outbox.ref, dispute.id))).run();
+  ctx.db.update(outbox).set({ status: "sent", providerMessageId: "<letter-1@xanthropenai.test>" }).where(and(eq(outbox.channel, "email"), eq(outbox.ref, dispute.id))).run();
   return { ctx, orchestrator, id, dispute };
 }
 
@@ -28,9 +28,9 @@ function vendorSays(ctx: ReturnType<typeof setup>["ctx"], dispute: { letterSubje
   return receiveVendorEmail(ctx, {
     from: "billing@helios.test",
     subject: "Re: " + dispute.letterSubject,
-    text: text + "\n\nOn Fri, Oct 24, 2026 at 9:14 AM Atlas Research AP <ap@atlas.test> wrote:\n> Atlas Research disputes $1,200.00 ...",
+    text: text + "\n\nOn Fri, Oct 24, 2026 at 9:14 AM xAnthropenAI AP <ap@xanthropenai.test> wrote:\n> xAnthropenAI disputes $1,200.00 ...",
     messageId,
-    inReplyTo: "<letter-1@atlas.test>",
+    inReplyTo: "<letter-1@xanthropenai.test>",
     receivedAt: new Date(Date.now() + 1000).toISOString(),
   });
 }
@@ -42,7 +42,7 @@ const outbound = (ctx: ReturnType<typeof setup>["ctx"], id: string) =>
 
 describe("vendor replies", () => {
   it("strips the quoted original from a reply", () => {
-    expect(stripQuoted("Thanks, we'll check.\n\nOn Fri, Oct 24, 2026 at 9:14 AM Atlas <a@b.c> wrote:\n> old text")).toBe("Thanks, we'll check.");
+    expect(stripQuoted("Thanks, we'll check.\n\nOn Fri, Oct 24, 2026 at 9:14 AM xAnthropenAI <a@b.c> wrote:\n> old text")).toBe("Thanks, we'll check.");
     expect(stripQuoted("Line one\n> quoted\nLine two")).toBe("Line one\nLine two");
   });
 
@@ -60,7 +60,7 @@ describe("vendor replies", () => {
     const email = ctx.db.select().from(outbox).where(and(eq(outbox.channel, "email"), eq(outbox.event, "dispute.reply_sent"))).get()!;
     expect(email.destination).toBe("billing@helios.test");
     expect(email.headers?.["In-Reply-To"]).toBe("<q1@vendor.test>");
-    expect(email.headers?.["References"]).toContain("<letter-1@atlas.test>");
+    expect(email.headers?.["References"]).toContain("<letter-1@xanthropenai.test>");
     expect(email.attachments[0].filename).toBe(dispute.id + "-evidence.csv");
     expect(email.body).toContain("i-hel-4471");
     expect(workItem(ctx, id).state).toBe("DISPUTED");
@@ -199,7 +199,7 @@ describe("vendor replies alongside other work", () => {
 
   it("never reads our own letter back as a vendor reply", async () => {
     const { ctx, dispute } = await openDispute();
-    const r = receiveVendorEmail(ctx, { from: "vendor@example.test", subject: dispute.letterSubject!, text: dispute.letterBody!, messageId: "<letter-1@atlas.test>" });
+    const r = receiveVendorEmail(ctx, { from: "vendor@example.test", subject: dispute.letterSubject!, text: dispute.letterBody!, messageId: "<letter-1@xanthropenai.test>" });
     expect(r.status).toBe("unmatched");
   });
 });

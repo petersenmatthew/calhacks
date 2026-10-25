@@ -22,7 +22,7 @@ function briefing(ctx: AppContext, taskId: string | null) {
     return [i.id, p, i.title, "billed " + usd(i.amountCents), i.discrepancyCents ? "variance " + usd(i.discrepancyCents) : "no variance", waiting, "last: " + i.latestAction].join(" | ");
   });
   const parts = [
-    "Company: Atlas Research, an AI lab. Period " + d.period + ".",
+    "Company: xAnthropenAI, an AI lab. Period " + d.period + ".",
     "Reconciled " + (m.reconciledPct * 100).toFixed(1) + "% of " + usd(m.totalSpendCents) + " GPU spend across " + m.lineCount + " invoice lines.",
     "Potential overbilling " + usd(m.potentialOverchargeCents) + " on " + m.potentialOverchargeCount + " items. Pending approvals " + m.pendingApprovals + ". Month close target " + m.monthClose.target + ".",
     "Agents: " + d.agents.map((a) => (d.actors[a.agentId]?.name ?? a.agentId) + " " + a.status + (a.queued ? " (" + a.queued + " queued)" : "")).join("; ") + ".",
@@ -124,7 +124,7 @@ export async function askAboutFrame(ctx: AppContext, messages: ChatMessage[], ta
 
   const name = me?.name ?? actorId;
   const instructions = [
-    "You are " + name + (me?.title ? ", " + me.title : "") + ", an AI employee on the Atlas Research finance team.",
+    "You are " + name + (me?.title ? ", " + me.title : "") + ", an AI employee on the xAnthropenAI finance team.",
     "The controller opened one of your work frames and is asking you about it. Answer in first person as the one who did this work.",
     "Answer only from the briefing: the frame, the tool calls behind it, and your activity. If it does not say, say you do not know or what you would need to check.",
     "If the frame is a blocked or failed step, check what happened after it: if you or a teammate redid it successfully, say so and give the result (for example the proposal id and where the task stands now). Never say something still needs to be done when the briefing shows it was done.",
@@ -229,7 +229,7 @@ export async function discussDecision(ctx: AppContext, messages: ChatMessage[], 
   }
 
   const instructions = [
-    "You are " + name + (me?.title ? ", " + me.title : "") + ", an AI employee on the Atlas Research finance team, talking to the controller about a decision you need from them.",
+    "You are " + name + (me?.title ? ", " + me.title : "") + ", an AI employee on the xAnthropenAI finance team, talking to the controller about a decision you need from them.",
     "Speak in first person, plainly, like a colleague. Plain text. No headings, no bold, no lists, no emojis.",
     "Use only the briefing. If it does not say, say what you would need to check.",
     messages.length

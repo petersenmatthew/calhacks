@@ -375,14 +375,14 @@ async function vendorPolicy(c: Caller) {
     const clauses = all.filter((cl) => cl !== procedural).map((cl) => "section " + cl.ref + " (" + cl.title + ")").join(" and ");
     const message =
       "Hello " + vendor + " billing team,\n\n" +
-      "Atlas Research disputes " + pkg.disputed_amount + " of the " + pkg.invoiced + " billed on invoice line " + pkg.invoice_line +
+      "xAnthropenAI disputes " + pkg.disputed_amount + " of the " + pkg.invoiced + " billed on invoice line " + pkg.invoice_line +
       (ev?.instance ? " for instance " + ev.instance.id : "") + ".\n\n" +
       (grounds || pkg.reason) +
       (clauses ? "\n\nUnder " + clauses + " of our agreement, the supported charge is " + pkg.undisputed_amount + "." : "") +
       (procedural ? " We raise this under section " + procedural.ref + " (" + procedural.title + ")." : "") +
       "\n\nWe will pay the undisputed " + pkg.undisputed_amount + ". Please issue a credit memo for " + pkg.disputed_amount +
       ". The supporting records and the calculation are below and attached.\n\n" +
-      "Atlas Research Accounts Payable";
+      "xAnthropenAI Accounts Payable";
     await c.call("send_vendor_dispute", { subject: "Billing dispute: " + pkg.invoice_line + " (" + pkg.disputed_amount + ")", message });
     return;
   }
@@ -425,7 +425,7 @@ async function vendorReplyPolicy(c: Caller, run: AgentRunContext) {
         credit_reference: null,
         credit_amount_cents: amount,
         confirmation_message:
-          "Thank you. Atlas Research accepts your credit of " + formatCents(amount) + " to settle dispute " + d.id + ". Please send the credit memo for our records.",
+          "Thank you. xAnthropenAI accepts your credit of " + formatCents(amount) + " to settle dispute " + d.id + ". Please send the credit memo for our records.",
         summary: vendor + " offered " + formatCents(amount) + " of the " + d.disputed_amount + "; the controller accepted it. The rest is charged to the owning project.",
       });
       return;
@@ -433,7 +433,7 @@ async function vendorReplyPolicy(c: Caller, run: AgentRunContext) {
     await c.call("reply_to_vendor", {
       answering: [offer.id],
       message:
-        "Thank you for your reply. After review, Atlas Research maintains its dispute of the full " + d.disputed_amount + ". " +
+        "Thank you for your reply. After review, xAnthropenAI maintains its dispute of the full " + d.disputed_amount + ". " +
         (grounds || String(d.reason)) + " Please issue a credit memo for " + d.disputed_amount + ".",
       attach_evidence: true,
       kind: offered.length ? "counter_offer" : "question",

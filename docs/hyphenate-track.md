@@ -67,7 +67,7 @@ Build pieces: stateful sync of the records into one shape (cursor per source, st
 
 ## How MOA maps to it
 
-Company: Atlas Research (fictional AI lab). Roles: GPU invoice reconciliation (Payables) and shared cost allocation, by six specialized agents: GPU Auditor, Capacity Planner, Cost Allocator, Vendor Liaison, Budget Analyst, and Controls Lead.
+Company: xAnthropenAI (fictional AI lab). Roles: GPU invoice reconciliation (Payables) and shared cost allocation, by six specialized agents: GPU Auditor, Capacity Planner, Cost Allocator, Vendor Liaison, Budget Analyst, and Controls Lead.
 
 Already covered:
 

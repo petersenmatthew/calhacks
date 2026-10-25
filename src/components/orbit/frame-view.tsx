@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { ArrowUpRight, Check, LoaderCircle, Minus, X } from "lucide-react";
-import type { BurnSpec, Check as CheckRow, ContractPreview, PolicyChange, DocSpec, FrameSpec, MatchSpec, StackSpec, ThreadSpec, TimelineSpec, Tone } from "@/lib/frames";
+import { ArrowUpRight, Check, LoaderCircle, Minus, ScrollText, X } from "lucide-react";
+import { PixelAgent } from "../pixel-agent";
+import type { BurnSpec, Check as CheckRow, ContractPreview, PolicyChange, SplitPart, DocSpec, FrameSpec, MatchSpec, StackSpec, ThreadSpec, TimelineSpec, Tone } from "@/lib/frames";
 import { CONTRACT_ID, contractHref, contractThumb } from "@/lib/contracts";
 import { ContractLinked } from "../contract/contract-link";
 import { compactMoney } from "@/lib/format";
@@ -638,7 +639,36 @@ function ContractCard({ c, open, t, span }: { c: ContractPreview; open?: boolean
   );
 }
 
-/** A rule the Controls Lead learned: the words that taught it, the rule before and after, and the decision. */
+/** One split of a charge as a bar, with each team's share underneath. */
+function SplitRow({ parts, tag, strong }: { parts: SplitPart[]; tag: string; strong?: boolean }) {
+  const total = parts.reduce((s, p) => s + p.cents, 0) || 1;
+  const tones = strong ? ["bg-primary", "bg-brand-ink", "bg-primary/50"] : ["bg-zinc-300", "bg-zinc-200", "bg-zinc-100"];
+  return (
+    <div className="grid grid-cols-[44px_1fr] items-start gap-3">
+      <span className={cn("pt-0.5 font-mono text-[12px]", strong ? "font-medium text-brand-ink" : "text-zinc-400 line-through decoration-zinc-300")}>{tag}</span>
+      <div>
+        <div className="flex h-3 overflow-hidden rounded-full bg-zinc-100">
+          {parts.map((p, i) => (
+            <div key={p.label} className={cn("h-full border-r-2 border-white last:border-r-0", tones[i % tones.length])} style={{ width: (p.cents / total) * 100 + "%" }} />
+          ))}
+        </div>
+        <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[12.5px] text-zinc-500">
+          {parts.map((p, i) => (
+            <span key={p.label} className="flex items-center gap-1">
+              <span className={cn("size-1.5 rounded-full", tones[i % tones.length])} />
+              {p.label}
+              {p.owner ? " (owner)" : ""} <span className="font-medium text-zinc-800 tnum">{compactMoney(p.cents)}</span>
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const clock = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+
+/** A rule the Controls Lead learned on this case: your words, what it changes in dollars, then the decision or where it has been used. */
 function PolicyChangeView({ c, open }: { c: PolicyChange; open?: boolean }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -646,49 +676,150 @@ function PolicyChangeView({ c, open }: { c: PolicyChange; open?: boolean }) {
     if (!c.approvalId) return;
     setBusy(decision);
     try {
-      await postJson("/api/approvals/" + c.approvalId, { decision, reason: decision === "REJECTED" ? "Rejected from the canvas" : null });
-      setDone(decision === "APPROVED" ? "Approved. It applies from the next case." : "Rejected.");
+      await postJson("/api/approvals/" + c.approvalId, { decision, reason: decision === "REJECTED" ? "Keep reviewing these case by case for now." : null });
+      setDone(decision === "APPROVED" ? "It's the rule now." : "Kept as is.");
     } catch (error) {
       toast.error((error as Error).message);
     } finally {
       setBusy(null);
     }
   };
+  const live = c.state === "live";
+  return (
+    <div className="animate-enter flex flex-col">
+      {live ? (
+        <p className="mt-2 text-[14.5px] leading-snug text-zinc-600">{c.statement}</p>
+      ) : c.quote ? (
+        <>
+          <div className="mt-4 flex justify-end">
+            <div className="max-w-[82%] rounded-2xl rounded-br-md bg-zinc-100 px-3.5 py-2 text-[14.5px] leading-snug text-zinc-800">{c.quote.text}</div>
+          </div>
+          <div className="mt-2 flex items-center gap-2 text-[13px] text-zinc-500">
+            <PixelAgent actorId="agent.policy" size={22} still />
+            Becomes rule <span className="font-mono text-[12px] text-zinc-700">{c.key}</span>
+            {c.replaces ? <span>, replacing &ldquo;{c.replaces}&rdquo;</span> : null}
+          </div>
+        </>
+      ) : null}
+
+      {live ? (
+        <div className="mt-4 flex items-center gap-3 rounded-xl bg-accent/60 px-3.5 py-3 ring-1 ring-primary/30">
+          <Check className="size-4 shrink-0 text-brand-ink" strokeWidth={2.5} />
+          <span className="text-[13.5px] text-zinc-800">{c.liveAt ? "Rule since " + clock(c.liveAt) + ". Handed to:" : "Handed to:"}</span>
+          <span className="ml-auto flex -space-x-1.5">
+            {(c.handedTo ?? []).map((a) => (
+              <span key={a} className="grid size-7 place-items-center rounded-full bg-white ring-2 ring-white">
+                <PixelAgent actorId={a} size={22} still />
+              </span>
+            ))}
+          </span>
+        </div>
+      ) : null}
+
+      {live && c.usedBy?.length ? (
+        <>
+          <div className="mt-4 text-[12.5px] font-medium text-zinc-500">Used since</div>
+          <div className="mt-1.5 divide-y divide-zinc-100 rounded-xl ring-1 ring-zinc-200">
+            {c.usedBy.map((u) => (
+              <div key={u.workItemId} className="flex items-center gap-3 px-3.5 py-2 text-[13px]">
+                <span className="font-mono text-[12px] text-zinc-400">{u.workItemId}</span>
+                <span className="truncate text-zinc-700">{u.label}</span>
+                <span className="ml-auto text-zinc-800 tnum">{compactMoney(u.amountCents)}</span>
+                <span className="rounded-full bg-accent px-2 py-0.5 text-[11px] text-brand-ink">without you</span>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : !live && !c.example && c.state === "pending" ? (
+        <div className="mt-4 rounded-xl px-4 py-3 text-[13.5px] leading-snug text-zinc-500 ring-1 ring-zinc-200">
+          No GPU reservation has been shared between teams this month, so nothing to re-split yet. The next shared one follows this rule.
+        </div>
+      ) : c.example ? (
+        <div className="mt-4 rounded-xl p-4 ring-1 ring-zinc-200">
+          <div className="flex items-baseline justify-between text-[12.5px]">
+            <span className="font-medium text-zinc-700">{live ? "What it changes" : "On the last shared reservation"}</span>
+            <span className="text-zinc-400 tnum">
+              {c.example.label} · {compactMoney(c.example.totalCents)}
+            </span>
+          </div>
+          <div className="mt-3 space-y-3">
+            <SplitRow parts={c.example.before} tag="before" />
+            <SplitRow parts={c.example.after} tag="after" strong />
+          </div>
+        </div>
+      ) : null}
+
+      <div className="mt-5 flex items-center gap-2">
+        {done ? (
+          <span className="text-[13px] text-zinc-600">{done}</span>
+        ) : c.state === "pending" ? (
+          <>
+            <span className="mr-auto rounded-full bg-amber-50 px-2.5 py-1 text-[12px] font-medium text-amber-700">Waiting for you</span>
+            {c.approvalId && open ? (
+              <>
+                <button type="button" disabled={busy !== null} onClick={(e) => (e.stopPropagation(), decide("REJECTED"))} className="rounded-lg px-3.5 py-2 text-[13.5px] text-zinc-600 ring-1 ring-zinc-200 hover:ring-zinc-400">
+                  Not yet
+                </button>
+                <button type="button" disabled={busy !== null} onClick={(e) => (e.stopPropagation(), decide("APPROVED"))} className="flex items-center gap-1.5 rounded-lg bg-zinc-900 px-3.5 py-2 text-[13.5px] font-medium text-white hover:bg-zinc-800">
+                  {busy === "APPROVED" ? <LoaderCircle className="size-3.5 animate-spin" /> : null} Make it the rule
+                </button>
+              </>
+            ) : null}
+          </>
+        ) : (
+          <span className="text-[12.5px] text-zinc-400">
+            {c.state === "live" ? (c.quote ? "From your note on " + c.quote.who.split(", on ")[1] : c.key) + (c.replaces ? " · replaces “" + c.replaces + "”" : "") : c.state === "rejected" ? "You kept the old rule." : "Replaced by a newer version."}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** The Controls Lead's standing frame: every rule the team follows, where it came from, and how often it has been used. */
+function RulebookView({ r }: { r: NonNullable<FrameSpec["rulebook"]> }) {
   return (
     <div className="animate-enter">
-      {c.quote ? (
-        <blockquote className="mt-4 border-l-2 border-zinc-300 pl-3 text-[14px] leading-snug text-zinc-600 italic">
-          &ldquo;{c.quote.text}&rdquo;
-          <div className="mt-0.5 text-[12px] text-zinc-400 not-italic">{c.quote.who}</div>
-        </blockquote>
-      ) : c.source ? (
-        <p className="mt-4 line-clamp-3 border-l-2 border-zinc-300 pl-3 text-[13px] leading-snug text-zinc-500">{c.source}</p>
-      ) : null}
-      <div className={cn("mt-4 overflow-hidden rounded-xl text-[13.5px] ring-1 ring-zinc-200", c.before && "grid grid-cols-2")}>
-        {c.before ? (
-          <div className="bg-red-50/60 p-3">
-            <div className="font-mono text-[11px] text-zinc-400">v{c.before.version}</div>
-            <div className="mt-1 line-clamp-6 leading-snug text-destructive line-through decoration-red-300">{c.before.text}</div>
+      <p className="mt-1.5 text-[13.5px] text-zinc-500">{r.handled} case{r.handled === 1 ? "" : "s"} handled without you under these rules.</p>
+      <div className="mt-4 space-y-2">
+        {r.rules.map((x) => (
+          <div key={x.key} className={cn("flex items-center gap-3 rounded-xl px-3.5 py-3 ring-1", x.isNew ? "bg-accent/50 ring-primary/40" : "ring-zinc-200")}>
+            <ScrollText className={cn("size-4 shrink-0", x.isNew ? "text-brand-ink" : "text-zinc-400")} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="truncate text-[14px] font-medium text-zinc-900">{x.title}</span>
+                {x.isNew ? <span className="rounded-full bg-primary px-1.5 py-px text-[10.5px] font-medium text-white">new</span> : null}
+                {x.pending ? <span className="rounded-full bg-amber-50 px-1.5 py-px text-[10.5px] font-medium text-amber-700">waiting for you</span> : null}
+              </div>
+              <div className="mt-0.5 text-[12px] text-zinc-500">
+                from {x.from} · <span className="font-mono text-[11px] text-zinc-400">{x.key}</span>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-[16px] font-semibold text-zinc-900 tnum">{x.used}</div>
+              <div className="text-[11px] text-zinc-400">case{x.used === 1 ? "" : "s"}</div>
+            </div>
           </div>
-        ) : null}
-        <div className={cn("bg-accent/60 p-3", c.before && "border-l")}>
-          <div className="font-mono text-[11px] text-zinc-400">v{c.after.version}</div>
-          <div className="mt-1 line-clamp-6 leading-snug text-brand-ink">{c.after.text}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** A note that set no rule: your words, and one line back. */
+function NoteOnlyView({ n }: { n: NonNullable<FrameSpec["noteOnly"]> }) {
+  return (
+    <div className="animate-enter">
+      {n.note ? (
+        <div className="mt-4 flex justify-end">
+          <div className="max-w-[82%] rounded-2xl rounded-br-md bg-zinc-100 px-3.5 py-2 text-[14.5px] leading-snug text-zinc-800">{n.note}</div>
         </div>
+      ) : null}
+      <div className="mt-3 flex items-start gap-2.5">
+        <PixelAgent actorId="agent.policy" size={28} still />
+        <div className="rounded-2xl rounded-tl-md bg-white px-3.5 py-2 text-[14.5px] leading-snug text-zinc-700 ring-1 ring-zinc-200">{n.reply}</div>
       </div>
-      <div className="mt-4 flex items-center justify-end gap-2">
-        <span className="mr-auto text-[12.5px] text-zinc-500">{done ?? c.status}</span>
-        {c.approvalId && open && !done ? (
-          <>
-            <button type="button" disabled={busy !== null} onClick={(e) => (e.stopPropagation(), decide("REJECTED"))} className="rounded-lg px-3 py-1.5 text-[13px] text-zinc-600 ring-1 ring-zinc-200 hover:ring-zinc-400">
-              Reject
-            </button>
-            <button type="button" disabled={busy !== null} onClick={(e) => (e.stopPropagation(), decide("APPROVED"))} className="flex items-center gap-1.5 rounded-lg bg-zinc-900 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-zinc-800">
-              {busy === "APPROVED" ? <LoaderCircle className="size-3.5 animate-spin" /> : null} Approve v{c.after.version}
-            </button>
-          </>
-        ) : null}
-      </div>
+      <div className="mt-4 text-[12.5px] text-zinc-400">No rule changed.</div>
     </div>
   );
 }
@@ -789,6 +920,8 @@ export function FrameView({
       {spec.match ? <MatchView m={spec.match} at={tl.match} result={tl.result} t={t} /> : null}
       {spec.reading ? <ContractReader c={spec.reading} /> : null}
       {spec.policyChange ? <PolicyChangeView c={spec.policyChange} open={open} /> : null}
+      {spec.rulebook ? <RulebookView r={spec.rulebook} /> : null}
+      {spec.noteOnly ? <NoteOnlyView n={spec.noteOnly} /> : null}
       {spec.match && spec.contract && tl.contract && t >= tl.contract[0] ? <ContractCard c={spec.contract} open={open} t={t} span={tl.contract} /> : null}
       {spec.stack ? <StackView s={spec.stack} at={tl.stack} legend={tl.legend} t={t} /> : null}
       {spec.burn ? <BurnView b={spec.burn} span={tl.burn} t={t} /> : null}
