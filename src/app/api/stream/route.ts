@@ -1,6 +1,6 @@
 import { and, asc, eq, gt, sql } from "drizzle-orm";
 import { activityEvents } from "@/server/db/schema";
-import { getContext } from "@/server/runtime";
+import { contextFor } from "@/server/runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
  * read from SQLite, so a reconnect with Last-Event-ID replays what was missed.
  */
 export function GET(request: Request) {
-  const ctx = getContext();
+  const ctx = contextFor(request);
   const url = new URL(request.url);
   const workItemId = url.searchParams.get("workItemId");
   const header = request.headers.get("last-event-id");

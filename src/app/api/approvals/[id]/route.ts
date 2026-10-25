@@ -1,7 +1,7 @@
 import { rateLimited } from "@/server/rate-limit";
 import { z } from "zod";
 import { errorResponse } from "@/server/http";
-import { getContext } from "@/server/runtime";
+import { contextFor } from "@/server/runtime";
 import { ACTOR } from "@/server/security/actors";
 import { decideApproval } from "@/server/workflow/approvals";
 
@@ -16,12 +16,12 @@ const body = z.object({
 /** Human decisions. The demo has a single signed-in user: the controller. */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const limited = rateLimited(getContext(), request, "decide");
+    const limited = rateLimited(contextFor(request), request, "decide");
     if (limited) return limited;
     const { id } = await params;
     const input = body.parse(await request.json());
     return Response.json(
-      decideApproval(getContext(), {
+      decideApproval(contextFor(request), {
         approvalId: id,
         actorId: ACTOR.controller,
         decision: input.decision,

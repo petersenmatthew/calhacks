@@ -2,7 +2,7 @@ import { rateLimited } from "@/server/rate-limit";
 import { z } from "zod";
 import { askAboutFrame, askAssistant } from "@/server/assistant";
 import { errorResponse } from "@/server/http";
-import { getContext } from "@/server/runtime";
+import { contextFor } from "@/server/runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -16,13 +16,13 @@ const body = z.object({
 /** Read-only questions about the books. The assistant has no write tools. */
 export async function POST(request: Request) {
   try {
-    const limited = rateLimited(getContext(), request, "chat");
+    const limited = rateLimited(contextFor(request), request, "chat");
     if (limited) return limited;
     const input = body.parse(await request.json());
     const reply =
       input.frameId && input.taskId
-        ? await askAboutFrame(getContext(), input.messages, input.taskId, input.frameId)
-        : await askAssistant(getContext(), input.messages, input.taskId ?? null);
+        ? await askAboutFrame(contextFor(request), input.messages, input.taskId, input.frameId)
+        : await askAssistant(contextFor(request), input.messages, input.taskId ?? null);
     return Response.json({ reply });
   } catch (error) {
     return errorResponse(error);

@@ -102,7 +102,7 @@ export function Onboarding({ open, publicDemo, onClose, onStart }: { open: boole
 
           {publicDemo ? (
             <p className="mt-5 border-t border-zinc-100 pt-4 text-[12px] leading-snug text-zinc-500">
-              Shared demo: other people may be using it at the same time. Slack and email are recorded on each task here, not sent. <b className="font-medium text-zinc-700">Reset demo</b> starts everything over.
+              This copy of the demo is yours alone; every visitor gets their own. Slack and email are recorded on each task here, not sent. <b className="font-medium text-zinc-700">Reset demo</b> starts your copy over.
             </p>
           ) : null}
         </div>

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { advanceClock } from "@/server/clock";
 import { errorResponse } from "@/server/http";
-import { getRuntime } from "@/server/runtime";
+import { runtimeFor } from "@/server/runtime";
 import { ACTOR } from "@/server/security/actors";
 
 const body = z.object({ hours: z.number().positive().max(24 * 90) });
@@ -10,7 +10,7 @@ const body = z.object({ hours: z.number().positive().max(24 * 90) });
 export async function POST(request: Request) {
   try {
     const { hours } = body.parse(await request.json());
-    const { ctx, orchestrator } = getRuntime();
+    const { ctx, orchestrator } = runtimeFor(request);
     const result = advanceClock(ctx, ACTOR.controller, hours);
     await orchestrator.runSchedule();
     return Response.json(result);

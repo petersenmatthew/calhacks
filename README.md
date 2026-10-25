@@ -57,12 +57,11 @@ Share `https://<your domain>/welcome` with judges: a landing page where the pixe
 
 `PUBLIC_DEMO=1` makes the app safe to share:
 
-- First-time visitors see a one-screen intro with **Start the sample case** (reopen it with the ? in the top bar).
+- Every visitor gets their own sandbox: a separate seeded database and agent team, picked by a cookie (`src/proxy.ts`). Nobody sees anyone else's cases, and **Reset demo** resets only your copy. Sandboxes idle for 45 minutes are deleted.
+- Visitors see a one-screen intro that opens the billing-event picker (reopen it with the ? in the top bar).
 - Slack and email are recorded on each task and never sent, whatever else is set.
 - Each visitor is limited per hour: 12 new billing events, 4 resets, 40 questions, 60 decisions, 20 pasted vendor replies.
-- Live model runs are capped at `MAX_LLM_RUNS_PER_HOUR` (default 120); past the cap, agents use the scripted replay instead of failing.
-
-Everyone shares one database, so one visitor's **Reset demo** resets it for all.
+- Live model runs are capped at `MAX_LLM_RUNS_PER_HOUR` (default 120) across all sandboxes; past the cap, agents use the scripted replay instead of failing.
 
 ## Environment variables
 

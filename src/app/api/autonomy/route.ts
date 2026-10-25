@@ -1,8 +1,8 @@
 import { getAutonomy } from "@/server/queries";
-import { getContext } from "@/server/runtime";
+import { contextFor } from "@/server/runtime";
 
 export const dynamic = "force-dynamic";
 
-export function GET() {
-  return Response.json(getAutonomy(getContext()));
+export function GET(request: Request) {
+  return Response.json(getAutonomy(contextFor(request)));
 }

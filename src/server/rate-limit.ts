@@ -2,8 +2,8 @@ import type { AppContext } from "./context";
 
 /*
  * Per-visitor limits for a public demo (PUBLIC_DEMO=1), so one visitor cannot
- * spend the model budget or keep resetting everyone else's demo. In-memory and
- * per process: right for one Railway instance; off everywhere else.
+ * spend the model budget. In-memory and per process: right for one Fly machine;
+ * off everywhere else.
  */
 
 const hits = new Map<string, number[]>();

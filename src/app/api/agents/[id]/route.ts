@@ -1,15 +1,15 @@
 import { z } from "zod";
 import { errorResponse } from "@/server/http";
 import { getAgentView } from "@/server/queries";
-import { getContext } from "@/server/runtime";
+import { contextFor } from "@/server/runtime";
 import { ACTOR } from "@/server/security/actors";
 import { setAgentSettings } from "@/server/settings";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const view = getAgentView(getContext(), id);
+  const view = getAgentView(contextFor(request), id);
   if (!view) return Response.json({ error: "Agent not found" }, { status: 404 });
   return Response.json(view);
 }
@@ -20,8 +20,8 @@ const body = z.object({ paused: z.boolean().optional(), guidance: z.string().max
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    setAgentSettings(getContext(), ACTOR.controller, id, body.parse(await request.json()));
-    return Response.json(getAgentView(getContext(), id));
+    setAgentSettings(contextFor(request), ACTOR.controller, id, body.parse(await request.json()));
+    return Response.json(getAgentView(contextFor(request), id));
   } catch (error) {
     return errorResponse(error);
   }

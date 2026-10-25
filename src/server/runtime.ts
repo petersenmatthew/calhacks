@@ -97,31 +97,35 @@ function envMode(): "llm" | "deterministic" | undefined {
 /** The app seeds one demo case; SEED=all loads every case, as the eval does. */
 const appSeed = () => (process.env.SEED === "all" ? "all" : "demo");
 
+function createRuntime(file: string): Runtime {
+  const llmAvailable = Boolean(process.env.OPENAI_API_KEY);
+  const ctx = createAppContext({
+    file,
+    config: {
+      stepDelayMs: Number(process.env.DETERMINISTIC_STEP_DELAY_MS ?? 700),
+      llmAvailable,
+      model: process.env.OPENAI_MODEL || getDefaultModel(),
+      defaultMode: envMode() ?? (llmAvailable ? "llm" : "deterministic"),
+      schedulerIntervalMs: process.env.AUTONOMY === "off" ? 0 : Number(process.env.SCHEDULER_INTERVAL_MS ?? 5000),
+      feedUrl: process.env.BILLING_FEED_URL || null,
+      // A public deployment never sends Slack or email, whatever the environment holds.
+      comms: publicDemo() ? { ...DEFAULT_COMMS, appUrl: commsFromEnv().appUrl } : commsFromEnv(),
+      publicDemo: publicDemo(),
+      maxLlmRunsPerHour: Number(process.env.MAX_LLM_RUNS_PER_HOUR ?? 120),
+      defaultRunMode: process.env.RUN_MODE === "all" ? "all" : "one",
+    },
+  });
+  if (!isSeeded(ctx)) seedEnvironment(ctx, appSeed());
+  else upgradeEnvironment(ctx);
+  const orchestrator = new Orchestrator(ctx);
+  if (process.env.NEXT_PHASE !== "phase-production-build") orchestrator.start();
+  return { ctx, orchestrator };
+}
+
 /** Process-wide singleton: database, event bus, and durable worker. */
 export function getRuntime(): Runtime {
   if (!globalRef.__moa) {
-    const llmAvailable = Boolean(process.env.OPENAI_API_KEY);
-    const ctx = createAppContext({
-      file: databasePath(),
-      config: {
-        stepDelayMs: Number(process.env.DETERMINISTIC_STEP_DELAY_MS ?? 700),
-        llmAvailable,
-        model: process.env.OPENAI_MODEL || getDefaultModel(),
-        defaultMode: envMode() ?? (llmAvailable ? "llm" : "deterministic"),
-        schedulerIntervalMs: process.env.AUTONOMY === "off" ? 0 : Number(process.env.SCHEDULER_INTERVAL_MS ?? 5000),
-        feedUrl: process.env.BILLING_FEED_URL || null,
-        // A public deployment never sends Slack or email, whatever the environment holds.
-        comms: publicDemo() ? { ...DEFAULT_COMMS, appUrl: commsFromEnv().appUrl } : commsFromEnv(),
-        publicDemo: publicDemo(),
-        maxLlmRunsPerHour: Number(process.env.MAX_LLM_RUNS_PER_HOUR ?? 120),
-        defaultRunMode: process.env.RUN_MODE === "all" ? "all" : "one",
-      },
-    });
-    if (!isSeeded(ctx)) seedEnvironment(ctx, appSeed());
-    else upgradeEnvironment(ctx);
-    const orchestrator = new Orchestrator(ctx);
-    globalRef.__moa = { ctx, orchestrator };
-    if (process.env.NEXT_PHASE !== "phase-production-build") orchestrator.start();
+    globalRef.__moa = createRuntime(databasePath());
   } else if (process.env.NODE_ENV !== "production" && migrateIfChanged(globalRef.__moa.ctx.db)) {
     // Hot reload brought in a schema change: it is applied above; refresh data that depends on it.
     upgradeEnvironment(globalRef.__moa.ctx);
@@ -129,13 +133,81 @@ export function getRuntime(): Runtime {
   return globalRef.__moa;
 }
 
+/*
+ * Public demo: every visitor gets a sandbox of their own (a separate seeded
+ * database, worker and event stream), so two judges never see each other's
+ * cases. proxy.ts gives each browser a random sandbox id in a cookie and passes
+ * it on the x-moa-sandbox header. Sandboxes idle for SANDBOX_IDLE_MS are
+ * stopped and deleted; a returning visitor then starts fresh.
+ */
+export const SANDBOX_HEADER = "x-moa-sandbox";
+const SANDBOX_IDLE_MS = 45 * 60_000;
+const MAX_SANDBOXES = 40;
+const sandboxRef = globalThis as unknown as { __moaSandboxes?: Map<string, Runtime & { lastSeen: number; file: string }> };
+
+function sandboxDir() {
+  return path.join(path.dirname(databasePath()), "sandboxes");
+}
+
+function closeSandbox(id: string) {
+  const all = sandboxRef.__moaSandboxes!;
+  const box = all.get(id);
+  if (!box) return;
+  all.delete(id);
+  box.orchestrator.stop();
+  box.ctx.epoch += 1;
+  try {
+    box.ctx.sqlite.close();
+  } catch {
+    /* already closed */
+  }
+  for (const f of [box.file, box.file + "-wal", box.file + "-shm"]) fs.rmSync(f, { force: true });
+}
+
+function sweepSandboxes(now: number) {
+  const all = sandboxRef.__moaSandboxes!;
+  for (const [id, box] of all) if (now - box.lastSeen > SANDBOX_IDLE_MS) closeSandbox(id);
+  while (all.size >= MAX_SANDBOXES) {
+    const oldest = [...all.entries()].sort((a, b) => a[1].lastSeen - b[1].lastSeen)[0];
+    closeSandbox(oldest[0]);
+  }
+}
+
+/** The runtime this request should use: the visitor's own sandbox on a public demo, else the shared one. */
+export function runtimeFor(request?: Request): Runtime {
+  const id = request?.headers.get(SANDBOX_HEADER);
+  if (!publicDemo() || !id || !/^[a-z0-9-]{16,64}$/i.test(id)) return getRuntime();
+  if (!sandboxRef.__moaSandboxes) {
+    sandboxRef.__moaSandboxes = new Map();
+    // Files left by a previous process belong to sandboxes nobody can reach any more.
+    fs.rmSync(sandboxDir(), { recursive: true, force: true });
+  }
+  const all = sandboxRef.__moaSandboxes;
+  const now = Date.now();
+  let box = all.get(id);
+  if (!box) {
+    sweepSandboxes(now);
+    fs.mkdirSync(sandboxDir(), { recursive: true });
+    const file = path.join(sandboxDir(), id + ".db");
+    box = { ...createRuntime(file), lastSeen: now, file };
+    all.set(id, box);
+  }
+  box.lastSeen = now;
+  return box;
+}
+
+/** The context this request should use (see runtimeFor). */
+export function contextFor(request?: Request) {
+  return runtimeFor(request).ctx;
+}
+
 export function getContext() {
   return getRuntime().ctx;
 }
 
 /** Wipe and reseed the sandbox so the demo can be repeated. */
-export async function resetEnvironment(actorId: string) {
-  const { ctx, orchestrator } = getRuntime();
+export async function resetEnvironment(actorId: string, request?: Request) {
+  const { ctx, orchestrator } = runtimeFor(request);
   guard(ctx, { actorId, action: "environment.reset" }, () => authorize(ctx, actorId, "environment:reset"));
   orchestrator.pause();
   ctx.epoch += 1;

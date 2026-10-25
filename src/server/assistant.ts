@@ -160,8 +160,13 @@ const Turn = z.object({
   waiting_on_detail: z.boolean().describe("True when your reply asks the controller for a detail you still need before they confirm, such as a budget amount."),
 });
 
-/** Opening messages, kept until the decision changes. */
-const openers = new Map<string, string>();
+/** Opening messages, kept until the decision changes; one cache per database (each visitor's sandbox reuses the same ids). */
+const openersByCtx = new WeakMap<AppContext, Map<string, string>>();
+function openersFor(ctx: AppContext) {
+  let m = openersByCtx.get(ctx);
+  if (!m) openersByCtx.set(ctx, (m = new Map()));
+  return m;
+}
 
 function decisionBriefing(ctx: AppContext, w: NonNullable<ReturnType<typeof getWorkspace>>, d: Decision) {
   const p = [...w.proposals].reverse()[0];
@@ -209,6 +214,7 @@ export async function discussDecision(ctx: AppContext, messages: ChatMessage[], 
   if (!w || !d) return { reply: "This one is already decided.", choiceId: null, note: null, budget: null };
   const me = w.actors[d.askedBy];
   const name = me?.name ?? "Agent";
+  const openers = openersFor(ctx);
   const key = taskId + ":" + (d.approvalId ?? "q") + ":" + d.choices.map((c) => c.id).join(",");
 
   const none = { choiceId: null, note: null, budget: null };

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { discussDecision } from "@/server/assistant";
 import { errorResponse } from "@/server/http";
-import { getContext } from "@/server/runtime";
+import { contextFor } from "@/server/runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +14,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   try {
     const { id } = await params;
     const { messages } = body.parse(await request.json());
-    return Response.json(await discussDecision(getContext(), messages, id));
+    return Response.json(await discussDecision(contextFor(request), messages, id));
   } catch (error) {
     return errorResponse(error);
   }
