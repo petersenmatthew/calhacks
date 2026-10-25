@@ -20,7 +20,7 @@ function schedule(): Scheduled[] {
   return [
     {
       offsetMs: 2 * 60_000,
-      label: "Meridian line that matches the contract exactly",
+      label: "Nebius line that matches the contract exactly",
       data: buildInstanceCase({
         key: "feed-1", providerId: "PRV-MERIDIAN", instanceId: "i-mer-2231", instanceType: "h200.8x", projectId: "PRJ-INF",
         experimentId: "exp-inf-batching-v4", experimentName: "Continuous batching v4", owner: "Diego Alvarez",
@@ -30,7 +30,7 @@ function schedule(): Scheduled[] {
     },
     {
       offsetMs: 6 * 60_000,
-      label: "Helios A100 line billed $0.40/h above contract ($12 variance)",
+      label: "Lambda A100 line billed $0.40/h above contract ($12 variance)",
       data: buildInstanceCase({
         key: "feed-2", providerId: "PRV-HELIOS", instanceId: "i-hel-4541", instanceType: "a100.8x", projectId: "PRJ-MMP",
         experimentId: "exp-mmp-caption-rl", experimentName: "Caption model RLHF", owner: "Lena Ortiz",
@@ -40,7 +40,7 @@ function schedule(): Scheduled[] {
     },
     {
       offsetMs: 1 * DAY_MS,
-      label: "Meridian short run billed at the 8-hour contract minimum",
+      label: "Nebius short run billed at the 8-hour contract minimum",
       data: buildInstanceCase({
         key: "feed-3", providerId: "PRV-MERIDIAN", instanceId: "i-mer-2240", instanceType: "h200.8x", projectId: "PRJ-RLA",
         experimentId: "exp-rla-smoke-test", experimentName: "Environment smoke test", owner: "Elena Petrova",
@@ -50,7 +50,7 @@ function schedule(): Scheduled[] {
     },
     {
       offsetMs: 3 * DAY_MS,
-      label: "Helios billed 6 h after the instance was terminated",
+      label: "Lambda billed 6 h after the instance was terminated",
       data: buildInstanceCase({
         key: "feed-4", providerId: "PRV-HELIOS", instanceId: "i-hel-4558", instanceType: "h100.8x", projectId: "PRJ-FLM",
         experimentId: "exp-flm-long-context-04", experimentName: "Long-context extension 04", owner: "Jonah Brooks",
@@ -61,7 +61,7 @@ function schedule(): Scheduled[] {
     },
     {
       offsetMs: 9 * DAY_MS + 4 * HOUR_MS,
-      label: "Helios H100 line that matches the contract exactly",
+      label: "Lambda H100 line that matches the contract exactly",
       data: buildInstanceCase({
         key: "feed-5", providerId: "PRV-HELIOS", instanceId: "i-hel-4570", instanceType: "h100.8x", projectId: "PRJ-RLA",
         experimentId: "exp-rla-critic-v2", experimentName: "Critic model v2", owner: "Elena Petrova",

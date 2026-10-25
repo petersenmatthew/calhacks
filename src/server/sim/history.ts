@@ -18,7 +18,7 @@ const PERIODS = ["2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09
 const SMALL_PAID = [420, 960, 1_280, 1_600, 2_150, 2_400, 3_100, 3_600, 4_000, 4_480, 4_800];
 // Variances the controller disputed: billing after termination, wrong rate card, duplicated lines.
 const DISPUTED = [
-  { cents: 64_000, credited: true, note: "Billed 10 h after termination; Helios credited in full." },
+  { cents: 64_000, credited: true, note: "Billed 10 h after termination; Lambda credited in full." },
   { cents: 120_000, credited: true, note: "Duplicated line on consolidated invoice; credited." },
   { cents: 19_200, credited: true, note: "A100 hours billed at H100 rate; credited." },
   { cents: 240_000, credited: true, note: "Reservation billed twice for overlapping term; credited." },
