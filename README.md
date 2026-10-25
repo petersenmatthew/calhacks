@@ -35,23 +35,23 @@ Production build:
 npm run build && npm start
 ```
 
-## Deploy on Railway (public demo for judges)
+## Deploy on Fly.io (public demo for judges)
 
-The repo ships a `Dockerfile` and `railway.json`. One instance, SQLite on a volume.
+The repo ships a `Dockerfile` and `fly.toml`: one machine, SQLite on a volume at `/data`, `PUBLIC_DEMO=1` already set.
 
 ```
-npm i -g @railway/cli
-railway login
-railway init                                   # new project "moa"
-railway up --detach                            # first build from this folder
-railway volume add --mount-path /data          # keeps the database across deploys
-railway variables --set PUBLIC_DEMO=1 --set OPENAI_API_KEY=sk-... --set DATABASE_PATH=/data/moa.db
-railway domain                                 # public URL
-railway variables --set APP_URL=https://<that domain>
-railway up --detach                            # redeploy with the variables
+brew install flyctl                            # or: curl -L https://fly.io/install.sh | sh
+fly auth login
+fly launch --copy-config --no-deploy           # pick an app name and region; keeps fly.toml
+fly volumes create data --size 1               # same region as the app; keeps the database across deploys
+fly secrets set OPENAI_API_KEY=sk-...          # use a spend-limited key
+fly secrets set APP_URL=https://<app>.fly.dev
+fly deploy --ha=false                          # one machine: SQLite can't be shared
 ```
 
-Or connect the GitHub repo in the Railway dashboard: it picks up `railway.json`; add the volume at `/data` and the same variables.
+Logs: `fly logs`. Redeploy after changes: `fly deploy`.
+
+The same Dockerfile also works on Railway (`railway.json`, volume at `/data`, same variables).
 
 Share `https://<your domain>/welcome` with judges: a landing page where the pixel team acts out a dispute, with one button that starts the sample case.
 

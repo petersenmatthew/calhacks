@@ -17,6 +17,8 @@ export const LIMITS = {
 } as const;
 
 function visitor(request: Request) {
+  const fly = request.headers.get("fly-client-ip");
+  if (fly) return fly.trim();
   const fwd = request.headers.get("x-forwarded-for");
   return (fwd ? fwd.split(",")[0] : request.headers.get("x-real-ip") ?? "local").trim();
 }

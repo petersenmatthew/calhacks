@@ -69,7 +69,7 @@ function Tree({ x, y, r }: { x: number; y: number; r: number }) {
   const rows = [];
   for (let dy = -r; dy <= 0; dy++) {
     const half = Math.round(Math.sqrt(r * r - dy * dy));
-    rows.push(<rect key={dy} x={x - half} y={y + dy} width={half * 2} height={1} fill={dy < -r / 2 ? "#6fb15a" : "#5b9f4c"} />);
+    rows.push(<rect key={dy} x={x - half} y={y + dy} width={half * 2} height={1} fill={dy < -r / 2 ? "#4f9f3c" : "#3f8b31"} />);
   }
   return <g>{rows}</g>;
 }
@@ -81,14 +81,14 @@ function Wheat({ x, h, delay = 0 }: { x: number; h: number; delay?: number }) {
   const grains = [];
   for (let i = 0; i < 6; i++) {
     const gy = top + i * 3;
-    grains.push(<rect key={"l" + i} x={x - 2} y={gy + 1} width={2} height={2} fill={i % 2 ? "#e9b65a" : "#f3cf7a"} />);
-    grains.push(<rect key={"r" + i} x={x + 1} y={gy} width={2} height={2} fill={i % 2 ? "#f3cf7a" : "#e9b65a"} />);
+    grains.push(<rect key={"l" + i} x={x - 2} y={gy + 1} width={2} height={2} fill={i % 2 ? "#e5a83f" : "#f0c55c"} />);
+    grains.push(<rect key={"r" + i} x={x + 1} y={gy} width={2} height={2} fill={i % 2 ? "#f0c55c" : "#e5a83f"} />);
   }
   return (
     <g className="pxl-wheat" style={{ animationDelay: delay + "s" }}>
       <rect x={x} y={top + 2} width={1} height={h - 2} fill="#c99a45" />
       {grains}
-      <rect x={x} y={top - 1} width={1} height={2} fill="#f3cf7a" />
+      <rect x={x} y={top - 1} width={1} height={2} fill="#f0c55c" />
     </g>
   );
 }
@@ -99,12 +99,12 @@ const MID = ridge(100, 6, 4.1);
 const R = rng(11);
 const SPECKS = Array.from({ length: 900 }, () => {
   const y = FIELD_TOP + 2 + Math.floor(R() * (H - FIELD_TOP - 2));
-  return { x: Math.floor(R() * W), y, c: R() < 0.5 ? "#c4e88a" : "#8cc85c", tall: y > 150 && R() < 0.6 };
+  return { x: Math.floor(R() * W), y, c: R() < 0.5 ? "#b1e163" : "#6cb53a", tall: y > 150 && R() < 0.6 };
 });
 const BLOOMS = Array.from({ length: 46 }, () => ({
   x: Math.floor(R() * W),
   y: FIELD_TOP + 6 + Math.floor(R() * (H - FIELD_TOP - 10)),
-  c: ["#fffaf0", "#ffe58a", "#ffb3c9", "#d4c4ff"][Math.floor(R() * 4)],
+  c: ["#fffaf0", "#ffd95c", "#ff9fbd", "#c3aeff"][Math.floor(R() * 4)],
 }));
 const TREES = [
   { x: 20, y: 110, r: 9 },
@@ -118,13 +118,13 @@ export function MeadowScene() {
   return (
     <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMax slice" shapeRendering="crispEdges" className="absolute inset-0 size-full" aria-hidden>
       {/* sky: bands from deep to pale, dithered where they meet */}
-      <rect x={0} y={0} width={W} height={H} fill="#6cc8f2" />
-      <Dither y={22} h={6} a="#6cc8f2" b="#82d2f5" />
-      <rect x={0} y={28} width={W} height={34} fill="#82d2f5" />
-      <Dither y={62} h={6} a="#82d2f5" b="#9edcf7" />
-      <rect x={0} y={68} width={W} height={20} fill="#9edcf7" />
-      <Dither y={88} h={4} a="#9edcf7" b="#bde8fa" />
-      <rect x={0} y={92} width={W} height={20} fill="#bde8fa" />
+      <rect x={0} y={0} width={W} height={H} fill="#45b4ee" />
+      <Dither y={22} h={6} a="#45b4ee" b="#5fc1f1" />
+      <rect x={0} y={28} width={W} height={34} fill="#5fc1f1" />
+      <Dither y={62} h={6} a="#5fc1f1" b="#7fcdf3" />
+      <rect x={0} y={68} width={W} height={20} fill="#7fcdf3" />
+      <Dither y={88} h={4} a="#7fcdf3" b="#a3dbf6" />
+      <rect x={0} y={92} width={W} height={20} fill="#a3dbf6" />
 
       <Cloud x={-14} y={64} w={62} className="pxl-cloud-a" />
       <Cloud x={232} y={58} w={84} className="pxl-cloud-b" />
@@ -147,22 +147,22 @@ export function MeadowScene() {
 
       {/* far mountains, then nearer hills */}
       {FAR.map((c) => (
-        <rect key={"f" + c.x} x={c.x} y={c.y} width={4} height={H - c.y} fill="#9cd0c4" />
+        <rect key={"f" + c.x} x={c.x} y={c.y} width={4} height={H - c.y} fill="#76c0aa" />
       ))}
       {MID.map((c) => (
-        <rect key={"m" + c.x} x={c.x} y={c.y} width={4} height={H - c.y} fill="#86c59b" />
+        <rect key={"m" + c.x} x={c.x} y={c.y} width={4} height={H - c.y} fill="#5fb377" />
       ))}
-      <rect x={0} y={104} width={W} height={6} fill="#97cf72" />
+      <rect x={0} y={104} width={W} height={6} fill="#78c24c" />
       {TREES.map((t) => (
         <Tree key={t.x} {...t} />
       ))}
 
       {/* the meadow, light at the back and richer toward you */}
-      <rect x={0} y={FIELD_TOP} width={W} height={H - FIELD_TOP} fill="#b2dd78" />
-      <Dither y={FIELD_TOP + 14} h={4} a="#b2dd78" b="#a6d66d" />
-      <rect x={0} y={FIELD_TOP + 18} width={W} height={H} fill="#a6d66d" />
-      <Dither y={FIELD_TOP + 38} h={4} a="#a6d66d" b="#98cf63" />
-      <rect x={0} y={FIELD_TOP + 42} width={W} height={H} fill="#98cf63" />
+      <rect x={0} y={FIELD_TOP} width={W} height={H - FIELD_TOP} fill="#9bd551" />
+      <Dither y={FIELD_TOP + 14} h={4} a="#9bd551" b="#8acb43" />
+      <rect x={0} y={FIELD_TOP + 18} width={W} height={H} fill="#8acb43" />
+      <Dither y={FIELD_TOP + 38} h={4} a="#8acb43" b="#7bbf38" />
+      <rect x={0} y={FIELD_TOP + 42} width={W} height={H} fill="#7bbf38" />
       {SPECKS.map((s, i) => (
         <rect key={i} x={s.x} y={s.tall ? s.y - 1 : s.y} width={1} height={s.tall ? 2 : 1} fill={s.c} />
       ))}

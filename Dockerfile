@@ -1,4 +1,4 @@
-# MOA on Railway (or any Docker host). One instance: SQLite lives on a volume at /data.
+# MOA on Fly.io, Railway, or any Docker host. One instance: SQLite lives on a volume at /data.
 FROM node:22-bookworm-slim AS build
 # better-sqlite3 is native: build tools in case no prebuilt binary matches.
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ ca-certificates && rm -rf /var/lib/apt/lists/*

@@ -1,0 +1,40 @@
+# MOA on Fly.io: one machine, SQLite on a volume mounted at /data.
+#   fly launch --copy-config --no-deploy   (pick an app name and region)
+#   fly volumes create data --size 1       (same region as the app)
+#   fly secrets set OPENAI_API_KEY=sk-...
+#   fly deploy --ha=false
+app = "moa-demo"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PUBLIC_DEMO = "1"
+  PORT = "3000"
+  DATABASE_PATH = "/data/moa.db"
+
+# The database lives here, so it survives deploys and restarts.
+[[mounts]]
+  source = "data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  # Keep the one machine up: the background worker (feeds, follow-ups) runs in it,
+  # and judges shouldn't wait for a cold start.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/api/health"
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "30s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

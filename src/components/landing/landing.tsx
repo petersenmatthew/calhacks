@@ -31,21 +31,17 @@ export function Landing() {
   };
 
   return (
-    <div className="relative h-dvh overflow-hidden bg-[#6cc8f2]">
+    <div className="relative h-dvh overflow-hidden bg-[#45b4ee]">
       {/* eslint-disable-next-line @next/next/no-page-custom-font */}
       <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" />
       <MeadowScene />
       <Roamers />
 
       <main className="relative z-[200] flex flex-col items-center px-6 pt-[12vh] text-center">
-        <h1 className="text-[52px] leading-[1.02] font-semibold tracking-[-0.01em] text-white sm:text-[92px]" style={{ fontFamily: "'Fraunces', Georgia, serif" }}>
-          Mixture of
-          <br />
-          Accountants
+        <h1 className="text-[96px] leading-none font-semibold tracking-[-0.02em] text-white sm:text-[160px]" style={{ fontFamily: "'Fraunces', Georgia, serif" }}>
+          moa
         </h1>
-        <p className="mt-5 max-w-[440px] text-[16px] leading-relaxed font-medium text-white sm:text-[18px]">
-          Six tiny AI accountants catch your GPU overbilling, chase the vendor, and get your money back. You just make the calls.
-        </p>
+        <p className="mt-3 max-w-[440px] text-[17px] leading-relaxed font-medium text-white sm:text-[20px]">Autonomous finance for AI research labs</p>
         <button
           type="button"
           onClick={start}
