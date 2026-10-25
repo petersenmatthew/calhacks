@@ -78,6 +78,9 @@ Copy `.env.example` to `.env.local`. All are optional.
 | `DETERMINISTIC_STEP_DELAY_MS` | `700` | Pause between deterministic agent steps so the live timeline is watchable. |
 | `DATABASE_PATH` | `./data/moa.db` | SQLite file (an existing `./data/experiment-ledger.db` keeps being used). |
 | `OPENAI_AGENTS_DISABLE_TRACING` | unset | Set to `1` to stop the SDK exporting traces to OpenAI. |
+| `FACTORY_API_KEY` | unset | Runs the six employees on Factory Droid (needs the `droid` CLI on PATH). The assistant and simulated vendor still use `OPENAI_API_KEY`. |
+| `DROID_MODEL` | Droid default | Droid model id for the employees. |
+| `AGENT_ENGINE` | `droid` if `FACTORY_API_KEY` is set | Set to `openai` to run the employees on the OpenAI Agents SDK instead. |
 | `SCHEDULER_INTERVAL_MS` | `5000` | How often the scheduler syncs billing feeds and runs follow-up rules. |
 | `AUTONOMY` | on | Set to `off` to disable the scheduler (agents still run when work is queued). |
 | `BILLING_FEED_URL` | unset | Optional external billing feed polled on a cursor: `GET <url>?after=<cursor>` returns `{ events, next_cursor }`. |
@@ -99,8 +102,18 @@ Copy `.env.example` to `.env.local`. All are optional.
 
 ### Execution modes
 
-- **LLM agents.** Each agent turn is an OpenAI Agents SDK run with typed Zod tools. The model chooses tools and writes findings; the run ends only when a terminal tool (handoff, approval request, posting request) succeeds.
+- **LLM agents.** Each agent turn is a Factory Droid session (with `FACTORY_API_KEY`) or an OpenAI Agents SDK run with typed Zod tools. The model chooses tools and writes findings; the run ends only when a terminal tool (handoff, approval request, posting request) succeeds.
 - **Deterministic replay.** A fixed, scripted decision policy calls the same tools through the same gateway, with the same permissions and audit. It exists for demos without credentials and for tests. Runs in this mode are labeled "Deterministic replay" everywhere in the UI and are never presented as LLM output.
+
+### Where Factory Droid runs
+
+Droid is each finance employee's runtime: the GPU Auditor, Cost Allocator, Vendor Liaison, Budget Analyst, Controls Lead, and Capacity Planner each run as a Droid session ([src/server/agents/droid.ts](src/server/agents/droid.ts)).
+
+- **Trigger.** Nobody prompts Droid. A session starts when a job reaches an employee: a new invoice from the billing feed, a handoff from another employee, a vendor email arriving in the inbox, an overdue dispute found by the scheduler, a posting, or a controller decision.
+- **What it can touch.** Droid gets only that employee's tools, served in process as an SDK MCP server. Its built-in tools (shell, files, web, subagents) are disabled, and a permission handler approves a call only if every tool in it belongs to that employee. Anything else is cancelled and written to the audit log as a `DROID_TOOL_SCOPE` denial. Every approved call still goes through the same gateway as the other modes, which checks role permissions, work item scope, and approval rules.
+- **Visible work.** Each tool call appears in the case timeline with its evidence. Findings, proposals, and approval requests appear on the canvas, and the run records its model, tool calls, tokens, and Factory credits. Droid cannot approve, post, or pay; it asks the controller.
+
+Live check: `DROID_LIVE=1 npx vitest run tests/droid-live.test.ts` works the overbilling case on Droid until it needs the controller.
 
 ## Try it
 

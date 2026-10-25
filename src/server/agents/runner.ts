@@ -3,7 +3,8 @@ import { recordActivity } from "../activity";
 import { nextId, nowIso, tx, type AppContext } from "../context";
 import { agentRuns, workItems } from "../db/schema";
 import { ACTOR, getActor } from "../security/actors";
-import { getExecutionMode } from "../settings";
+import { agentModelLabel, getExecutionMode } from "../settings";
+import { runDroidAgent } from "./droid";
 import type { JobRow } from "../workflow/jobs";
 import { isOnboarding } from "../workflow/onboarding";
 import { getWorkItem, transitionWorkItem } from "../workflow/work-items";
@@ -108,7 +109,7 @@ export async function runAgentJob(ctx: AppContext, job: JobRow) {
         workItemId,
         agentId,
         mode,
-        model: mode === "llm" ? ctx.config.model : null,
+        model: mode === "llm" ? agentModelLabel(ctx) : null,
         task,
         status: "running",
         startedAt: nowIso(),
@@ -132,7 +133,9 @@ export async function runAgentJob(ctx: AppContext, job: JobRow) {
       title: agentName + " started: " + task,
       summary:
         mode === "llm"
-          ? "LLM agent via OpenAI Agents SDK (" + ctx.config.model + ")"
+          ? ctx.config.agentEngine === "droid"
+            ? "Factory Droid agent, limited to its own tools (" + agentModelLabel(ctx) + ")"
+            : "LLM agent via OpenAI Agents SDK (" + ctx.config.model + ")"
           : "Deterministic replay: scripted agent policy, no LLM calls",
       mode,
     });
@@ -151,7 +154,7 @@ export async function runAgentJob(ctx: AppContext, job: JobRow) {
   const started = Date.now();
   try {
     let usage: Record<string, number> | null = null;
-    if (mode === "llm") usage = await runLlmAgent(ctx, run);
+    if (mode === "llm") usage = ctx.config.agentEngine === "droid" ? await runDroidAgent(ctx, run) : await runLlmAgent(ctx, run);
     else await runDeterministicAgent(ctx, run);
     if (!run.terminal) throw new Error(agentName + " ended without completing its task");
     const terminal = run.terminal;

@@ -16,6 +16,7 @@
     "db:reset": "node -e \"require('fs').rmSync('data',{recursive:true,force:true})\""
   },
   "dependencies": {
+    "@factory/droid-sdk": "^0.10.0",
     "@openai/agents": "^0.21.0",
     "better-sqlite3": "^13.0.3",
     "class-variance-authority": "^0.7.1",
