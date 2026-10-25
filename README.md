@@ -166,12 +166,12 @@ Everything the system tells a person or a vendor goes through an outbox table, w
 | The vendor... | The Vendor Liaison | Guardrail |
 | --- | --- | --- |
 | Issued the full credit | Books it with their memo number and closes the case | A message naming a different amount cannot be booked as a full credit |
-| Refused | Books the charge to the owning team, pings Priya and the lead | |
+| Refused | Books the charge to the owning team, pings the controller and the lead | |
 | Asked for records or pushed back | Answers in the same thread with the evidence and clause, CSV attached | May only quote amounts already in the approved dispute |
-| Offered a partial credit, or asked for something only staff know (PO, signature) | Asks Priya, with its recommendation, in Slack and on the task (Accept / Hold out / write an answer); the case stays open | A partial credit can only be booked after Priya answers, and is split: credit for what the vendor gave, the rest to the team |
+| Offered a partial credit, or asked for something only staff know (PO, signature) | Asks the controller, with its recommendation, in Slack and on the task (Accept / Hold out / write an answer); the case stays open | A partial credit can only be booked after the controller answers, and is split: credit for what the vendor gave, the rest to the team |
 | Only acknowledged | Notes it and keeps waiting | |
 
-Out-of-office and other automatic replies are stored on the thread but not acted on. A bounce marks the dispute's email "Bounced" and pings Priya, since the vendor has not seen it. Attachment names (a credit memo PDF, say) are noted in the reply the liaison reads, and HTML-only replies are converted to text. Our own outgoing mail carries an `X-Atlas-Outbox` header so it is never read back as a reply, a reply cannot predate its letter, and once the vendor has answered the 14-day chase stops. A reply that arrived some other way can be pasted on the task.
+Out-of-office and other automatic replies are stored on the thread but not acted on. A bounce marks the dispute's email "Bounced" and pings the controller, since the vendor has not seen it. Attachment names (a credit memo PDF, say) are noted in the reply the liaison reads, and HTML-only replies are converted to text. Our own outgoing mail carries an `X-Atlas-Outbox` header so it is never read back as a reply, a reply cannot predate its letter, and once the vendor has answered the 14-day chase stops. A reply that arrived some other way can be pasted on the task.
 
 **Slack threads and reactions.** Each approval request and each dispute is one message; everything after it goes in its thread. A decided approval gets a reaction on the request (✅ approved, ❌ rejected, ↩️ changes requested) and a thread reply with who decided and what happens next. A dispute's thread collects the vendor's replies, the liaison's answers and questions, follow-ups and the close; the close (and a bounce) also show in the channel, and the letter gets ✅ (credited), 🤝 (partial credit) or ❌ (denied). Replies and reactions wait until the message they belong to is posted, and a Slack rate limit pauses delivery for as long as Slack asks without counting as a failed attempt.
 
@@ -179,14 +179,14 @@ Out-of-office and other automatic replies are stored on the thread but not acted
 
 | Event | Where | Who |
 | --- | --- | --- |
-| Approval needed (proposal or learned policy) | #finance-approvals | Priya (controller) |
-| Approval waiting 1 day / 3 days | DM / DM + #finance-approvals | Priya / Dana (CFO, backup approver) |
-| An agent needs information (e.g. unknown owner) | #finance-ops | Priya |
-| Dispute sent, vendor followed up, vendor replied, liaison answered | #vendor-disputes | FYI to Priya |
-| Vendor offered less, or asked for something only staff know | #vendor-disputes + DM | Priya |
-| Dispute unanswered 30 days | #vendor-disputes + DM | Priya |
-| Dispute denied, charge moved to a team | #vendor-disputes | Priya and that team's lead |
-| Team trending over budget | #budget-alerts | Team lead, plus Priya when at risk or over |
+| Approval needed (proposal or learned policy) | #finance-approvals | Controller |
+| Approval waiting 1 day / 3 days | DM / DM + #finance-approvals | Controller / CFO (backup approver) |
+| An agent needs information (e.g. unknown owner) | #finance-ops | Controller |
+| Dispute sent, vendor followed up, vendor replied, liaison answered | #vendor-disputes | FYI to the controller |
+| Vendor offered less, or asked for something only staff know | #vendor-disputes + DM | Controller |
+| Dispute unanswered 30 days | #vendor-disputes + DM | Controller |
+| Dispute denied, charge moved to a team | #vendor-disputes | Controller and that team's lead |
+| Team trending over budget | #budget-alerts | Team lead, plus the controller when at risk or over |
 
 **Connecting the real thing.** For email, sign up for Resend with the address you put in `VENDOR_EMAIL` and set `RESEND_API_KEY` (Resend's test sender can only email the account owner), or use a Gmail app password in `SMTP_URL`. For Slack, create a free workspace, add an app with the scopes above, install it, set `SLACK_BOT_TOKEN`, and set `SLACK_USER_IDS` for whoever should be mentioned. Open `/api/comms/check` to see what is connected; `POST` it to retry failed messages, send a test to Slack and the vendor inbox, and check the mailbox for replies now.
 
@@ -244,6 +244,7 @@ npm test
 ```bash
 npm run eval                 # deterministic agents
 AGENT_MODE=llm npm run eval  # LLM agents (needs OPENAI_API_KEY)
+npm run eval:live            # two cases on the live model, key from .env.local
 ```
 
 Each seeded case in `src/server/sim/cases.ts` has an answer key: the expected outcome, dispute amount, expense per project, and the policy that should authorize the posting. The harness (`src/server/eval/harness.ts`) seeds an in-memory database, lets the agents work every case, and plays the controller from the key: it approves matching proposals, rejects others with the key's correction, answers ownership questions, and sends the vendor reply. It reports:
@@ -276,9 +277,8 @@ tests/                 Vitest suite
 
 ## Limitations
 
-- **One user:** there is no login. Every human action is taken as the controller. In Slack and email the controller is Priya Natarajan, from the fictional Atlas Research directory (`src/server/comms/directory.ts`); map her to a real account with `SLACK_USERS`.
+- **One user:** there is no login. Every human action is taken as the controller, named by `CONTROLLER_NAME` in the app, Slack and email alike; map the controller to a real Slack account with `SLACK_USERS` (`controller=...`).
 - **Simulated systems:** the scheduler, infrastructure controller, provider meters, experiment tracker, ERP, AP history and billing feeds are simulated. Email and Slack are delivered only when configured; otherwise they are recorded on the task. Vendor replies are read from the mailbox when IMAP is set up, or pasted on the task; the **Simulate vendor** buttons work without email.
-- **LLM vs replay:** with `OPENAI_API_KEY` the agents run on the live model; without it, and past the public demo's hourly cap, they use the deterministic replay, which is labeled as such in the UI.
-- **Investigation page:** the Flow tab shows only the Compute Investigator and the Cost Accountant. The Canvas shows all six.
+- **LLM vs replay:** with `OPENAI_API_KEY` the agents run on the live model; without it, and past the public demo's hourly cap, they use the deterministic replay, which is labeled as such in the UI. `npm run eval:live` checks two cases on the live model (a dispute and a charge that must not be disputed) using the key in `.env.local`; `npm run eval -- --case=O-01` runs any subset.
 - **One node:** SQLite, the worker and the scheduler run inside the Next.js server process, so nothing happens while it is stopped (queued jobs and due follow-ups resume on restart). Restart the dev server after changing server code.
 - **Reset wipes everything:** **Reset demo** deletes the sandbox, including its audit log. It is a demo control, not a production feature.

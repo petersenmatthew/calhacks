@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "eval": "node --import tsx scripts/eval.ts",
+    "eval:live": "AGENT_MODE=llm node --env-file=.env.local --import tsx scripts/eval.ts --case=O-01,E-01",
     "db:generate": "drizzle-kit generate",
     "db:reset": "node -e \"require('fs').rmSync('data',{recursive:true,force:true})\""
   },

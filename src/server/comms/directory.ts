@@ -1,4 +1,4 @@
-import { ACTOR } from "../security/actors";
+import { ACTOR, controllerName } from "../security/actors";
 
 /*
  * Atlas Research's people and Slack channels. The handles are what the bot
@@ -16,7 +16,16 @@ export interface Person {
 }
 
 export const PEOPLE: Person[] = [
-  { handle: "priya", name: "Priya Natarajan", title: "Controller", email: "priya@atlas-research.ai", actorId: ACTOR.controller },
+  // The controller is whoever uses the app, so Slack and email use the same name the app shows (CONTROLLER_NAME).
+  {
+    handle: "priya",
+    get name() {
+      return controllerName();
+    },
+    title: "Controller",
+    email: "controller@atlas-research.ai",
+    actorId: ACTOR.controller,
+  },
   { handle: "dana", name: "Dana Whitfield", title: "CFO", email: "dana@atlas-research.ai", actorId: ACTOR.cfo },
   { handle: "maya", name: "Dr. Maya Chen", title: "Lead, Frontier Language Models", email: "maya@atlas-research.ai", projectId: "PRJ-FLM" },
   { handle: "ravi", name: "Ravi Shah", title: "Lead, Multimodal Perception", email: "ravi@atlas-research.ai", projectId: "PRJ-MMP" },

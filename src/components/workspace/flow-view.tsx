@@ -24,7 +24,7 @@ function runFor(data: WorkspaceData, agentId: string) {
 
 /** What is happening on this item right now, in two or three words. */
 export function flowStatus(data: WorkspaceData): { label: string; tone: Tone; spin: boolean } {
-  for (const id of ["agent.compute", "agent.finance"]) {
+  for (const id of ["agent.compute", "agent.capacity", "agent.finance", "agent.policy", "agent.vendor", "agent.budget"]) {
     const r = runFor(data, id);
     if (r.status === "running") return { label: r.current?.verb ?? "Working", tone: "blue", spin: true };
   }
@@ -100,9 +100,20 @@ function PillNode({ icon: Icon, label, state, sub }: { icon: LucideIcon; label: 
   );
 }
 
+/** Whether an agent worked this item (or is queued for it), so its card belongs in the flow. */
+function took(data: WorkspaceData, agentId: string) {
+  const r = runFor(data, agentId);
+  return r.runs > 0 || r.queued;
+}
+
 function FlowStrip({ data }: { data: WorkspaceData }) {
-  const compute = runFor(data, "agent.compute");
+  // A shared reservation is investigated by the Capacity Planner, a billing line by the Compute Investigator.
+  const investigator = data.item.type === "SHARED_ALLOCATION" ? "agent.capacity" : "agent.compute";
+  const compute = runFor(data, investigator);
   const finance = runFor(data, "agent.finance");
+  const policy = took(data, "agent.policy");
+  const vendor = took(data, "agent.vendor");
+  const budget = took(data, "agent.budget");
   const pending = data.approvals.some((a) => a.status === "PENDING");
   const decided = data.approvals.filter((a) => a.status !== "PENDING");
   const lastDecision = decided[decided.length - 1];
@@ -112,13 +123,25 @@ function FlowStrip({ data }: { data: WorkspaceData }) {
   const youSub = pending ? "Your turn" : lastDecision ? (lastDecision.status === "APPROVED" ? "Approved" : "Sent back") : finished ? "Not needed" : undefined;
   return (
     <div className="flex items-center overflow-x-auto pt-1 pb-2">
-      <AgentCard data={data} agentId="agent.compute" />
+      <AgentCard data={data} agentId={investigator} />
       <Connector active={finance.status === "running" || (compute.status === "completed" && finance.queued)} />
       <AgentCard data={data} agentId="agent.finance" />
       <Connector active={pending} tone="orange" />
       <PillNode icon={User} label="You" state={youState} sub={youSub} />
+      {policy ? (
+        <>
+          <Connector active={runFor(data, "agent.policy").status === "running"} />
+          <AgentCard data={data} agentId="agent.policy" />
+        </>
+      ) : null}
       <Connector active={data.item.state === "APPROVED"} />
       <PillNode icon={BookCheck} label="Ledger" state={posted ? "done" : "todo"} sub={posted ? "Posted" : undefined} />
+      {vendor ? (
+        <>
+          <Connector active={runFor(data, "agent.vendor").status === "running"} />
+          <AgentCard data={data} agentId="agent.vendor" />
+        </>
+      ) : null}
       {data.dispute ? (
         <>
           <Connector active={false} />
@@ -128,6 +151,12 @@ function FlowStrip({ data }: { data: WorkspaceData }) {
             state={data.dispute.status === "SUBMITTED" ? "alert" : "done"}
             sub={data.dispute.status === "SUBMITTED" ? "Disputed" : data.dispute.status === "CREDIT_ACCEPTED" ? "Credited" : "Denied"}
           />
+        </>
+      ) : null}
+      {budget ? (
+        <>
+          <Connector active={runFor(data, "agent.budget").status === "running"} />
+          <AgentCard data={data} agentId="agent.budget" />
         </>
       ) : null}
     </div>
@@ -153,7 +182,7 @@ function SourceTiles({ data }: { data: WorkspaceData }) {
   const { openEvidence } = useWorkspace();
   const billing = data.item.type === "BILLING_VARIANCE";
   const rows: { agentId: string; tiles: typeof SOURCES }[] = [
-    { agentId: "agent.compute", tiles: SOURCES.filter((s) => s.kind === "both" || s.kind === (billing ? "billing" : "allocation")) },
+    { agentId: billing ? "agent.compute" : "agent.capacity", tiles: SOURCES.filter((s) => s.kind === "both" || s.kind === (billing ? "billing" : "allocation")) },
     { agentId: "agent.finance", tiles: SOURCES.filter((s) => s.kind === "finance") },
   ];
   return (
