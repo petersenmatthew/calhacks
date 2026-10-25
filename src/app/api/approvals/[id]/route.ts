@@ -1,3 +1,4 @@
+import { rateLimited } from "@/server/rate-limit";
 import { z } from "zod";
 import { errorResponse } from "@/server/http";
 import { getContext } from "@/server/runtime";
@@ -15,6 +16,8 @@ const body = z.object({
 /** Human decisions. The demo has a single signed-in user: the controller. */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const limited = rateLimited(getContext(), request, "decide");
+    if (limited) return limited;
     const { id } = await params;
     const input = body.parse(await request.json());
     return Response.json(

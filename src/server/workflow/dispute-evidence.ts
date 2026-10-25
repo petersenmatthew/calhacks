@@ -1,6 +1,6 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import type { AppContext } from "../context";
-import { gpuInstances, invoiceLines, invoices, lifecycleEvents, type ContractClause, type InstanceChecks } from "../db/schema";
+import { gpuInstances, invoiceLines, invoices, lifecycleEvents, proposals, type ContractClause, type InstanceChecks } from "../db/schema";
 import { formatCents } from "../domain/money";
 import { contractForProvider } from "./checks";
 import type { WorkItemRow } from "./work-items";
@@ -10,8 +10,10 @@ import type { WorkItemRow } from "./work-items";
  * from a system of record (the invoice line, the infrastructure controller's
  * lifecycle events and the provider's own API acknowledgment, the provider
  * meter, and the contract) and every number is computed here, not written by
- * an agent. Clauses are chosen by what is actually wrong with the line, so a
- * letter never cites a clause that does not apply.
+ * an agent. The Cost Accountant chooses the clauses by reading the contract;
+ * the gateway (checkCitedClauses) only lets through sections that exist in
+ * that provider's contract. relevantClauses is the fixed fallback for disputes
+ * drafted before agents chose their own clauses, and for the deterministic replay.
  */
 
 export interface CitedClause extends ContractClause {
@@ -57,7 +59,46 @@ function find(clauses: ContractClause[], words: string[]) {
   return clauses.find((c) => words.some((w) => c.title.toLowerCase().includes(w)));
 }
 
-/** Clauses that support this particular dispute, each with the reason it applies. */
+/** "§ 4.2", "Section 4.2.", "clause 4.2" all mean 4.2. */
+export function normalizeClauseRef(ref: string) {
+  return ref.trim().replace(/^(§+|section|sec\.?|clause|article|art\.?)\s*/i, "").replace(/[.\s]+$/, "");
+}
+
+/** The clause that sets the deadline for raising a dispute, whatever it is called. */
+export function isDisputeWindowClause(c: ContractClause) {
+  return /disput|claim/i.test(c.title) || (/disput|claim|billing error/i.test(c.text) && /\bdays?\b/i.test(c.text));
+}
+
+export interface ClauseCheck {
+  clauses: CitedClause[];
+  dropped: { ref: string; reason: string }[];
+  /** Cited clauses other than the dispute window: the actual grounds. */
+  grounds: number;
+}
+
+/**
+ * Gateway check on the clauses an agent cites: each must exist in this
+ * provider's contract and come with a reason. The dispute-window clause is
+ * added when the agent left it out, so the vendor sees the deadline.
+ */
+export function checkCitedClauses(contract: ContractClause[], cited: { ref: string; why: string }[], invoiceIssuedAt: string | null): ClauseCheck {
+  const out: CitedClause[] = [];
+  const dropped: { ref: string; reason: string }[] = [];
+  for (const c of cited) {
+    const ref = normalizeClauseRef(c.ref);
+    const clause = contract.find((x) => normalizeClauseRef(x.ref) === ref);
+    if (!clause) dropped.push({ ref: c.ref, reason: "Not a section of this contract." });
+    else if (c.why.trim().length < 10) dropped.push({ ref: c.ref, reason: "No reason given for how it applies." });
+    else if (!out.some((x) => x.ref === clause.ref)) out.push({ ...clause, why: c.why.trim().slice(0, 300) });
+  }
+  const window = contract.find(isDisputeWindowClause);
+  if (window && !out.some((x) => x.ref === window.ref)) {
+    out.push({ ...window, why: "Raised within the contract's dispute window" + (invoiceIssuedAt ? " (invoice issued " + invoiceIssuedAt.slice(0, 10) + ")." : ".") });
+  }
+  return { clauses: out, dropped, grounds: out.filter((c) => !isDisputeWindowClause(c)).length };
+}
+
+/** Fixed fallback: clauses picked by title keywords for what is wrong with the line, each with the reason it applies. */
 export function relevantClauses(clauses: ContractClause[], checks: InstanceChecks, invoiceIssuedAt: string | null): CitedClause[] {
   const out: CitedClause[] = [];
   const add = (c: ContractClause | undefined, why: string) => {
@@ -77,6 +118,24 @@ export function relevantClauses(clauses: ContractClause[], checks: InstanceCheck
   }
   add(find(clauses, ["dispute"]), "Raised within the contract's dispute window" + (invoiceIssuedAt ? " (invoice issued " + invoiceIssuedAt.slice(0, 10) + ")." : "."));
   return out;
+}
+
+/** The clauses on the latest live dispute proposal for this item, as the Cost Accountant chose them. */
+function chosenClauses(ctx: AppContext, item: WorkItemRow, contract: ContractClause[]): CitedClause[] | null {
+  const proposal = ctx.db
+    .select()
+    .from(proposals)
+    .where(and(eq(proposals.workItemId, item.id), eq(proposals.kind, "VENDOR_DISPUTE"), inArray(proposals.status, ["APPROVED", "EXECUTED", "PENDING_APPROVAL", "DRAFT"])))
+    .orderBy(desc(proposals.version))
+    .get();
+  const chosen = proposal?.payload.dispute?.clauses;
+  if (!chosen?.length) return null;
+  const out: CitedClause[] = [];
+  for (const c of chosen) {
+    const clause = contract.find((x) => x.ref === c.ref);
+    if (clause) out.push({ ...clause, why: c.why });
+  }
+  return out.length ? out : null;
 }
 
 export function buildDisputeEvidence(ctx: AppContext, item: WorkItemRow): DisputeEvidence {
@@ -155,7 +214,7 @@ export function buildDisputeEvidence(ctx: AppContext, item: WorkItemRow): Disput
     supported: formatCents(checks.expectedCents),
     invoiced: formatCents(checks.invoicedCents),
     disputed: formatCents(checks.discrepancyCents),
-    clauses: relevantClauses(contract.clauses, checks, invoice?.issuedAt ?? null),
+    clauses: chosenClauses(ctx, item, contract.clauses) ?? relevantClauses(contract.clauses, checks, invoice?.issuedAt ?? null),
   };
 }
 

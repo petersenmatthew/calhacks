@@ -61,6 +61,7 @@ export function getSettingsView(ctx: AppContext) {
     llmAvailable: ctx.config.llmAvailable,
     model: ctx.config.model,
     stepDelayMs: ctx.config.stepDelayMs,
+    publicDemo: ctx.config.publicDemo,
   };
 }
 

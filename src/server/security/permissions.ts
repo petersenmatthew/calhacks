@@ -62,6 +62,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   finance_agent: [
     "workitem:read",
     "budget:read",
+    "contract:read",
     "policy:read",
     "precedent:read",
     "allocation:calculate",

@@ -423,7 +423,7 @@ function toolSpec(row: ActivityRow, w: WorkspaceData): FrameSpec {
           head: { label: "Invoice " + (w.line?.externalLineId ?? w.item.invoiceLineId), detail: provider, value: money(w.line?.amountCents) },
           rows: [
             { label: "Pay", detail: "Supported by the contract", value: s(r, "undisputed_amount"), tone: "ok" },
-            { label: "Dispute", detail: list(a, "clause_refs").length ? "Clauses " + list(a, "clause_refs").join(", ") : "Not supported", value: s(r, "disputed_amount"), tone: "bad" },
+            { label: "Dispute", detail: list(r, "clause_refs").length ? "Clauses " + list(r, "clause_refs").join(", ") : "Not supported", value: s(r, "disputed_amount"), tone: "bad" },
           ],
           result: { label: "Ask " + provider + " for a credit", value: s(r, "disputed_amount"), tone: "warn" },
         },

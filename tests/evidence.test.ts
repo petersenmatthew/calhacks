@@ -22,7 +22,7 @@ describe("evidence citations", () => {
     const res = await invokeTool(ctx, run, "propose_vendor_dispute", {
       work_item_id: id,
       rationale: "Lifecycle and contract support 24 h; 12 h were billed after termination.",
-      clause_refs: ["4.2"],
+      clauses: [{ ref: "4.2", why: "Billing ends at termination; 12 h were billed after it." }],
       evidence_ids: [finding.id],
     });
 

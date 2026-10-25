@@ -1,3 +1,4 @@
+import { rateLimited } from "@/server/rate-limit";
 import { z } from "zod";
 import { errorResponse } from "@/server/http";
 import { getContext } from "@/server/runtime";
@@ -20,6 +21,8 @@ const body = z.object({
 
 export async function POST(request: Request) {
   try {
+    const limited = rateLimited(getContext(), request, "simulate");
+    if (limited) return limited;
     const input = body.parse(await request.json());
     const result = runScenario(getContext(), input.scenario, input.params);
     // A new invoice goes to the front of the line, so the team picks it up next.

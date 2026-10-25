@@ -15,7 +15,7 @@ export function setup(file = ":memory:", config: Parameters<typeof createAppCont
 }
 
 export function tempDbFile() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "experiment-ledger-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moa-"));
   return path.join(dir, "test.db");
 }
 
