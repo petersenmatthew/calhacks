@@ -13,7 +13,7 @@ import {
   providers,
   type ContractClause,
 } from "../db/schema";
-import { ACTOR, ACTOR_SEED } from "../security/actors";
+import { ACTOR, ACTOR_SEED, controllerName } from "../security/actors";
 import { ingestCase } from "./scenarios";
 import { SEED_CASES } from "./cases";
 import { seedFeedSchedule } from "./feed-schedule";
@@ -237,6 +237,8 @@ export function isSeeded(ctx: AppContext) {
 /** Add actors introduced after a database was seeded. Actors are append-only, so existing rows are left as they are. */
 export function ensureActors(ctx: AppContext) {
   ctx.db.insert(actors).values(ACTOR_SEED).onConflictDoNothing().run();
+  // The controller's name follows the environment (CONTROLLER_NAME, or "You" on a public demo).
+  ctx.db.update(actors).set({ name: controllerName() }).where(eq(actors.id, ACTOR.controller)).run();
 }
 
 /**

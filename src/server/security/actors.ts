@@ -22,6 +22,15 @@ export const ACTOR = {
   simulator: "system.simulator",
 } as const;
 
+/**
+ * The person using the app is the controller. CONTROLLER_NAME names them; a
+ * public demo calls them "You", since every visitor plays that part.
+ */
+export function controllerName() {
+  const pub = process.env.PUBLIC_DEMO === "1" || process.env.PUBLIC_DEMO === "true";
+  return process.env.CONTROLLER_NAME?.trim() || (pub ? "You" : "Matthew Petersen");
+}
+
 export const ACTOR_SEED: ActorRow[] = [
   {
     id: ACTOR.compute,
@@ -73,7 +82,7 @@ export const ACTOR_SEED: ActorRow[] = [
   },
   {
     id: ACTOR.controller,
-    name: "Matthew Petersen",
+    name: controllerName(),
     kind: "human",
     role: "controller",
     title: "Controller",

@@ -189,7 +189,9 @@ function Home({ data, items, onOpen }: { data: DashboardData; items: Item[]; onO
   const needs = items.filter((i) => groupOf(i) === "needs");
   const moving = items.filter((i) => groupOf(i) === "moving");
   const done = items.filter((i) => groupOf(i) === "done");
-  const name = (data.actors["human.controller"]?.name ?? "").split(" ")[0];
+  // A public demo calls the controller "You": greet without a name then.
+  const full = data.actors["human.controller"]?.name ?? "";
+  const name = full === "You" ? "" : full.split(" ")[0];
   const [now] = useState(() => new Date());
   const decisions = needs.length + learned;
   const minutes = Math.max(1, Math.ceil((decisions * 12) / 60));
