@@ -6,11 +6,9 @@ import { createContext, useContext, useEffect, useState } from "react";
 import useSWR from "swr";
 import { CircleHelp, Network, ShieldCheck, SquareKanban } from "lucide-react";
 import { fetcher } from "@/lib/api";
-import { periodLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { DashboardData } from "@/server/queries";
-import { dashboardKey, Metrics } from "./dashboard/dashboard";
-import { ClockControl } from "./dashboard/clock-control";
+import { dashboardKey } from "./dashboard/dashboard";
 import { ResetButton } from "./dashboard/reset-button";
 import { SimulateDialog } from "./dashboard/simulate-dialog";
 import { hasSeenOnboarding, Onboarding } from "./onboarding";
@@ -95,25 +93,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </Link>
             ))}
           </nav>
-          {data && data.periods.length > 1 ? (
-            <select
-              value={data.period}
-              onChange={(e) => setPeriod(e.target.value)}
-              className="h-7 rounded-md bg-transparent px-1 text-[12px] text-muted-foreground outline-none hover:bg-zinc-100"
-            >
-              {data.periods.map((p) => (
-                <option key={p} value={p}>
-                  {periodLabel(p, true)}
-                </option>
-              ))}
-            </select>
-          ) : data ? (
-            <span className="text-[12px] text-muted-foreground">{periodLabel(data.period, true)}</span>
-          ) : null}
           <div className="ml-auto flex items-center gap-4">
-            {data ? <Metrics data={data} /> : null}
             <div className="flex items-center gap-1.5">
-              {data ? <ClockControl now={data.clock.now} offsetMs={data.clock.offsetMs} onDone={() => mutate()} /> : null}
               <button
                 type="button"
                 onClick={() => setIntro(true)}

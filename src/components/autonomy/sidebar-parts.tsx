@@ -142,9 +142,6 @@ export function RunningOnItsOwn({ data }: { data: AutonomyData }) {
               <span className="shrink-0 text-[11.5px] text-zinc-400">{short.format(new Date(f.businessAt))}</span>
             </div>
           ))}
-          <p className="px-2.5 pt-1 text-[11.5px] leading-snug text-zinc-400">
-            Feeds sync every {Math.round(data.scheduler.intervalMs / 1000)} s. Waiting approvals are reminded after 1 day and escalated after 3; unanswered disputes are chased at 14 days and escalated at 30.
-          </p>
         </div>
       ) : null}
     </section>

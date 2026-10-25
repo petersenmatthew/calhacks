@@ -21,8 +21,12 @@ function typing(t: EventTarget | null) {
   return t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName));
 }
 
-function Typed({ text }: { text: string }) {
+function Typed({ text, onDone }: { text: string; onDone?: () => void }) {
   const [shown, setShown] = useState(0);
+  const done = useRef(onDone);
+  useEffect(() => {
+    done.current = onDone;
+  });
   useEffect(() => {
     let raf = 0;
     const start = performance.now();
@@ -30,6 +34,7 @@ function Typed({ text }: { text: string }) {
       const next = Math.min(text.length, Math.floor(((now - start) / 1000) * 110));
       setShown(next);
       if (next < text.length) raf = requestAnimationFrame(tick);
+      else done.current?.();
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
@@ -66,6 +71,8 @@ export function DecisionThread({
   onDone: () => void;
 }) {
   const [opener, setOpener] = useState<string | null>(null);
+  // Suggestions appear once the opening line has finished typing.
+  const [typed, setTyped] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState<number[]>([]);
@@ -89,7 +96,7 @@ export function DecisionThread({
     try {
       await submitDecision(w, decision, choice, note, budget);
       setDone(
-        [doneMessage(decision, choice, w), budget ? "Budget Analyst sets " + budget.projectName + " to " + money(budget.monthlyCents) + " a month." : null]
+        [doneMessage(decision, choice, w), budget ? "Budget Analyst sets " + budget.projectName + " to " + money(budget.monthlyCents, { cents: false }) + " a month." : null]
           .filter(Boolean)
           .join(" "),
       );
@@ -102,13 +109,13 @@ export function DecisionThread({
   };
 
   // Number keys pick a suggestion.
-  const latest = useRef({ act, choices: decision.choices });
+  const latest = useRef({ act, choices: decision.choices, typed });
   useEffect(() => {
-    latest.current = { act, choices: decision.choices };
+    latest.current = { act, choices: decision.choices, typed };
   });
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return;
+      if (!latest.current.typed || e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return;
       const c = latest.current.choices[Number(e.key) - 1];
       if (c) {
         e.preventDefault();
@@ -138,12 +145,12 @@ export function DecisionThread({
 
       <div className="text-[13.5px] leading-relaxed text-zinc-800">
         {speaker}
-        {opener ? <Typed text={opener} /> : <Dots />}
+        {opener ? <Typed text={opener} onDone={() => setTyped(true)} /> : <Dots />}
       </div>
 
-      {!done ? (
+      {!done && typed ? (
         decision.kind === "split" ? (
-          <div className="grid gap-1.5">
+          <div className="animate-enter grid gap-1.5">
             {decision.choices.map((c) => (
               <button
                 key={c.id}
@@ -177,7 +184,7 @@ export function DecisionThread({
             ))}
           </div>
         ) : (
-          <div className="overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200">
+          <div className="animate-enter overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200">
             {decision.choices.map((c, i) => (
               <button
                 key={c.id}
@@ -215,19 +222,35 @@ export function DecisionThread({
             <span className="whitespace-pre-wrap">{t.content}</span>
             {!done && i === lastAgent && !dismissed.includes(i) && (t.choiceId || t.note) ? (
               <ConfirmRow
-                label={
-                  t.choiceId
-                    ? (decision.choices.find((x) => x.id === t.choiceId)?.label ?? "")
-                    : decision.custom === "answer"
-                      ? "Send your answer"
-                      : "Send back with your note"
-                }
-                extras={[
-                  ...(t.choiceId && t.note ? ["Plus: " + t.note] : []),
-                  ...(t.budget ? ["Set " + t.budget.projectName + " budget to " + money(t.budget.monthlyCents) + " a month"] : []),
+                items={[
+                  ...(t.choiceId
+                    ? [
+                        (() => {
+                          const c = decision.choices.find((x) => x.id === t.choiceId);
+                          return { actorId: decision.kind === "dispute" ? "agent.vendor" : decision.askedBy, text: c?.label ?? "", detail: c?.hint };
+                        })(),
+                      ]
+                    : [{ actorId: decision.askedBy, text: decision.custom === "answer" ? "Send your answer" : "Send back with your note" }]),
+                  ...(t.budget
+                    ? [
+                        {
+                          actorId: "agent.budget",
+                          text: t.budget.projectName + " budget",
+                          from: t.budget.fromCents != null ? money(t.budget.fromCents, { cents: false }) : undefined,
+                          to: money(t.budget.monthlyCents, { cents: false }) + "/mo",
+                        },
+                      ]
+                    : []),
+                  ...(t.choiceId && t.note ? [{ actorId: decision.askedBy, text: "Note", detail: t.note }] : []),
                 ]}
                 busy={busy !== null}
-                onConfirm={() => act(decision.choices.find((x) => x.id === t.choiceId) ?? null, t.note ?? undefined, t.budget)}
+                onConfirm={() =>
+                  act(
+                    decision.choices.find((x) => x.id === t.choiceId) ?? null,
+                    t.note ?? (t.budget ? "Set the " + t.budget.projectName + " budget to " + money(t.budget.monthlyCents, { cents: false }) + " a month." : undefined),
+                    t.budget,
+                  )
+                }
                 onCancel={() => setDismissed((d) => [...d, i])}
               />
             ) : null}
@@ -249,41 +272,46 @@ export function DecisionThread({
   );
 }
 
-function ConfirmRow({
-  label,
-  extras,
-  busy,
-  onConfirm,
-  onCancel,
-}: {
-  label: string;
-  extras: string[];
-  busy: boolean;
-  onConfirm: () => void;
-  onCancel: () => void;
-}) {
+type ConfirmItem = { actorId: string; text: string; detail?: string; from?: string; to?: string };
+
+/** What happens on Confirm, one line per employee who will act, then the two buttons. */
+function ConfirmRow({ items, busy, onConfirm, onCancel }: { items: ConfirmItem[]; busy: boolean; onConfirm: () => void; onCancel: () => void }) {
   return (
-    <div className="animate-enter mt-2.5 flex items-center gap-1.5 rounded-xl bg-zinc-50 p-1.5 pl-3 ring-1 ring-zinc-200">
-      <span className="min-w-0 flex-1 text-[12.5px] text-zinc-600">
-        <span className="block truncate">{label}</span>
-        {extras.map((x) => (
-          <span key={x} className="block text-zinc-500">
-            {x}
-          </span>
+    <div className="animate-enter mt-3 overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200">
+      <div className="px-3.5 pt-3 text-[11.5px] text-zinc-500">On confirm</div>
+      <ul className="space-y-2.5 px-3.5 pt-2 pb-3">
+        {items.map((x, i) => (
+          <li key={i} className="flex items-center gap-2.5">
+            <AgentAvatar actorId={x.actorId} size="md" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-[13px] leading-snug font-medium text-zinc-900">{x.text}</span>
+              {x.to ? (
+                <span className="block text-[12px] tnum">
+                  {x.from ? <span className="text-zinc-400 line-through decoration-zinc-300">{x.from}</span> : null}
+                  {x.from ? <span className="mx-1 text-zinc-300">→</span> : null}
+                  <span className="font-semibold text-brand-ink">{x.to}</span>
+                </span>
+              ) : x.detail ? (
+                <span className="block text-[12px] leading-snug text-zinc-500">{x.detail[0].toUpperCase() + x.detail.slice(1)}</span>
+              ) : null}
+            </span>
+          </li>
         ))}
-      </span>
-      <button type="button" onClick={onCancel} disabled={busy} className="h-7 rounded-lg px-2.5 text-[12.5px] text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900">
-        Not yet
-      </button>
-      <button
-        type="button"
-        onClick={onConfirm}
-        disabled={busy}
-        className="inline-flex h-7 items-center gap-1 rounded-lg bg-zinc-900 px-3 text-[12.5px] font-medium text-white hover:bg-zinc-800 disabled:opacity-60"
-      >
-        {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" strokeWidth={2.5} />}
-        Confirm
-      </button>
+      </ul>
+      <div className="flex gap-1.5 border-t border-zinc-100 bg-zinc-50/70 p-1.5">
+        <button type="button" onClick={onCancel} disabled={busy} className="h-8 rounded-lg px-3 text-[12.5px] text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900">
+          Not yet
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          disabled={busy}
+          className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-zinc-900 px-3 text-[12.5px] font-medium text-white hover:bg-zinc-800 disabled:opacity-60"
+        >
+          {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" strokeWidth={2.5} />}
+          Confirm
+        </button>
+      </div>
     </div>
   );
 }

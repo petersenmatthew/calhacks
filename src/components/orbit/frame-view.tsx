@@ -465,45 +465,67 @@ function BurnView({ b, span, t }: { b: BurnSpec; span: [number, number]; t: numb
 function ThreadView({ th, steps, messages, t, scroll }: { th: ThreadSpec; steps: number[]; messages: number[]; t: number; scroll?: boolean }) {
   return (
     <div className="mt-4">
-      <ol className="flex flex-wrap items-center gap-y-1">
+      <ol className="flex flex-wrap items-center gap-y-1 text-[12px]">
         {th.steps.map((s, i) =>
           t >= steps[i] ? (
             <li key={i} className="animate-enter flex items-center">
-              {i > 0 ? <span className={cn("mx-1 h-px w-4", s.state === "todo" ? "bg-zinc-200" : "bg-zinc-400")} /> : null}
+              {i > 0 ? <span className={cn("mx-2 h-px w-3", s.state === "todo" ? "bg-zinc-200" : "bg-zinc-300")} /> : null}
               <span
                 className={cn(
-                  "flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] whitespace-nowrap",
-                  s.state === "done" ? TONE_PILL[s.tone ?? "ok"] : s.state === "now" ? "bg-white text-zinc-700 ring-1 ring-zinc-300" : "bg-zinc-50 text-zinc-400",
+                  "flex items-center gap-1 whitespace-nowrap",
+                  s.state === "done" ? (s.tone === "bad" ? "text-destructive" : "text-zinc-700") : s.state === "now" ? "font-medium text-zinc-900" : "text-zinc-400",
                 )}
               >
-                {s.state === "done" ? s.tone === "bad" ? <X className="size-3" strokeWidth={3} /> : <Check className="size-3" strokeWidth={3} /> : null}
-                {s.state === "now" ? <LoaderCircle className="size-3 animate-spin" /> : null}
+                {s.state === "done" ? (
+                  s.tone === "bad" ? <X className="size-3" strokeWidth={3} /> : <Check className="size-3 text-brand-ink" strokeWidth={3} />
+                ) : null}
+                {s.state === "now" ? <LoaderCircle className="size-3 animate-spin text-zinc-500" /> : null}
                 {s.label}
               </span>
             </li>
           ) : null,
         )}
       </ol>
-      <div className="mt-3 space-y-2">
+      <div className="mt-4 space-y-2.5">
         {th.messages.map((m, i) =>
           t >= messages[i] ? (
-            <div
-              key={i}
-              className={cn(
-                "animate-enter rounded-xl px-4 py-2.5 ring-1",
-                m.tone === "bad" ? "bg-red-50/60 ring-red-100" : m.tone === "ok" ? "bg-accent/60 ring-accent" : "bg-white ring-zinc-200",
-                i > 0 && "ml-10",
-              )}
-            >
-              <div className="flex gap-1.5 text-[12px] text-zinc-500">
-                <span className="font-medium text-zinc-700">{m.from}</span>
-                <span>to {m.to}</span>
-              </div>
-              {m.subject ? <div className="mt-0.5 text-[13.5px] font-medium">{m.subject}</div> : null}
-              <div className={cn("mt-1 text-[13px] leading-relaxed whitespace-pre-wrap text-zinc-600", !scroll && "line-clamp-4")}>{m.body}</div>
-            </div>
+            <EmailCard key={i} m={m} reply={i > 0} scroll={scroll} />
           ) : null,
         )}
+      </div>
+    </div>
+  );
+}
+
+/** One email, laid out like Gmail: subject, sender, recipient, body. */
+function EmailCard({ m, reply, scroll }: { m: ThreadSpec["messages"][number]; reply: boolean; scroll?: boolean }) {
+  return (
+    <div className={cn("animate-enter overflow-hidden rounded-2xl bg-white shadow-[0_1px_2px_rgb(0_0_0/0.04)] ring-1 ring-zinc-200", reply && "ml-8")}>
+      <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-2 text-[11.5px] text-zinc-500">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/logos/gmail.svg" alt="" className="h-3 w-4" />
+        <span className="font-medium text-zinc-600">Gmail</span>
+        {reply ? <span className="text-zinc-400">· Reply</span> : null}
+        {m.at ? <span className="ml-auto tnum">{m.at}</span> : null}
+      </div>
+      <div className="px-4 pt-3 pb-3.5">
+        {m.subject ? <div className="text-[14.5px] leading-snug font-semibold text-zinc-900">{m.subject}</div> : null}
+        <div className={cn("flex items-center gap-2.5", m.subject && "mt-2.5")}>
+          {m.logo ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={m.logo} alt="" className="size-8 shrink-0 rounded-full object-cover ring-1 ring-zinc-200" />
+          ) : (
+            <span className="grid size-8 shrink-0 place-items-center rounded-full bg-zinc-900 text-[12px] font-semibold text-white">{m.from[0]}</span>
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[13px] font-medium text-zinc-900">{m.from}</div>
+            <div className="truncate text-[11.5px] text-zinc-500">to {m.to}</div>
+          </div>
+          {m.tag ? (
+            <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium", m.tone === "bad" ? "bg-red-50 text-destructive" : "bg-accent text-brand-ink")}>{m.tag}</span>
+          ) : null}
+        </div>
+        <div className={cn("mt-2.5 text-[13px] leading-relaxed whitespace-pre-wrap text-zinc-600", !scroll && "line-clamp-4")}>{m.body}</div>
       </div>
     </div>
   );
