@@ -16,6 +16,7 @@ import type { DecisionTurn } from "@/server/assistant";
 import { DisputeLetter } from "../comms/dispute-letter";
 import { DoneFinale } from "./done-card";
 import { VendorThread } from "../comms/vendor-thread";
+import { FLOWER_COLORS, Flower, MeadowStrip, UI_FLOWERS } from "../landing/meadow";
 import { AgentAvatar } from "../status";
 import { LearnedPolicyRow, pendingLearnedPolicy, RunningOnItsOwn, useAutonomy } from "../autonomy/sidebar-parts";
 
@@ -86,24 +87,24 @@ function TaskRow({ item, data, onOpen, active, dup }: { item: Item; data: Dashbo
       type="button"
       onClick={onOpen}
       className={cn(
-        "group flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left transition-colors hover:bg-zinc-100/80",
+        "group flex h-10 w-full items-center gap-2.5 rounded-xl px-2.5 text-left transition-colors hover:bg-zinc-100/80",
         active && "bg-zinc-100",
       )}
     >
-      <span className="grid size-3.5 shrink-0 place-items-center">
+      <span className="grid size-4 shrink-0 place-items-center">
         {working ? (
           <LoaderCircle className="size-3.5 animate-spin text-brand-ink" />
         ) : g === "needs" ? (
-          <span className="size-[7px] rounded-full bg-primary ring-[3px] ring-primary/25" />
+          <Flower petal={FLOWER_COLORS[2].petal} eye={FLOWER_COLORS[2].eye} size={10} />
         ) : g === "done" ? (
-          <Check className="size-3 text-zinc-400" strokeWidth={2.5} />
+          <Check className="size-3 text-brand-ink" strokeWidth={2.5} />
         ) : item.state === "DISPUTED" ? (
           <span className="size-[7px] rounded-full border-[1.5px] border-zinc-400" />
         ) : (
           <span className="size-[7px] rounded-full bg-zinc-300" />
         )}
       </span>
-      <span className={cn("min-w-0 flex-1 truncate text-[13px]", g === "done" ? "text-zinc-500" : "text-zinc-800")}>
+      <span className={cn("min-w-0 flex-1 truncate text-[14px]", g === "done" ? "text-zinc-500" : "text-zinc-900")}>
         {shortTitle(item, data.providers)}
         {dup && item.resource ? <span className="ml-1.5 font-mono text-[11px] text-zinc-400">{item.resource}</span> : null}
       </span>
@@ -115,7 +116,7 @@ function TaskRow({ item, data, onOpen, active, dup }: { item: Item; data: Dashbo
   );
 }
 
-function Section({ title, count, children, collapsible }: { title: string; count: number; children: ReactNode; collapsible?: boolean }) {
+function Section({ title, count, children, collapsible, flower }: { title: string; count: number; children: ReactNode; collapsible?: boolean; flower?: (typeof FLOWER_COLORS)[number] }) {
   const [open, setOpen] = useState(!collapsible);
   if (!count) return null;
   return (
@@ -124,8 +125,9 @@ function Section({ title, count, children, collapsible }: { title: string; count
         type="button"
         disabled={!collapsible}
         onClick={() => setOpen(!open)}
-        className="mb-1 flex w-full items-center gap-1.5 px-2.5 text-[12px] font-medium text-zinc-500 enabled:hover:text-zinc-800"
+        className="mb-1 flex w-full items-center gap-2 px-2.5 text-[13px] font-medium text-zinc-500 enabled:hover:text-zinc-800"
       >
+        {flower ? <Flower petal={flower.petal} eye={flower.eye} size={11} className="-mt-0.5" /> : null}
         {title}
         <span className="text-zinc-400 tnum">{count}</span>
         {collapsible ? <ChevronDown className={cn("ml-auto size-3.5 transition-transform", !open && "-rotate-90")} /> : null}
@@ -143,9 +145,9 @@ function Books({ data }: { data: DashboardData }) {
   return (
     <div className="mt-5 space-y-2 px-2.5">
       {b.projects.length ? (
-        <div className="rounded-xl bg-white p-3 ring-1 ring-zinc-200">
+        <div className="rounded-2xl bg-white p-3.5 ring-1 ring-zinc-200">
           <div className="flex items-baseline justify-between">
-            <span className="text-[13px] font-medium text-zinc-800">Compute budgets</span>
+            <span className="text-[14px] font-medium text-zinc-900">Compute budgets</span>
             <span className="text-[11.5px] text-zinc-400 tnum">
               Day {b.elapsed} of {b.daysInMonth}
             </span>
@@ -194,13 +196,15 @@ function Home({ data, items, onOpen }: { data: DashboardData; items: Item[]; onO
   const titles = items.map((i) => shortTitle(i, data.providers));
   const dup = (i: Item) => titles.filter((t) => t === shortTitle(i, data.providers)).length > 1;
   return (
-    <div className="px-3 pt-6 pb-4">
+    <div className="pb-4">
+      <MeadowStrip seed={5} className="block h-14 w-full" />
+      <div className="px-3 pt-5">
       <div className="px-2.5">
-        <h2 className="text-[20px] leading-tight font-semibold tracking-[-0.015em] text-zinc-950">
+        <h2 className="text-[24px] leading-[1.15] font-semibold tracking-[-0.02em] text-zinc-950">
           {greeting(now)}
           {name ? ", " + name : ""}
         </h2>
-        <p className="mt-1 text-[13px] text-zinc-500">
+        <p className="mt-1.5 text-[14px] text-zinc-600">
           {decisions
             ? decisions + (decisions === 1 ? " decision" : " decisions") + ", about " + minutes + " min"
             : moving.length
@@ -210,23 +214,24 @@ function Home({ data, items, onOpen }: { data: DashboardData; items: Item[]; onO
       </div>
       <Books data={data} />
       <div className="mt-6">
-        <Section title="Needs you" count={decisions}>
+        <Section title="Needs you" count={decisions} flower={FLOWER_COLORS[2]}>
           {autonomy.data ? <LearnedPolicyRow data={autonomy.data} refresh={() => autonomy.mutate()} /> : null}
           {needs.map((i) => (
             <TaskRow key={i.id} item={i} data={data} dup={dup(i)} onOpen={() => onOpen(i.id)} />
           ))}
         </Section>
-        <Section title="In progress" count={moving.length}>
+        <Section title="In progress" count={moving.length} flower={FLOWER_COLORS[1]}>
           {moving.map((i) => (
             <TaskRow key={i.id} item={i} data={data} dup={dup(i)} onOpen={() => onOpen(i.id)} />
           ))}
         </Section>
         {autonomy.data ? <RunningOnItsOwn data={autonomy.data} /> : null}
-        <Section title="Done" count={done.length} collapsible>
+        <Section title="Done" count={done.length} collapsible flower={UI_FLOWERS.green}>
           {done.map((i) => (
             <TaskRow key={i.id} item={i} data={data} dup={dup(i)} onOpen={() => onOpen(i.id)} />
           ))}
         </Section>
+      </div>
       </div>
     </div>
   );

@@ -61,22 +61,22 @@ function EventsTable({ data }: { data: AuditData }) {
   });
   return (
     <div className="border-t">
-      <div className="flex flex-wrap items-center gap-2 border-b px-6 py-2.5">
-        <div className="flex rounded-lg bg-zinc-100 p-0.5">
+      <div className="flex flex-wrap items-center gap-2 border-b px-6 py-3">
+        <div className="flex gap-1">
           {FILTERS.map((f) => (
             <button
               key={f.key}
               onClick={() => setFilter(f.key)}
               className={cn(
-                "rounded-md px-2.5 py-1 text-[12px] font-medium",
-                filter === f.key ? "bg-white text-zinc-900 shadow-xs" : "text-zinc-500 hover:text-zinc-800",
+                "h-8 rounded-full px-3 text-[12.5px] font-medium ring-1 transition-colors",
+                filter === f.key ? "bg-zinc-900 text-white ring-zinc-900" : "text-zinc-600 ring-zinc-200 hover:bg-zinc-50 hover:text-zinc-900",
               )}
             >
-              {f.label} <span className={cn("ml-0.5 tnum", f.key === "denied" && counts.denied ? "text-destructive" : "text-zinc-400")}>{counts[f.key]}</span>
+              {f.label} <span className={cn("ml-0.5 tnum", f.key === "denied" && counts.denied ? "text-destructive" : filter === f.key ? "text-white/55" : "text-zinc-400")}>{counts[f.key]}</span>
             </button>
           ))}
         </div>
-        <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter by work item, action, policy, approval" className="ml-auto h-8 max-w-[300px] text-[12.5px]" />
+        <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter by work item, action, policy, approval" className="ml-auto h-8 max-w-[300px] rounded-full px-3.5 text-[12.5px]" />
       </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[820px] text-[12px]">
@@ -393,18 +393,30 @@ export function AuditView() {
   return (
     <div className="h-full overflow-y-auto">
       <Tabs defaultValue="events" className="gap-0">
-        <header className="flex h-11 items-center gap-4 border-b px-6">
-          <TabsList className="h-7">
-            <TabsTrigger value="events" className="text-[12px]">Events</TabsTrigger>
-            <TabsTrigger value="policies" className="text-[12px]">Policies</TabsTrigger>
-            <TabsTrigger value="ledger" className="text-[12px]">Ledger</TabsTrigger>
-          </TabsList>
+        <header className="px-6 pt-7 pb-4">
+          <div className="flex items-end gap-4">
+            <div>
+              <h1 className="text-[24px] leading-[1.15] font-semibold tracking-[-0.02em] text-zinc-950">Audit trail</h1>
+              <p className="mt-1.5 text-[14px] text-zinc-600">Every step the team took, every posting, and every call you made.</p>
+            </div>
           {data ? (
-            <span className={cn("ml-auto flex items-center gap-1.5 text-[12px]", data.chain.ok ? "text-brand-ink" : "text-destructive")}>
+            <span className={cn("ml-auto flex items-center gap-1.5 rounded-full px-3 py-1 text-[12.5px] font-medium", data.chain.ok ? "bg-accent text-brand-ink" : "bg-destructive/10 text-destructive")}>
               {data.chain.ok ? <ShieldCheck className="size-3.5" /> : <ShieldX className="size-3.5" />}
               {data.chain.ok ? "Hash chain intact · " + data.chain.count + " events" : "Hash chain broken at event " + data.chain.brokenAtId}
             </span>
           ) : null}
+          </div>
+          <TabsList variant="line" className="mt-5 -ml-1 h-8 gap-1 p-0">
+            {(["events", "policies", "ledger"] as const).map((v) => (
+              <TabsTrigger
+                key={v}
+                value={v}
+                className="h-8 flex-none rounded-lg px-2.5 text-[13px] capitalize after:hidden data-active:bg-zinc-100! data-active:text-zinc-900"
+              >
+                {v}
+              </TabsTrigger>
+            ))}
+          </TabsList>
         </header>
         {!data ? (
           <div className="px-6">

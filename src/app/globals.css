@@ -51,25 +51,26 @@
 
 :root {
   color-scheme: only light;
-  --brand-ink: #536000;
+  /* Meadow palette, taken from the intro card: grass green for status, stem green for text, near-black for actions. */
+  --brand-ink: #3a7f2c;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: #c6d600;
-  --primary-foreground: #20220c;
+  --primary: #5aac45;
+  --primary-foreground: #ffffff;
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
   --muted-foreground: oklch(0.556 0 0);
-  --accent: #f2f5d9;
+  --accent: #ecf6e6;
   --accent-foreground: oklch(0.205 0 0);
   --destructive: #b42318;
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: #c6d600;
+  --ring: #5aac45;
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -78,12 +79,12 @@
   --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: #c6d600;
-  --sidebar-primary-foreground: #20220c;
-  --sidebar-accent: #f2f5d9;
+  --sidebar-primary: #5aac45;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ecf6e6;
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: #c6d600;
+  --sidebar-ring: #5aac45;
 }
 
 .dark {
@@ -145,8 +146,8 @@
   }
   .card-soft {
     background: white;
-    border-radius: 14px;
-    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 16px rgb(0 0 0 / 0.05);
+    border-radius: 16px;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 6px 20px rgb(0 0 0 / 0.05);
     outline: 1px solid rgb(228 228 231 / 0.9);
   }
   .flow-dash {
@@ -166,7 +167,7 @@
 
 @keyframes el-flash {
   from {
-    background-color: rgb(198 214 0 / 0.16);
+    background-color: rgb(90 172 69 / 0.14);
   }
   to {
     background-color: transparent;
