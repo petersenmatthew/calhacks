@@ -46,14 +46,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // First visit: a one-screen intro with a button that starts the sample case.
   const [intro, setIntro] = useState(false);
   useEffect(() => {
-    // Read after mount (storage is browser-only), then open on the next frame.
-    // Coming from the landing page's Start: always show it. Otherwise only the first time.
+    // Read in the browser (storage is browser-only), then open on the next frame. Checked on every
+    // page change, since the shell stays mounted when the landing page's Start moves to the canvas.
+    // Coming from that Start: always show it. Otherwise only the first time.
+    if (pathname === "/welcome") return;
     const fromLanding = new URLSearchParams(window.location.search).get("intro") === "1";
     if (fromLanding) window.history.replaceState(null, "", window.location.pathname);
     if (!fromLanding && hasSeenOnboarding()) return;
     const raf = requestAnimationFrame(() => setIntro(true));
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [pathname]);
 
   // After the intro, give people a moment to take in the canvas before the team starts moving.
   const router = useRouter();
