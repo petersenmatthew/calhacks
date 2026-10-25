@@ -9,7 +9,15 @@ import { money } from "./format";
 
 export type SummaryFigure = { label: string; value: string; tone?: "good" | "muted" };
 export type SummaryStep = { actorId: string; text: string };
-export type TaskSummary = { figures: SummaryFigure[]; steps: SummaryStep[]; took: string | null; agents: number; you: number };
+export type TaskSummary = {
+  figures: SummaryFigure[];
+  steps: SummaryStep[];
+  took: string | null;
+  agents: number;
+  you: number;
+  /** Where the billed money went, in cents. */
+  flow: { billed: number; charged: number; recovered: number; lost: number };
+};
 
 const DONE = new Set(["RESOLVED", "POSTED"]);
 
@@ -64,10 +72,23 @@ export function taskSummary(w: WorkspaceData): TaskSummary {
   const decided = w.approvals.filter((a) => a.status !== "PENDING" && a.decidedBy);
   for (const a of decided) {
     const verb = a.status === "APPROVED" ? "Approved" : a.status === "REJECTED" ? "Rejected" : "Asked for changes to";
-    steps.push({ actorId: a.decidedBy!, text: verb + " " + (a.subjectType === "POLICY" ? "the policy" : "the proposal") + (a.decisionReason ? ": “" + firstSentence(a.decisionReason) + "”" : ".") });
+    const budgetAsk = a.decisionReason && /^Set the .+ budget to /.test(a.decisionReason);
+    steps.push({
+      actorId: a.decidedBy!,
+      text:
+        verb + " " + (a.subjectType === "POLICY" ? "the policy" : "the proposal") +
+        (budgetAsk ? " and asked for a budget change." : a.decisionReason ? ": “" + firstSentence(a.decisionReason) + "”" : "."),
+    });
   }
   if (!decided.length && executed?.authorization?.startsWith("Standing")) {
     steps.push({ actorId: "system.ledger_gateway", text: "Covered by a standing policy, so it booked without asking you." });
+  }
+  // A budget change the controller asked for alongside their approval.
+  for (const a of w.activity) {
+    if (a.toolName !== "set_project_budget" || a.status !== "ok") continue;
+    const r = (a.result ?? {}) as Record<string, unknown>;
+    const name = w.projects[String(r.project_id ?? "")]?.name ?? "the project";
+    steps.push({ actorId: a.actorId, text: "Changed the " + name + " budget from " + String(r.previous_budget ?? "?").replace(/\.00$/, "") + " to " + String(r.monthly_budget ?? "?").replace(/\.00$/, "") + " a month, as you asked." });
   }
   if (d) {
     const replies = w.vendorMessages.filter((m) => m.direction === "inbound" && m.status !== "ignored").length;
@@ -88,5 +109,5 @@ export function taskSummary(w: WorkspaceData): TaskSummary {
   const took = times.length > 1 ? duration(Math.max(...times) - Math.min(...times)) : null;
   const agents = new Set(w.activity.filter((a) => a.actorId.startsWith("agent.")).map((a) => a.actorId)).size;
   const you = w.approvals.filter((a) => a.status !== "PENDING" && a.decidedBy?.startsWith("human.")).length + w.findings.filter((f) => f.kind === "human").length;
-  return { figures, steps, took, agents, you };
+  return { figures, steps, took, agents, you, flow: { billed, charged, recovered: credited, lost: d && d.status === "DENIED" ? d.amountCents : 0 } };
 }

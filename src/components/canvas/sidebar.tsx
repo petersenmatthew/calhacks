@@ -6,7 +6,7 @@ import { ArrowLeft, ArrowUp, ArrowUpRight, Check, ChevronDown, ChevronUp, Loader
 import { agentSteps, boardStage } from "@/lib/agent-steps";
 import { postJson } from "@/lib/api";
 import { askVerb, buildDecision, outcomeOf, shortTitle } from "@/lib/decision";
-import { clockTime, compactMoney, dateOnly, money, periodLabel } from "@/lib/format";
+import { clockTime, compactMoney, money } from "@/lib/format";
 import { buildFeed } from "@/lib/narration";
 import { isDone } from "@/lib/summary";
 import { cn } from "@/lib/utils";
@@ -14,13 +14,50 @@ import type { DashboardData, WorkspaceData } from "@/server/queries";
 import { DecisionThread, type TalkTurn } from "../review/decision-thread";
 import type { DecisionTurn } from "@/server/assistant";
 import { DisputeLetter } from "../comms/dispute-letter";
-import { DoneCard } from "./done-card";
+import { DoneFinale } from "./done-card";
 import { VendorThread } from "../comms/vendor-thread";
 import { AgentAvatar } from "../status";
 import { LearnedPolicyRow, pendingLearnedPolicy, RunningOnItsOwn, useAutonomy } from "../autonomy/sidebar-parts";
 
 type Item = DashboardData["workItems"][number];
 export type ChatMessage = { role: "user" | "assistant"; content: string };
+
+/**
+ * Keeps a scrolling chat pinned to its newest line as content arrives (new
+ * messages, typed-out text, typing dots). Scrolling up to read unpins it;
+ * scrolling back to the bottom pins it again. Jumps to the bottom whenever key changes.
+ */
+function useStickToBottom(ref: React.RefObject<HTMLElement | null>, key: string | null) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || key === null) return;
+    let pinned = true;
+    const follow = () => {
+      if (pinned) el.scrollTop = el.scrollHeight;
+    };
+    const onScroll = () => {
+      pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    };
+    follow();
+    const resize = new ResizeObserver(follow);
+    const watch = () => {
+      resize.disconnect();
+      for (const c of Array.from(el.children)) resize.observe(c);
+    };
+    watch();
+    const mutate = new MutationObserver(() => {
+      watch();
+      follow();
+    });
+    mutate.observe(el, { childList: true, subtree: true, characterData: true });
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      resize.disconnect();
+      mutate.disconnect();
+      el.removeEventListener("scroll", onScroll);
+    };
+  }, [ref, key]);
+}
 
 export type Group = "needs" | "moving" | "done";
 
@@ -100,47 +137,11 @@ function Section({ title, count, children, collapsible }: { title: string; count
 
 /* ------------------------------------------------------------------ home */
 
-function Donut({ pct }: { pct: number }) {
-  const r = 17;
-  const c = 2 * Math.PI * r;
-  return (
-    <svg width={44} height={44} viewBox="0 0 44 44" className="shrink-0 -rotate-90">
-      <circle cx={22} cy={22} r={r} fill="none" stroke="#f4f4f5" strokeWidth={5} />
-      <circle cx={22} cy={22} r={r} fill="none" stroke="var(--primary)" strokeWidth={5} strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - Math.min(1, pct))} className="transition-[stroke-dashoffset] duration-700" />
-      <text x={22} y={22} transform="rotate(90 22 22)" textAnchor="middle" dominantBaseline="central" className="fill-zinc-800" style={{ fontSize: 11, fontWeight: 600 }}>
-        {Math.round(pct * 100)}%
-      </text>
-    </svg>
-  );
-}
-
-/** The month at a glance: how far close has come, who closed it, and where each project's compute spend is heading. */
+/** Where each project's compute spend is heading this month. */
 function Books({ data }: { data: DashboardData }) {
-  const m = data.metrics;
   const b = data.budgets;
-  if (!m.lineCount) return null;
-  const byYou = Math.max(0, m.completedReconciliations - m.autoMatched);
   return (
     <div className="mt-5 space-y-2 px-2.5">
-      <div className="flex items-center gap-3 rounded-xl bg-white p-3 ring-1 ring-zinc-200">
-        <Donut pct={m.completedReconciliations / m.lineCount} />
-        <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-medium text-zinc-800">{periodLabel(data.period, true)} close</div>
-          <div className="text-[12px] text-zinc-500 tnum">
-            {m.completedReconciliations} of {m.lineCount} lines closed · target {dateOnly(m.monthClose.target + "T00:00:00Z")}
-          </div>
-          <div className="mt-1 flex gap-3 text-[11.5px] text-zinc-500 tnum">
-            <span className="flex items-center gap-1">
-              <span className="size-1.5 rounded-full bg-primary" />
-              {m.autoMatched} by agents
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="size-1.5 rounded-full bg-brand-ink" />
-              {byYou} after your review
-            </span>
-          </div>
-        </div>
-      </div>
       {b.projects.length ? (
         <div className="rounded-xl bg-white p-3 ring-1 ring-zinc-200">
           <div className="flex items-baseline justify-between">
@@ -180,7 +181,7 @@ function Books({ data }: { data: DashboardData }) {
   );
 }
 
-function Home({ data, items, onOpen, onStart }: { data: DashboardData; items: Item[]; onOpen: (id: string) => void; onStart: () => void }) {
+function Home({ data, items, onOpen }: { data: DashboardData; items: Item[]; onOpen: (id: string) => void }) {
   const autonomy = useAutonomy();
   const learned = pendingLearnedPolicy(autonomy.data) ? 1 : 0;
   const needs = items.filter((i) => groupOf(i) === "needs");
@@ -206,16 +207,6 @@ function Home({ data, items, onOpen, onStart }: { data: DashboardData; items: It
               ? "Nothing needs you. Agents are on " + moving.length + "."
               : "All clear for " + data.period + "."}
         </p>
-        {needs.length ? (
-          <button
-            type="button"
-            onClick={onStart}
-            className="mt-4 flex h-10 w-full items-center justify-between rounded-xl bg-zinc-900 pr-2 pl-4 text-[13.5px] font-medium text-white transition-colors hover:bg-zinc-800"
-          >
-            Start reviewing
-            <kbd className="grid h-6 place-items-center rounded-md bg-white/15 px-1.5 font-mono text-[11px] text-white/80">Enter</kbd>
-          </button>
-        ) : null}
       </div>
       <Books data={data} />
       <div className="mt-6">
@@ -271,11 +262,6 @@ function Feed({ w }: { w: WorkspaceData }) {
   const lines = buildFeed(w);
   const here = w.agents.filter((a) => a.currentWorkItemId === w.item.id && a.status !== "idle");
   const [openedAt] = useState(() => Date.now());
-  const end = useRef<HTMLDivElement>(null);
-  const count = lines.length + here.length;
-  useEffect(() => {
-    end.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [count]);
   return (
     <div className="space-y-3">
       {lines.map((l, i) => {
@@ -328,7 +314,6 @@ function Feed({ w }: { w: WorkspaceData }) {
           </div>
         );
       })}
-      <div ref={end} />
     </div>
   );
 }
@@ -337,7 +322,7 @@ function Feed({ w }: { w: WorkspaceData }) {
 function HowWeGotHere({ w, extra }: { w: WorkspaceData; extra?: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="mt-6 border-t border-zinc-100 pt-3">
+    <div className="mt-5">
       <div className="flex items-center justify-between text-[12.5px] text-zinc-500">
         <button type="button" onClick={() => setOpen(!open)} className="flex items-center gap-1 hover:text-zinc-900">
           <ChevronDown className={cn("size-3.5 transition-transform", !open && "-rotate-90")} />
@@ -411,11 +396,18 @@ function TaskView({
   if (isDone(w.item.state) && !busy) {
     return (
       <div className="animate-enter space-y-5 px-5 pt-5 pb-6">
-        <DoneCard w={w} justFinished={justFinished} />
+        <div>
+          <div className="text-[12px] text-zinc-500">
+            {(w.providers[w.item.providerId]?.shortName ?? "") + " · " + (w.item.instanceId ?? w.item.reservationId ?? w.item.id)}
+          </div>
+          <h2 className="mt-1.5 text-[17px] leading-snug font-semibold tracking-[-0.01em] text-balance text-zinc-950">
+            {shortTitle({ ...w.item, resource: w.item.instanceId ?? w.item.reservationId }, w.providers)}
+          </h2>
+        </div>
         {w.dispute?.letterBody ? <DisputeLetter dispute={w.dispute} /> : null}
         <VendorThread w={w} />
-        <HowWeGotHere w={w} />
-        <div className="text-[12.5px] text-zinc-500">{record}</div>
+        <DoneFinale w={w} justFinished={justFinished} />
+        <HowWeGotHere w={w} extra={record} />
         {chat.length || chatPending ? <Thread messages={chat} pending={chatPending} onTask={onTask} inset /> : null}
       </div>
     );
@@ -477,10 +469,6 @@ function Thread({
   /** Inside a padded view: no padding of its own. */
   inset?: boolean;
 }) {
-  const end = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    end.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages.length, pending]);
   return (
     <div className={cn("space-y-4", inset ? "border-t border-zinc-100 pt-5" : "px-5 pt-5 pb-4")}>
       {messages.map((m, i) =>
@@ -507,7 +495,6 @@ function Thread({
           ))}
         </div>
       ) : null}
-      <div ref={end} />
     </div>
   );
 }
@@ -605,6 +592,8 @@ function FrameChat({
   onClose: () => void;
   onTask: (id: string) => void;
 }) {
+  const scroller = useRef<HTMLDivElement>(null);
+  useStickToBottom(scroller, f.key);
   return (
     <>
       <div className="flex h-12 shrink-0 items-center gap-1 border-b border-zinc-100 px-3">
@@ -617,7 +606,7 @@ function FrameChat({
           Back to task
         </button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
         <div className="px-5 pt-5">
           <div className="flex items-center gap-3">
             <AgentAvatar actorId={f.actorId} size="lg" />
@@ -730,10 +719,6 @@ export function Sidebar({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  useEffect(() => {
-    scroller.current?.scrollTo({ top: 0 });
-  }, [task]);
-
   const ask = async (text: string) => {
     const next = [...chat, { role: "user" as const, content: text }];
     setChat(next);
@@ -751,6 +736,11 @@ export function Sidebar({
 
   const ready = w && w.item.id === task ? w : undefined;
   const mode = frameChat ? "frame" : agentPanel ? "agent" : chatOpen ? "chat" : task ? "task" : "home";
+  // Chats stay pinned to the newest message; the home list starts at the top.
+  useStickToBottom(scroller, mode === "task" || mode === "chat" ? mode + ":" + (task ?? "") : null);
+  useEffect(() => {
+    if (mode === "home") scroller.current?.scrollTo({ top: 0 });
+  }, [mode]);
   const pendingDecision = ready ? buildDecision(ready) : null;
   const talkKey = ready && pendingDecision ? ready.item.id + ":" + (pendingDecision.approvalId ?? "q") : null;
   const talkTo = pendingDecision ? (ready?.actors[pendingDecision.askedBy]?.name ?? "the agent") : null;
@@ -864,7 +854,7 @@ export function Sidebar({
 
           <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
             {mode === "home" ? (
-              <Home data={data} items={items} onOpen={onTask} onStart={() => needs[0] && onTask(needs[0].id)} />
+              <Home data={data} items={items} onOpen={onTask} />
             ) : mode === "chat" ? (
               <Thread messages={chat} pending={pending} onTask={(id) => { setChatOpen(false); onTask(id); }} />
             ) : ready ? (

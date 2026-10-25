@@ -261,6 +261,13 @@ function stats(id: OrbitNodeId, o: DashboardData): Stat[] {
   ];
 }
 
+/** The seat's status in words: only the parts that apply, e.g. "working · 1 queued" or "2 done". */
+function statusLine(id: OrbitNodeId, o: DashboardData) {
+  const [wait, work, done] = stats(id, o).map((s) => s.n);
+  const parts = [work ? "working" : null, wait ? wait + " queued" : null, done ? done + " done" : null].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "idle";
+}
+
 /* ------------------------------------------------------------------ pieces */
 
 function useViewport() {
@@ -484,10 +491,11 @@ export function Orbit({
     const g = groups.find((x) => x.node.id === focusNode)!;
     const p = at(g.node.angle);
     const shownPos = g.pos.slice(0, g.shown.length);
-    const xs = [p.x - NODE_W / 2, p.x + NODE_W / 2, ...shownPos.flatMap((s) => [s.x, s.x + FW])];
-    const ys = [p.y - NODE_H / 2 - 36, p.y + NODE_H / 2, ...shownPos.flatMap((s) => [s.y, s.y + FH])];
-    const [x0, x1, y0, y1] = [Math.min(...xs) - 48, Math.max(...xs) + 48, Math.min(...ys) - 48, Math.max(...ys) + 48];
-    cam = { x: (x0 + x1) / 2, y: (y0 + y1) / 2, k: Math.min(Math.min(size.w / (x1 - x0), size.h / (y1 - y0)) * 0.9, fit * 3.2) };
+    // Fit the frames and the employee's avatar; the name label may run off the edge so the frames read large.
+    const xs = [p.x - 36, p.x + 36, ...shownPos.flatMap((s) => [s.x, s.x + FW])];
+    const ys = [p.y - NODE_H / 2, p.y + NODE_H / 2, ...shownPos.flatMap((s) => [s.y, s.y + FH])];
+    const [x0, x1, y0, y1] = [Math.min(...xs) - 24, Math.max(...xs) + 24, Math.min(...ys) - 56, Math.max(...ys) + 32];
+    cam = { x: (x0 + x1) / 2, y: (y0 + y1) / 2, k: Math.min(Math.min(size.w / (x1 - x0), size.h / (y1 - y0)) * 0.96, fit * 4.5) };
   }
   const transform = "translate(" + (size.w / 2 - cam.x * cam.k) + "px, " + (size.h / 2 - cam.y * cam.k) + "px) scale(" + cam.k + ")";
 
@@ -717,7 +725,7 @@ export function Orbit({
                       "absolute top-1/2 left-1/2 flex h-10 -translate-x-1/2 -translate-y-1/2 cursor-zoom-in items-center gap-2 rounded-full border border-zinc-200 bg-white pr-4 pl-3 text-[14px] whitespace-nowrap text-zinc-600 transition-colors hover:border-zinc-300 hover:text-zinc-900",
                       lit(g.node.id) && "border-zinc-300 text-zinc-900",
                     )}
-                    title={stats(g.node.id, overview).map((s) => s.n + " " + s.tone).join(" · ")}
+                    title={statusLine(g.node.id, overview)}
                   >
                     <span
                       className={cn(
@@ -767,9 +775,7 @@ export function Orbit({
                       <span className={cn("text-[15px] text-zinc-500 transition-colors group-hover:text-zinc-900", (lit(g.node.id) || live[g.node.id]) && "text-zinc-900")}>
                         {g.node.dept}
                       </span>
-                      <span className="font-mono text-[10px] text-zinc-400 tnum">
-                        {stats(g.node.id, overview).map((s) => s.n).join(" · ")}
-                      </span>
+                      <span className="text-[11px] text-zinc-400 tnum">{statusLine(g.node.id, overview)}</span>
                     </span>
                   </button>
                 )}

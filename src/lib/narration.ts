@@ -120,6 +120,12 @@ function say(row: ActivityRow, w: WorkspaceData): string {
       );
     case "record_budget_note":
       return cap(s(a, "summary") || row.summary || row.title);
+    case "set_project_budget": {
+      const name = w.projects[s(r, "project_id")]?.name ?? "the project";
+      const whole = (v: string) => v.replace(/\.00$/, "");
+      const down = dollars(s(r, "monthly_budget")) < dollars(s(r, "previous_budget"));
+      return "Done: the " + name + " budget is now " + whole(s(r, "monthly_budget")) + " a month, " + (down ? "down" : "up") + " from " + whole(s(r, "previous_budget")) + ", as you asked.";
+    }
     default:
       return row.summary ? cap(row.summary) : row.title;
   }
