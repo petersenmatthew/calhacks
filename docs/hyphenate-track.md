@@ -67,7 +67,7 @@ Build pieces: stateful sync of the records into one shape (cursor per source, st
 
 ## How MOA maps to it
 
-Company: Atlas Research (fictional AI lab). Roles: GPU invoice reconciliation (Payables) and shared cost allocation, by a Compute Agent and a Finance Agent.
+Company: Atlas Research (fictional AI lab). Roles: GPU invoice reconciliation (Payables) and shared cost allocation, by six specialized agents: GPU Auditor, Capacity Planner, Cost Allocator, Vendor Liaison, Budget Analyst, and Controls Lead.
 
 Already covered:
 
@@ -80,8 +80,8 @@ Already covered:
 Added for autonomy (see README, "What runs on its own"):
 
 - **Continuous sync:** a scheduler inside the worker pulls provider billing feeds every few seconds with a cursor per source (`sync_cursors`), so work starts without clicks. An HTTP feed adapter (`BILLING_FEED_URL`) is the hook for a real provider.
-- **Time:** a business clock drives follow-ups. Approvals are reminded after 1 day and escalated to the CFO after 3; unanswered vendor disputes are chased by the Finance Agent at 14 days and escalated at 30.
-- **Self-learning at onboarding:** the Finance Agent mines six months of AP history and proposes a materiality policy ($50) that the history supports; once approved, small variances post without a dispute.
+- **Time:** a business clock drives follow-ups. Approvals are reminded after 1 day and escalated to the CFO after 3; unanswered vendor disputes are chased by the Vendor Liaison at 14 days and escalated at 30.
+- **Self-learning at onboarding:** the Controls Lead mines six months of AP history and proposes a materiality policy ($50) that the history supports; once approved, small variances post without a dispute.
 - **Answer key and score:** 14 planted cases with hand-computed outcomes (`npm run eval`).
 
 Remaining gaps:

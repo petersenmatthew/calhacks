@@ -106,7 +106,7 @@ export function ApprovalCard({ approval }: { approval: Approval }) {
         reason: reason.trim() || null,
         directive: directive === "none" ? null : directive,
       });
-      toast.success(decision === "APPROVED" ? "Approved. The ledger gateway executes it." : "Sent back to the Cost Accountant with your reason.");
+      toast.success(decision === "APPROVED" ? "Approved. The ledger gateway executes it." : "Sent back to the Cost Allocator with your reason.");
       refresh();
     } catch (error) {
       toast.error((error as Error).message);

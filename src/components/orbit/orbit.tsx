@@ -91,13 +91,13 @@ type Layout = "up" | "down" | "left" | "right";
  * (intake rules, the ledger gateway, policy memory) shows up inside their work, and
  * the ring itself is the orchestrator passing work between them.
  */
-export const EMPLOYEES: { id: OrbitNodeId; actorId: string; label: string; job: string; dept: string }[] = [
-  { id: "compute", actorId: "agent.compute", label: "Compute Investigator", job: "What actually ran", dept: "FinOps" },
-  { id: "finance", actorId: "agent.finance", label: "Cost Accountant", job: "Charges teams, books", dept: "Accounting" },
-  { id: "vendor", actorId: "agent.vendor", label: "Vendor Liaison", job: "Disputes and credits", dept: "Payables" },
-  { id: "budget", actorId: "agent.budget", label: "Budget Analyst", job: "Team burn vs budget", dept: "FP&A" },
-  { id: "policy", actorId: "agent.policy", label: "Policy Analyst", job: "Learns rules from you", dept: "Controls" },
-  { id: "capacity", actorId: "agent.capacity", label: "Capacity Planner", job: "Reserved GPU use", dept: "Procurement" },
+export const EMPLOYEES: { id: OrbitNodeId; actorId: string; label: string; job: string }[] = [
+  { id: "compute", actorId: "agent.compute", label: "GPU Auditor", job: "What actually ran" },
+  { id: "finance", actorId: "agent.finance", label: "Cost Allocator", job: "Charges teams, books" },
+  { id: "vendor", actorId: "agent.vendor", label: "Vendor Liaison", job: "Disputes and credits" },
+  { id: "budget", actorId: "agent.budget", label: "Budget Analyst", job: "Team burn vs budget" },
+  { id: "policy", actorId: "agent.policy", label: "Controls Lead", job: "Learns rules from you" },
+  { id: "capacity", actorId: "agent.capacity", label: "Capacity Planner", job: "Reserved GPU use" },
 ];
 
 /*
@@ -691,7 +691,7 @@ export function Orbit({
                     </div>
                     <button
                       type="button"
-                      aria-label={g.node.dept}
+                      aria-label={g.node.label}
                       onClick={(e) => {
                         e.stopPropagation();
                     setFocus({ kind: "node", id: g.node.id });
@@ -706,13 +706,13 @@ export function Orbit({
                         live[g.node.id] && "border-zinc-400 text-zinc-900",
                       )}
                     >
-                      {g.node.dept}
+                      {g.node.label}
                     </button>
                   </>
                 ) : seatStyle === "dot" ? (
                   <button
                     type="button"
-                    aria-label={g.node.dept}
+                    aria-label={g.node.label}
                   onClick={(e) => {
                     e.stopPropagation();
                     setFocus({ kind: "node", id: g.node.id });
@@ -733,12 +733,12 @@ export function Orbit({
                         live[g.node.id] ? "animate-pulse bg-primary ring-4 ring-primary/25" : stats(g.node.id, overview)[0].n ? "bg-amber-400" : "bg-zinc-300",
                       )}
                     />
-                    {g.node.dept}
+                    {g.node.label}
                   </button>
                 ) : (
                   <button
                     type="button"
-                    aria-label={g.node.dept}
+                    aria-label={g.node.label}
                   onClick={(e) => {
                     e.stopPropagation();
                     setFocus({ kind: "node", id: g.node.id });
@@ -773,7 +773,7 @@ export function Orbit({
                       )}
                     >
                       <span className={cn("text-[15px] text-zinc-500 transition-colors group-hover:text-zinc-900", (lit(g.node.id) || live[g.node.id]) && "text-zinc-900")}>
-                        {g.node.dept}
+                        {g.node.label}
                       </span>
                       <span className="text-[11px] text-zinc-400 tnum">{statusLine(g.node.id, overview)}</span>
                     </span>

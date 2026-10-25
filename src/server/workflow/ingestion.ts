@@ -305,7 +305,7 @@ function openWorkItem(
     type: "WORK_ITEM",
     title: "Opened " + id + ": " + title,
     summary: checks.flags.map((f) => f.message).join(" "),
-    changes: ["Work item " + id + " created (NEW)", "Assigned to " + (type === "SHARED_ALLOCATION" ? "Capacity Planner" : "Compute Investigator")],
+    changes: ["Work item " + id + " created (NEW)", "Assigned to " + (type === "SHARED_ALLOCATION" ? "Capacity Planner" : "GPU Auditor")],
     result: { flags: checks.flags },
   });
   enqueueJob(ctx, {

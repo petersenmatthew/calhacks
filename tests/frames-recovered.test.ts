@@ -20,7 +20,7 @@ describe("blocked tool calls on the canvas", () => {
       id: ok.id - 0.5,
       toolName: null,
       status: "error",
-      title: "Cost Accountant failed: tool:propose_adjustment",
+      title: "Cost Allocator failed: tool:propose_adjustment",
       summary: "Unknown evidence ids for " + id + ": F-5005 [EVIDENCE_REQUIRED]",
     };
 

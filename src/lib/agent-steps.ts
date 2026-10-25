@@ -45,12 +45,12 @@ export const AGENT_STEPS: Record<string, StepDef[]> = {
 };
 
 export const AGENT_SHORT: Record<string, string> = {
-  "agent.compute": "Investigator",
-  "agent.finance": "Accountant",
+  "agent.compute": "Auditor",
+  "agent.finance": "Allocator",
   "agent.capacity": "Capacity",
   "agent.vendor": "Vendor",
   "agent.budget": "Budget",
-  "agent.policy": "Policy",
+  "agent.policy": "Controls",
 };
 
 /** Every employee, in the order they sit on the canvas ring. */

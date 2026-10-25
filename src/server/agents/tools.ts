@@ -322,7 +322,7 @@ const getWorkItemTool = defineTool({
 });
 
 /* ------------------------------------------------------------------ */
-/* Compute Investigator                                                       */
+/* GPU Auditor                                                       */
 /* ------------------------------------------------------------------ */
 
 const getInstanceLifecycle = defineTool({
@@ -669,19 +669,19 @@ const handoffToFinance = defineTool({
   permission: "handoff:finance",
   category: "write",
   terminal: true,
-  description: "Hand the work item to the Cost Accountant after your findings are recorded. Ends your run.",
+  description: "Hand the work item to the Cost Allocator after your findings are recorded. Ends your run.",
   schema: z.object({ work_item_id: workItemId, note: z.string() }),
   handler: ({ ctx, run, item }, args) => {
     if (!latestComputeFinding(ctx, item)) fail("Submit compute findings before handing off.", "WORKFLOW");
     assignAgent(ctx, item.id, ACTOR.finance);
     enqueueJob(ctx, { workItemId: item.id, kind: "AGENT_RUN", agentId: ACTOR.finance, payload: { trigger: "handoff", note: args.note } });
     return {
-      result: { handed_off_to: "Cost Accountant" },
-      title: (getActor(ctx, run.agentId)?.name ?? "Agent") + " handed off to Cost Accountant",
+      result: { handed_off_to: "Cost Allocator" },
+      title: (getActor(ctx, run.agentId)?.name ?? "Agent") + " handed off to Cost Allocator",
       summary: args.note.slice(0, 500),
       activityType: "HANDOFF",
-      changes: ["Assigned to Cost Accountant"],
-      terminal: { summary: "handed off to Cost Accountant" },
+      changes: ["Assigned to Cost Allocator"],
+      terminal: { summary: "handed off to Cost Allocator" },
     };
   },
 });
@@ -722,7 +722,7 @@ const requestHumanInfo = defineTool({
 });
 
 /* ------------------------------------------------------------------ */
-/* Cost Accountant                                                       */
+/* Cost Allocator                                                       */
 /* ------------------------------------------------------------------ */
 
 const getProjectBudget = defineTool({
@@ -1023,7 +1023,7 @@ const proposeAdjustment = defineTool({
         standing_authorization: standing,
         next_step: standing.authorized ? "submit_for_posting" : "request_human_approval",
       },
-      title: "Cost Accountant proposed allocation " + id + " v" + version,
+      title: "Cost Allocator proposed allocation " + id + " v" + version,
       summary:
         describeLines(ctx, snap.lines) + ". " +
         (standing.authorized ? "Covered by standing policy " + standing.policyId + "." : "Needs controller approval: " + standing.reason),
@@ -1138,7 +1138,7 @@ const proposeVendorDispute = defineTool({
         liability_note: "Accounts payable stays at " + formatCents(checks.invoicedCents) + " until the vendor issues a credit.",
         next_step: "request_human_approval",
       },
-      title: "Cost Accountant proposed a vendor dispute of " + formatCents(disputed),
+      title: "Cost Allocator proposed a vendor dispute of " + formatCents(disputed),
       summary:
         "Dispute " + formatCents(disputed) + " with " + (provider?.name ?? "vendor") + " and allocate the undisputed " + formatCents(undisputed) +
         " to " + projectName(ctx, owner) + ". The liability stays until a credit is issued.",
@@ -1231,7 +1231,7 @@ const proposePolicy = defineTool({
     });
     return {
       result: { policy_id: id, version, approval_id: approvalId },
-      title: "Cost Accountant proposed reusable policy " + POLICY_KEYS.sharedReservation + " v" + version,
+      title: "Cost Allocator proposed reusable policy " + POLICY_KEYS.sharedReservation + " v" + version,
       summary: statement,
       activityType: "POLICY",
       changes: ["Policy " + id + " proposed", "Approval " + approvalId + " pending"],
@@ -1262,7 +1262,7 @@ const requestHumanApproval = defineTool({
     transitionWorkItem(ctx, item.id, "NEEDS_APPROVAL", run.agentId, "Awaiting controller decision on " + proposal.id + " v" + proposal.version);
     return {
       result: { approval_id: approvalId, status: "PENDING" },
-      title: "Cost Accountant submitted " + proposal.id + " v" + proposal.version + " for controller approval",
+      title: "Cost Allocator submitted " + proposal.id + " v" + proposal.version + " for controller approval",
       summary,
       activityType: "TOOL_CALL",
       changes: ["Proposal " + proposal.id + " PENDING_APPROVAL"],
@@ -1321,7 +1321,7 @@ const submitForPosting = defineTool({
     transitionWorkItem(ctx, item.id, "RESOLVED", ACTOR.orchestrator, "Reconciliation complete under " + standing.policyId);
     return {
       result: { posted: true, journal_entry_id: entryId, authorization },
-      title: "Cost Accountant submitted " + proposal.id + " for posting under " + standing.policyId,
+      title: "Cost Allocator submitted " + proposal.id + " for posting under " + standing.policyId,
       summary: "The ledger gateway verified " + standing.policyId + " and posted " + entryId + ".",
       activityType: "TOOL_CALL",
       changes: ["Journal entry " + entryId + " posted", "State: RESOLVED"],
@@ -1336,7 +1336,7 @@ const requestMoreInfo = defineTool({
   permission: "handoff:compute",
   category: "write",
   terminal: true,
-  description: "Send the work item back to the investigator who gathered the evidence (Compute Investigator, or Capacity Planner for reservations) with a specific question. Ends your run.",
+  description: "Send the work item back to the investigator who gathered the evidence (GPU Auditor, or Capacity Planner for reservations) with a specific question. Ends your run.",
   schema: z.object({ work_item_id: workItemId, question: z.string() }),
   handler: ({ ctx, run, item }, args) => {
     const target = item.type === "SHARED_ALLOCATION" ? ACTOR.capacity : ACTOR.compute;
@@ -1347,7 +1347,7 @@ const requestMoreInfo = defineTool({
     enqueueJob(ctx, { workItemId: item.id, kind: "AGENT_RUN", agentId: target, payload: { trigger: "finance_question", question: args.question } });
     return {
       result: { handed_off_to: name },
-      title: "Cost Accountant asked the " + name + " for more evidence",
+      title: "Cost Allocator asked the " + name + " for more evidence",
       summary: args.question.slice(0, 500),
       activityType: "HANDOFF",
       changes: ["Assigned to " + name],
@@ -1366,7 +1366,7 @@ const getDisputePackage = defineTool({
   permission: "dispute:read",
   category: "read",
   description:
-    "Read the controller-approved dispute for your work item: amounts, the Cost Accountant's reasoning, cited contract clauses, the provider, and any vendor reply so far.",
+    "Read the controller-approved dispute for your work item: amounts, the Cost Allocator's reasoning, cited contract clauses, the provider, and any vendor reply so far.",
   schema: z.object({ work_item_id: workItemId }),
   handler: ({ ctx, item }) => {
     const found = approvedDispute(ctx, item);
@@ -1999,7 +1999,7 @@ const noteVendorUpdateTool = defineTool({
 });
 
 /* ------------------------------------------------------------------ */
-/* Policy Analyst: onboarding (learn from AP history)                  */
+/* Controls Lead: onboarding (learn from AP history)                  */
 /* ------------------------------------------------------------------ */
 
 const BANDS: { label: string; min: number; max: number }[] = [
@@ -2179,7 +2179,7 @@ const proposeMaterialityPolicy = defineTool({
         approval_id: approvalId,
         history_check: { paid_lines_covered: paidCovered, paid_lines_above_threshold: paidAbove, credited_disputes_below_threshold: 0 },
       },
-      title: "Policy Analyst proposed " + MATERIALITY_POLICY_KEY + " v" + version + " from AP history",
+      title: "Controls Lead proposed " + MATERIALITY_POLICY_KEY + " v" + version + " from AP history",
       summary: statement,
       activityType: "POLICY",
       changes: ["Policy " + id + " proposed", "Approval " + approvalId + " pending"],
@@ -2199,7 +2199,7 @@ const finishOnboarding = defineTool({
   schema: z.object({ summary: z.string() }),
   handler: (_tc, args) => ({
     result: { done: true },
-    title: "Policy Analyst finished onboarding",
+    title: "Controls Lead finished onboarding",
     summary: args.summary.slice(0, 600),
     terminal: { summary: "finished onboarding" },
   }),

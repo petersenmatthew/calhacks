@@ -6,12 +6,12 @@ Autonomous finance for AI research labs. Six AI agents check every GPU invoice l
 
 | Agent | Job |
 | --- | --- |
-| Compute Investigator | Checks a charge against shutdown records, the provider's meter, and job logs |
-| Cost Accountant | Reads the contract, decides what is owed, drafts disputes and team allocations |
+| GPU Auditor | Checks a charge against shutdown records, the provider's meter, and job logs |
+| Cost Allocator | Reads the contract, decides what is owed, drafts disputes and team allocations |
 | Vendor Liaison | Emails the dispute with evidence, reads the reply, follows up, books the credit |
 | Capacity Planner | Works out who used a shared GPU reservation and how much sat idle |
 | Budget Analyst | Checks each research team's burn against its budget after anything posts |
-| Policy Analyst | Turns the controller's past decisions into reusable policies |
+| Controls Lead | Turns the controller's past decisions into reusable policies |
 
 **Agents decide, code guarantees.** Every agent action is a typed tool call through one gateway that enforces that agent's permissions, does all money math in code, and checks that cited contract clauses exist. Agents never approve or pay; disputes need the controller, and money stays owed until a credit memo arrives. Every step goes to an append-only audit log.
 
@@ -109,13 +109,13 @@ The app opens on **Canvas**: the six agents on a ring around you, each spawning 
 **The main case: GPU overbilling** (about two minutes)
 
 1. Click **Simulate billing event** and send **GPU overbilling**. Lambda bills 36 h at $100/h for an instance that ran 24 h; the checks open a case.
-2. Watch the Compute Investigator pull the shutdown records, Lambda's meter, the job log and the contract. The job ended at 22 h, but idle time on a running instance is billable, so only the 12 h after shutdown are disputed. The Cost Accountant picks the contract clauses and proposes: pay $2,400, dispute $1,200.
+2. Watch the GPU Auditor pull the shutdown records, Lambda's meter, the job log and the contract. The job ended at 22 h, but idle time on a running instance is billable, so only the 12 h after shutdown are disputed. The Cost Allocator picks the contract clauses and proposes: pay $2,400, dispute $1,200.
 3. **Approve** in the sidebar. The Vendor Liaison emails the dispute with an evidence file; only the supported $2,400 posts, and $3,600 stays owed.
 4. Reply as Lambda: paste *"We've issued credit memo CM-1042 for $1,200.00"* on the task (or reply to the real email if one is set up). The Vendor Liaison books the credit, closes the case, and a summary card shows what was recovered.
 
 **More to try**
 
-- **Shared cluster allocation** ($12,400, two teams): the gateway refuses to post the written policy's split because it conflicts with the reservation terms. Reject it with *"Reserved capacity must be charged to the team that owns the reservation"*; the Policy Analyst proposes policy v2 and the Cost Accountant reworks the split. Approve both, then send **Next month: similar reservation** and it posts on its own under the learned policy.
+- **Shared cluster allocation** ($12,400, two teams): the gateway refuses to post the written policy's split because it conflicts with the reservation terms. Reject it with *"Reserved capacity must be charged to the team that owns the reservation"*; the Controls Lead proposes policy v2 and the Cost Allocator reworks the split. Approve both, then send **Next month: similar reservation** and it posts on its own under the learned policy.
 - **Fast-forward time** with the clock in the top bar. New Lambda and Nebius lines arrive from the billing feeds and get worked; a $12 variance is accepted under the learned materiality policy instead of disputed (approve that policy first: it is waiting in the sidebar from onboarding). At +3 days a $600 dispute arrives; approve it, let the vendor stay silent, and it is chased at 14 days and escalated at 30. An approval left waiting is reminded after a day and escalated to the CFO after three.
 - **Custom invoice line** makes a discrepancy that isn't scripted. **Resend last billing event** shows a repeated event is ignored. **Reset demo** starts over.
 
@@ -127,11 +127,11 @@ flowchart LR
   Ingest -->|clean| Auto[Auto-match under approved policy]
   Ingest -->|exception| WI[(Work item)]
   WI --> Queue[(Durable job queue)]
-  Queue --> Compute[Compute Investigator or Capacity Planner]
-  Compute -->|handoff| Finance[Cost Accountant]
+  Queue --> Compute[GPU Auditor or Capacity Planner]
+  Compute -->|handoff| Finance[Cost Allocator]
   Compute & Finance & Vendor & Policy & Budget --> Gateway[Tool gateway: RBAC, scope, validation, evidence, audit]
   Finance -->|request approval| Human[Controller decision]
-  Human -->|rejected| Policy[Policy Analyst]
+  Human -->|rejected| Policy[Controls Lead]
   Policy -->|handoff| Finance
   Human -->|approved dispute| Vendor[Vendor Liaison]
   Vendor -->|submit, close| Ledger
@@ -143,7 +143,7 @@ flowchart LR
 ```
 
 - **Work items** move through `NEW`, `INVESTIGATING`, `NEEDS_INFO`, `PROPOSED`, `NEEDS_APPROVAL`, `APPROVED`, `POSTED`, `DISPUTED`, `RESOLVED`. Invalid transitions are rejected and audited.
-- **Collaboration** happens through the shared work item. The Compute Investigator records structured findings and hands off; the Cost Accountant reads them, proposes, and can send questions back.
+- **Collaboration** happens through the shared work item. The GPU Auditor records structured findings and hands off; the Cost Allocator reads them, proposes, and can send questions back.
 - **Durability.** Jobs live in SQLite. Interrupted jobs are re-queued on restart, and approvals pause a workflow until a human decides.
 - **Live updates.** Activity rows are streamed over server-sent events; a reconnect replays missed rows.
 
@@ -153,13 +153,13 @@ flowchart LR
 - **Feed sync.** Each provider feed is read from a cursor stored in `sync_cursors`, so a re-sync never re-reads a line; ingestion is also idempotent on event and line ids. A line that fails is recorded and set aside so the feed keeps flowing. The demo feeds publish over business time (`sim/feed-schedule.ts`); `BILLING_FEED_URL` points the same code at a real HTTP feed.
 - **Business clock.** Finance runs over weeks. Reminders and chases measure age on a business clock that equals wall-clock time in production; the demo can move it forward, and every move is audited.
 - **Follow-ups** (`workflow/follow-ups.ts`). Approval waiting 1 day: remind the controller. 3 days: escalate to the CFO (backup approver). Vendor dispute unanswered 14 days: the Vendor Liaison runs `get_dispute_status` and `send_vendor_follow_up`. 30 days: it runs `escalate_dispute` with a recommendation. Each action is keyed so it happens once, and every one is in the audit trail.
-- **Onboarding** (`workflow/onboarding.ts`). Before the first close the Policy Analyst runs `query_ap_history` over the ERP's AP export and `propose_materiality_policy`. The application rejects a threshold that would have accepted any variance the vendor later credited. Once the controller approves, the ledger gateway lets variances at or below the threshold post without a dispute.
+- **Onboarding** (`workflow/onboarding.ts`). Before the first close the Controls Lead runs `query_ap_history` over the ERP's AP export and `propose_materiality_policy`. The application rejects a threshold that would have accepted any variance the vendor later credited. Once the controller approves, the ledger gateway lets variances at or below the threshold post without a dispute.
 
 ## Email and Slack
 
 Everything the system tells a person or a vendor goes through an outbox table, written in the same transaction as the action that caused it and delivered by the scheduler. A message is never sent for an action that rolled back, and a failed send is retried. With no mail server or Slack configured, messages are kept in the outbox and marked "recorded" (letters still show on the dispute).
 
-**Vendor disputes.** When the controller approves a dispute, the Vendor Liaison writes the cover letter and the application attaches the evidence: the invoice line, the instance's PROVISIONED, STOP_REQUESTED and TERMINATED times with the provider's own API acknowledgment, the provider meter, the contract calculation, and the text of each cited clause with the reason it applies. The Cost Accountant chooses the clauses by reading the contract text, each with a reason; the gateway rejects any section that is not in that provider's contract and adds the dispute-window clause if it was left out. The letter, evidence, recipient, and delivery status are stored on the dispute record and shown on the task. The email carries a CSV of the same facts, and the subject carries the vendor case reference. Vendor follow-ups at 14 days go to the same address as replies.
+**Vendor disputes.** When the controller approves a dispute, the Vendor Liaison writes the cover letter and the application attaches the evidence: the invoice line, the instance's PROVISIONED, STOP_REQUESTED and TERMINATED times with the provider's own API acknowledgment, the provider meter, the contract calculation, and the text of each cited clause with the reason it applies. The Cost Allocator chooses the clauses by reading the contract text, each with a reason; the gateway rejects any section that is not in that provider's contract and adds the dispute-window clause if it was left out. The letter, evidence, recipient, and delivery status are stored on the dispute record and shown on the task. The email carries a CSV of the same facts, and the subject carries the vendor case reference. Vendor follow-ups at 14 days go to the same address as replies.
 
 **When the vendor writes back.** The scheduler reads the AP mailbox over IMAP every 30 seconds (Gmail: the same app password as SMTP). A reply is matched to its dispute by email thread or by the case reference in the subject, stored once by Message-ID with the quoted original stripped, posted to #vendor-disputes, and handed to the Vendor Liaison, who reads the whole thread and does one of five things:
 
@@ -194,12 +194,12 @@ Out-of-office and other automatic replies are stored on the thread but not acted
 
 | Agent | Tools |
 | --- | --- |
-| Compute Investigator | `get_work_item`, `get_instance_lifecycle`, `get_gpu_job_logs`, `get_experiment`, `get_provider_usage`, `get_billing_terms`, `submit_compute_findings`, `handoff_to_finance`, `request_human_info` |
+| GPU Auditor | `get_work_item`, `get_instance_lifecycle`, `get_gpu_job_logs`, `get_experiment`, `get_provider_usage`, `get_billing_terms`, `submit_compute_findings`, `handoff_to_finance`, `request_human_info` |
 | Capacity Planner | `get_work_item`, `find_related_experiments`, `get_experiment`, `get_billing_terms`, `submit_compute_findings`, `handoff_to_finance`, `request_human_info` |
-| Cost Accountant | `get_work_item`, `get_project_budget`, `get_billing_terms`, `get_allocation_policy`, `search_precedents`, `calculate_cost_allocation`, `propose_adjustment`, `propose_vendor_dispute`, `request_human_approval`, `submit_for_posting`, `request_more_info` (reads the learned materiality policy through `get_allocation_policy`) |
+| Cost Allocator | `get_work_item`, `get_project_budget`, `get_billing_terms`, `get_allocation_policy`, `search_precedents`, `calculate_cost_allocation`, `propose_adjustment`, `propose_vendor_dispute`, `request_human_approval`, `submit_for_posting`, `request_more_info` (reads the learned materiality policy through `get_allocation_policy`) |
 | Vendor Liaison | `get_work_item`, `get_dispute_package`, `get_billing_terms`, `send_vendor_dispute`, `close_dispute`, and for follow-ups `get_dispute_status`, `send_vendor_follow_up`, `escalate_dispute` |
 | Budget Analyst | `get_work_item`, `get_posted_charges`, `get_project_budget`, `forecast_project_burn`, `record_budget_note` |
-| Policy Analyst | `get_work_item`, `get_allocation_policy`, `search_precedents`, `propose_policy`, `handoff_to_finance`, and at onboarding `query_ap_history`, `propose_materiality_policy`, `finish_onboarding` |
+| Controls Lead | `get_work_item`, `get_allocation_policy`, `search_precedents`, `propose_policy`, `handoff_to_finance`, and at onboarding `query_ap_history`, `propose_materiality_policy`, `finish_onboarding` |
 
 All arithmetic is application code: billable hours, expected charges, allocations (largest-remainder rounding, always summing exactly), and dispute amounts. Agents choose actions and cite evidence; they cannot type amounts.
 
@@ -228,12 +228,12 @@ npm test
 ```
 
 - **Autonomy:** feed sync on a cursor with no duplicates, onboarding proposes the $50 threshold the history supports, the learned policy changes the outcome of a $12 variance, approval reminders and escalations fire once, waiting time is measured from the request, and an unanswered dispute is chased at 14 days and escalated at 30.
-- **Contract clauses:** the Cost Accountant's clauses are accepted from a contract worded differently (where title matching finds nothing), made-up sections are rejected, and the dispute-window clause is added.
+- **Contract clauses:** the Cost Allocator's clauses are accepted from a contract worded differently (where title matching finds nothing), made-up sections are rejected, and the dispute-window clause is added.
 - **Email and Slack:** a dispute carries the lifecycle evidence and the cited clauses, the letter is stored on the dispute and emailed with a CSV attachment, the controller is pinged in Slack, and delivery through Resend and a Slack bot token is exercised with a stubbed network.
 - **Arithmetic:** exact allocation sums and contract billable hours.
 - **Correct billing:** an instance whose job ended early is explained with no dispute.
 - **Scenario 1:** the Vendor Liaison sends the $1,200 dispute, and the liability stays unchanged until the Liaison books the vendor's credit.
-- **Scenarios 2 and 3:** rejection, a policy proposed by the Policy Analyst, rework, policy approval, a restart from the same database file, then automatic reuse next month with exact amounts.
+- **Scenarios 2 and 3:** rejection, a policy proposed by the Controls Lead, rework, policy approval, a restart from the same database file, then automatic reuse next month with exact amounts.
 - **Denials:** agents approving or posting, and gateway posting without approval, are denied and audited.
 - **Ledger integrity:** unbalanced entries are rejected, duplicate ingestion is ignored, and the audit log is append-only with its hash chain intact.
 - **LLM wiring:** the real Agents SDK run loop is driven by the SDK's `ScriptedModel`, including recovery from a guardrail rejection.

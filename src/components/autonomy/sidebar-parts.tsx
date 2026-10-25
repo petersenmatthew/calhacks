@@ -24,7 +24,7 @@ export function pendingLearnedPolicy(data: AutonomyData | undefined) {
   return policy && approval ? { policy, approval } : null;
 }
 
-/** The policy the Policy Analyst learned from AP history, decided right in the "Needs you" list. */
+/** The policy the Controls Lead learned from AP history, decided right in the "Needs you" list. */
 export function LearnedPolicyRow({ data, refresh }: { data: AutonomyData; refresh: () => void }) {
   const found = pendingLearnedPolicy(data);
   const [open, setOpen] = useState(false);
@@ -34,7 +34,7 @@ export function LearnedPolicyRow({ data, refresh }: { data: AutonomyData; refres
   const { policy, approval } = found;
   const decide = async (decision: "APPROVED" | "REJECTED") => {
     if (decision === "REJECTED" && reason.trim().length < 3) {
-      toast.error("Add a reason so the Policy Analyst knows what was wrong.");
+      toast.error("Add a reason so the Controls Lead knows what was wrong.");
       return;
     }
     setBusy(decision);
@@ -61,7 +61,7 @@ export function LearnedPolicyRow({ data, refresh }: { data: AutonomyData; refres
       {open ? (
         <div className="space-y-2.5 px-2.5 pb-3">
           <div className="flex items-center gap-1.5 text-[11.5px] text-zinc-500">
-            <ScrollText className="size-3.5" /> {policy.policyKey} v{policy.version} · learned from AP history by the Policy Analyst
+            <ScrollText className="size-3.5" /> {policy.policyKey} v{policy.version} · learned from AP history by the Controls Lead
           </div>
           <p className="text-[12.5px] leading-snug text-zinc-800">{policy.statement}</p>
           <p className="text-[12px] leading-snug text-zinc-500">{policy.rationale}</p>
