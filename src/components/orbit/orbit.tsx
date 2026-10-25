@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { ArrowLeft, ChevronLeft, ChevronRight, LoaderCircle, RotateCcw, X } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, LoaderCircle, RotateCcw, ScanSearch, X } from "lucide-react";
 import { boardStage } from "@/lib/agent-steps";
 import { type Frame, type OrbitNodeId } from "@/lib/frames";
 import { cn } from "@/lib/utils";
@@ -927,72 +927,83 @@ function Toolbar({
   onStep: (dir: 1 | -1) => void;
   onReplay: () => void;
 }) {
-  const crumb = "rounded-md px-1.5 py-0.5 hover:bg-zinc-100";
+  const home = () => {
+    onHome();
+    onClearTask?.();
+  };
+  const sep = <span className="text-zinc-300">/</span>;
+  const link = "text-zinc-500 hover:text-zinc-900";
   return (
-    <div className="absolute top-4 left-4 z-40 flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
-      <div className="card-soft flex h-11 items-center gap-1 pr-2 pl-1.5">
+    <>
+      {/* Where you are, as plain text on the canvas. */}
+      <div className="absolute top-5 left-5 z-40 flex items-center gap-2 text-[14px]" onClick={(e) => e.stopPropagation()}>
         {level !== "all" ? (
           <ToolButton label="Zoom out" onClick={onBack}>
             <ArrowLeft className="size-4" />
           </ToolButton>
-        ) : (
-          <span className="grid size-8 place-items-center rounded-full bg-zinc-100 text-[11px] font-semibold text-zinc-600">AR</span>
-        )}
-        <nav className="flex items-center gap-0.5 text-[13.5px] text-zinc-500">
-          <button
-            type="button"
-            onClick={() => {
-              onHome();
-              onClearTask?.();
-            }}
-            className={cn(crumb, level === "all" && !task && "font-medium text-zinc-800")}
-          >
-            Atlas Research
-          </button>
-          {task ? (
-            <>
-              <ChevronRight className="size-3.5 text-zinc-300" />
-              <span className="flex items-center gap-1 rounded-md bg-accent py-0.5 pr-1 pl-1.5 text-zinc-800">
-                <button type="button" onClick={onHome} className={cn("max-w-[220px] truncate", level === "all" && "font-medium")}>
-                  {task.label}
-                </button>
-                <button type="button" onClick={onClearTask} aria-label="Show all work" title="Show all work (Esc)" className="grid size-4 place-items-center rounded text-zinc-500 hover:bg-white/70 hover:text-zinc-900">
-                  <X className="size-3" />
-                </button>
-              </span>
-            </>
-          ) : null}
-          {nodeLabel ? (
-            <>
-              <ChevronRight className="size-3.5 text-zinc-300" />
-              <button type="button" onClick={onNode} className={cn(crumb, level === "node" && "font-medium text-zinc-800")}>
-                {nodeLabel}
-              </button>
-            </>
-          ) : null}
-          {frameLabel ? (
-            <>
-              <ChevronRight className="size-3.5 text-zinc-300" />
-              <span className="px-1.5 font-medium text-zinc-800">{frameLabel}</span>
-            </>
-          ) : null}
-        </nav>
+        ) : null}
+        <button type="button" onClick={home} className={cn(link, !task && level === "all" && "font-medium text-zinc-900")}>
+          Atlas Research
+        </button>
+        {task ? (
+          <>
+            {sep}
+            <button type="button" onClick={onHome} className="max-w-[260px] truncate font-medium text-zinc-900">
+              {task.label}
+            </button>
+            <button
+              type="button"
+              onClick={onClearTask}
+              aria-label="Show all work"
+              title="Show all work (Esc)"
+              className="grid size-6 place-items-center rounded-full text-zinc-400 hover:bg-zinc-200/60 hover:text-zinc-900"
+            >
+              <X className="size-3.5" />
+            </button>
+          </>
+        ) : null}
+        {nodeLabel ? (
+          <>
+            {sep}
+            <button type="button" onClick={onNode} className={cn(link, level === "node" && "font-medium text-zinc-900")}>
+              {nodeLabel}
+            </button>
+          </>
+        ) : null}
+        {frameLabel ? (
+          <>
+            {sep}
+            <span className="font-medium text-zinc-900">{frameLabel}</span>
+          </>
+        ) : null}
       </div>
-      <span className="font-mono text-[12px] text-zinc-400 tnum">Z {zoom}%</span>
-      {level === "frame" ? (
-        <div className="card-soft fixed bottom-6 left-6 z-40 flex h-11 items-center gap-0.5 px-1">
-          <ToolButton label="Previous frame" onClick={() => onStep(-1)}>
-            <ChevronLeft className="size-4" />
-          </ToolButton>
-          <ToolButton label="Replay (R)" onClick={onReplay}>
-            <RotateCcw className="size-4" />
-          </ToolButton>
-          <ToolButton label="Next frame" onClick={() => onStep(1)}>
-            <ChevronRight className="size-4" />
-          </ToolButton>
-        </div>
-      ) : null}
-    </div>
+
+      {/* Bottom left: zoom (click to fit everything), plus frame stepping when a frame is open. */}
+      <div className="absolute bottom-5 left-5 z-40 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          onClick={onHome}
+          title="Fit to screen"
+          className="card-soft flex h-9 items-center gap-1.5 rounded-full! pr-3 pl-2.5 text-[12.5px] text-zinc-600 hover:text-zinc-950"
+        >
+          <ScanSearch className="size-4 text-zinc-500" />
+          <span className="tnum">{zoom}%</span>
+        </button>
+        {level === "frame" ? (
+          <div className="card-soft flex h-9 items-center gap-0.5 rounded-full! px-0.5">
+            <ToolButton label="Previous frame" onClick={() => onStep(-1)}>
+              <ChevronLeft className="size-4" />
+            </ToolButton>
+            <ToolButton label="Replay (R)" onClick={onReplay}>
+              <RotateCcw className="size-4" />
+            </ToolButton>
+            <ToolButton label="Next frame" onClick={() => onStep(1)}>
+              <ChevronRight className="size-4" />
+            </ToolButton>
+          </div>
+        ) : null}
+      </div>
+    </>
   );
 }
 

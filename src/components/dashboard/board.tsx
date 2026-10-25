@@ -103,7 +103,7 @@ function PolicyCard({ p }: { p: DashboardData["policyApprovals"][number] }) {
 export function Board({ data }: { data: DashboardData }) {
   const agentFor = (id: string) => data.agents.find((a) => a.currentWorkItemId === id && a.status !== "idle");
   return (
-    <div className="bg-dots h-full overflow-auto">
+    <div className="bg-canvas h-full overflow-auto">
       <div className="flex min-h-full min-w-max px-4 py-6">
         {BOARD_STAGES.map(({ key, label }) => {
           const items = data.workItems.filter((i) => boardStage(i) === key);

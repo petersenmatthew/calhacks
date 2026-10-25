@@ -139,10 +139,9 @@
 
 
 @layer utilities {
-  .bg-dots {
-    background-color: rgb(250 250 250);
-    background-image: radial-gradient(rgb(212 212 216) 1px, transparent 1px);
-    background-size: 18px 18px;
+  /* Warm white behind the canvas and board, so white cards stand out with no pattern. */
+  .bg-canvas {
+    background-color: #fbfaf7;
   }
   .card-soft {
     background: white;
@@ -429,3 +428,4 @@
 @media (prefers-reduced-motion: reduce) {
   .px-held, .px-land, .px-held .px-kick { animation: none; }
 }
+

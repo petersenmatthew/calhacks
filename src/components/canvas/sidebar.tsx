@@ -262,8 +262,13 @@ function Typed({ text, on }: { text: string; on: boolean }) {
   );
 }
 
+/** Whether the feed shows the dispute email inline, right after the Vendor Liaison sends it. */
+function letterInFeed(w: WorkspaceData) {
+  return Boolean(w.dispute?.letterBody) && buildFeed(w).some((l) => l.kind === "agent" && l.tool === "send_vendor_dispute");
+}
+
 /** The employees explaining their work to you as they go, plus your own decisions. */
-function Feed({ w }: { w: WorkspaceData }) {
+function Feed({ w, letter = true }: { w: WorkspaceData; letter?: boolean }) {
   const lines = buildFeed(w);
   const here = w.agents.filter((a) => a.currentWorkItemId === w.item.id && a.status !== "idle");
   const [openedAt] = useState(() => Date.now());
@@ -299,6 +304,11 @@ function Feed({ w }: { w: WorkspaceData }) {
             <div className={cn("pl-[26px] text-[13.5px] leading-relaxed", l.tone === "bad" ? "text-destructive" : "text-zinc-800")}>
               <Typed text={l.text} on={Date.parse(l.at) > openedAt - 3000} />
             </div>
+            {letter && l.tool === "send_vendor_dispute" && w.dispute?.letterBody ? (
+              <div className="mt-2.5 pl-[26px]">
+                <DisputeLetter dispute={w.dispute} />
+              </div>
+            ) : null}
           </div>
         );
       })}
@@ -324,7 +334,7 @@ function Feed({ w }: { w: WorkspaceData }) {
 }
 
 /** One quiet footer row: the story so far on the left, the full record on the right. */
-function HowWeGotHere({ w, extra }: { w: WorkspaceData; extra?: ReactNode }) {
+function HowWeGotHere({ w, extra, letter }: { w: WorkspaceData; extra?: ReactNode; letter?: boolean }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="mt-5">
@@ -337,7 +347,7 @@ function HowWeGotHere({ w, extra }: { w: WorkspaceData; extra?: ReactNode }) {
       </div>
       {open ? (
         <div className="mt-4">
-          <Feed w={w} />
+          <Feed w={w} letter={letter} />
         </div>
       ) : null}
     </div>
@@ -412,7 +422,7 @@ function TaskView({
         {w.dispute?.letterBody ? <DisputeLetter dispute={w.dispute} /> : null}
         <VendorThread w={w} />
         <DoneFinale w={w} justFinished={justFinished} />
-        <HowWeGotHere w={w} extra={record} />
+        <HowWeGotHere w={w} extra={record} letter={false} />
         {chat.length || chatPending ? <Thread messages={chat} pending={chatPending} onTask={onTask} inset /> : null}
       </div>
     );
@@ -432,7 +442,7 @@ function TaskView({
         </p>
       </div>
       <Feed w={w} />
-      {w.dispute?.letterBody ? <DisputeLetter dispute={w.dispute} /> : null}
+      {w.dispute?.letterBody && !letterInFeed(w) ? <DisputeLetter dispute={w.dispute} /> : null}
       <VendorThread w={w} />
       <div className="text-[12.5px] text-zinc-500">{record}</div>
       {chat.length || chatPending ? <Thread messages={chat} pending={chatPending} onTask={onTask} inset /> : null}
