@@ -239,7 +239,7 @@ export function FlowView() {
   const status = flowStatus(data);
   const proposal = data.proposals[data.proposals.length - 1];
   return (
-    <div className="bg-dots h-full overflow-y-auto">
+    <div className="bg-canvas h-full overflow-y-auto">
       <div className="mx-auto max-w-[860px] space-y-8 px-6 py-6">
         <FlowStrip data={data} />
         <div className="relative pt-4">

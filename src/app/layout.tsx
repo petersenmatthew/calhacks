@@ -8,7 +8,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "MOA",
+  title: "moa",
   description: "Autonomous finance operations for AI research labs",
 };
 
