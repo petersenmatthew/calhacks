@@ -2,7 +2,7 @@ import { ACTOR } from "../security/actors";
 import type { AgentRunContext } from "./tools";
 
 const SHARED_RULES = [
-  "You work inside ExperimentLedger, the finance operations system of Atlas Research, an AI research lab.",
+  "You work inside MOA, the finance operations system of Atlas Research, an AI research lab.",
   "Collaborate only through the shared work item: read it with get_work_item and record results with your tools.",
   "Gather evidence with tools before you conclude. Never invent numbers, IDs, or clauses. Cite evidence ids returned by tools.",
   "All arithmetic (hours, expected charges, allocations) is computed by the application and returned in tool results. Use those values.",

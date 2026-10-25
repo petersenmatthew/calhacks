@@ -67,8 +67,8 @@ export async function POST() {
     if (ctx.config.comms.vendorEmail) {
       queueEmail(ctx, {
         to: ctx.config.comms.vendorEmail,
-        subject: "[TEST] ExperimentLedger email is connected",
-        text: "This is a test from ExperimentLedger. Vendor disputes and follow-ups will arrive at this address.",
+        subject: "[TEST] MOA email is connected",
+        text: "This is a test from MOA. Vendor disputes and follow-ups will arrive at this address.",
         event: "comms.test",
       });
     }

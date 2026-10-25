@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { Fragment, useState } from "react";
 import useSWR from "swr";
-import { ChevronRight, ShieldCheck, ShieldX } from "lucide-react";
+import { Check, ChevronRight, ShieldCheck, ShieldX } from "lucide-react";
 import { fetcher } from "@/lib/api";
-import { clockTime, dateOnly, dateTimeUtc, money } from "@/lib/format";
+import { clockTime, dateOnly, money } from "@/lib/format";
+import { PROVIDER_SOURCE, SOURCE } from "@/lib/sources";
 import { cn } from "@/lib/utils";
 import type { AuditData } from "@/server/queries";
 import { JsonView } from "../json-view";
@@ -197,91 +198,191 @@ function PoliciesList({ data }: { data: AuditData }) {
   );
 }
 
-function Ledger({ data }: { data: AuditData }) {
-  const debits = data.trialBalance.reduce((s, a) => s + a.debits, 0);
-  const credits = data.trialBalance.reduce((s, a) => s + a.credits, 0);
+type Entry = AuditData["journal"][number];
+
+type Step = { id: string; at: string; text: string; detail?: string; cents: number; tone?: "credit" };
+
+type Charge = {
+  key: string;
+  vendor: string;
+  logo?: string;
+  line: string;
+  what: string | null;
+  workItemId: string | null;
+  at: string;
+  billed: number;
+  teams: { name: string; cents: number }[];
+  credited: number;
+  waiting: number;
+  steps: Step[];
+};
+
+const net = (e: Entry, code: string) => e.lines.filter((l) => l.accountCode === code).reduce((s, l) => s + l.debitCents - l.creditCents, 0);
+
+function how(auth: string, data: AuditData) {
+  if (/^standing policy/i.test(auth)) return "automatically, under standing policy";
+  const by = auth.match(/by (.+)$/);
+  if (by) return "approved by " + (by[1].split(" ")[0] === data.actors["human.controller"]?.name.split(" ")[0] ? "you" : by[1]);
+  return auth;
+}
+
+/** Group journal entries into one story per invoice line: billed, where it went, what came back. */
+function charges(data: AuditData): Charge[] {
+  const groups = new Map<string, Entry[]>();
+  for (const e of data.journal) {
+    const k = e.invoiceLineId ?? e.id;
+    groups.set(k, [...(groups.get(k) ?? []), e]);
+  }
+  return [...groups.entries()]
+    .map(([key, entries]) => {
+      const sorted = [...entries].sort((a, b) => a.postedAt.localeCompare(b.postedAt) || a.id.localeCompare(b.id));
+      const invoice = sorted.find((e) => e.source === "erp_ap");
+      const vendor = invoice?.lines.find((l) => l.accountCode === "2000")?.memo ?? "Vendor";
+      const provider = Object.values(data.providers).find((p) => p.shortName === vendor);
+      const sid = provider ? PROVIDER_SOURCE[provider.id] : undefined;
+      const teams = new Map<string, number>();
+      const steps: Step[] = [];
+      for (const e of sorted) {
+        if (e.source === "erp_ap") {
+          steps.push({ id: e.id, at: e.postedAt, text: "Invoice recorded", detail: "Owed to " + vendor, cents: e.totalCents });
+          continue;
+        }
+        const toTeams = e.lines.filter((l) => l.accountCode === "6100" && l.debitCents > l.creditCents);
+        for (const l of toTeams) {
+          const name = (l.projectId && data.projects[l.projectId]?.name) || "a team";
+          teams.set(name, (teams.get(name) ?? 0) + l.debitCents - l.creditCents);
+          steps.push({ id: e.id, at: e.postedAt, text: "Charged to " + name, detail: how(e.authorization, data), cents: l.debitCents - l.creditCents });
+        }
+        const credit = net(e, "2000");
+        if (credit > 0) {
+          const memo = e.lines.find((l) => l.accountCode === "2000")?.memo.match(/CM-[\w-]+/)?.[0];
+          steps.push({ id: e.id, at: e.postedAt, text: vendor + " credited it back", detail: memo ? "Credit memo " + memo : undefined, cents: credit, tone: "credit" });
+        }
+        if (!toTeams.length && credit <= 0) steps.push({ id: e.id, at: e.postedAt, text: e.memo, detail: e.authorization, cents: e.totalCents });
+      }
+      const what = invoice?.lines.find((l) => l.accountCode === "6990")?.memo ?? null;
+      return {
+        key,
+        vendor,
+        logo: sid ? SOURCE[sid].logo : undefined,
+        line: invoice?.invoiceLineId ?? key,
+        what,
+        workItemId: sorted.find((e) => e.workItemId)?.workItemId ?? null,
+        at: sorted[sorted.length - 1].postedAt,
+        billed: invoice?.totalCents ?? 0,
+        teams: [...teams.entries()].map(([name, cents]) => ({ name, cents })),
+        credited: sorted.reduce((s, e) => s + Math.max(0, net(e, "2000")), 0),
+        waiting: sorted.reduce((s, e) => s + net(e, "6990"), 0),
+        steps,
+      };
+    })
+    .sort((a, b) => b.at.localeCompare(a.at));
+}
+
+const usd = (c: number) => money(c, { cents: c % 100 !== 0 });
+
+function ChargeRow({ c }: { c: Charge }) {
+  const [open, setOpen] = useState(false);
+  const story = [
+    ...c.teams.map((t) => usd(t.cents) + " to " + t.name),
+    c.credited ? usd(c.credited) + " credited back" : null,
+    c.waiting > 0 ? usd(c.waiting) + " not assigned yet" : null,
+  ].filter(Boolean);
   return (
-    <div className="grid border-t lg:grid-cols-[360px_minmax(0,1fr)] lg:divide-x">
-      <div>
-        <div className="border-b px-6 py-3">
-          <div className="text-[13px] font-semibold">Trial balance</div>
-          <div className={cn("text-[11.5px]", debits === credits ? "text-brand-ink" : "text-destructive")}>
-            {debits === credits ? "Debits equal credits" : "Out of balance"}
+    <li>
+      <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-center gap-3 px-6 py-3 text-left hover:bg-zinc-50">
+        {c.logo ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={c.logo} alt="" className="size-8 shrink-0 rounded-lg ring-1 ring-zinc-200" />
+        ) : (
+          <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-zinc-100 text-[11px] font-semibold text-zinc-500">{c.vendor[0]}</span>
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-2 text-[13px] text-zinc-900">
+            <span className="font-medium">{c.vendor}</span>
+            <span className="truncate text-zinc-500">{c.what?.split(":")[0] ?? c.line}</span>
+          </span>
+          <span className="block truncate text-[12px] text-zinc-500">{story.join(" · ") || "Recorded"}</span>
+        </span>
+        <span className="shrink-0 text-right">
+          <span className="block text-[13px] font-medium text-zinc-900 tnum">{usd(c.billed)}</span>
+          {c.waiting > 0 ? (
+            <span className="block text-[11px] font-medium text-amber-700">Waiting</span>
+          ) : (
+            <span className="flex items-center justify-end gap-1 text-[11px] text-brand-ink">
+              <Check className="size-3" strokeWidth={3} /> Settled
+            </span>
+          )}
+        </span>
+        <ChevronRight className={cn("size-4 shrink-0 text-zinc-400 transition-transform", open && "rotate-90")} />
+      </button>
+      {open ? (
+        <div className="px-6 pb-4 pl-[68px]">
+          <ol className="relative space-y-3 border-l border-zinc-200 pl-4">
+            {c.steps.map((s, i) => (
+              <li key={s.id + i} className="relative">
+                <span className={cn("absolute top-1.5 -left-[21px] size-2 rounded-full ring-2 ring-white", s.tone === "credit" ? "bg-primary" : "bg-zinc-300")} />
+                <div className="flex items-baseline gap-3 text-[12.5px]">
+                  <span className="text-zinc-800">{s.text}</span>
+                  <span className={cn("ml-auto tnum", s.tone === "credit" ? "text-brand-ink" : "text-zinc-700")}>{(s.tone === "credit" ? "−" : "") + usd(s.cents)}</span>
+                </div>
+                <div className="flex gap-2 text-[11.5px] text-zinc-500">
+                  <span>{[dateOnly(s.at), s.detail].filter(Boolean).join(" · ")}</span>
+                  <span className="ml-auto font-mono text-[10.5px] text-zinc-400">{s.id}</span>
+                </div>
+              </li>
+            ))}
+          </ol>
+          <div className="mt-3 flex gap-3 text-[11.5px] text-zinc-500">
+            <span className="font-mono">{c.line}</span>
+            {c.workItemId ? (
+              <Link href={"/canvas?task=" + c.workItemId} className="text-brand-ink hover:underline">
+                Open {c.workItemId}
+              </Link>
+            ) : null}
           </div>
         </div>
-        <table className="w-full text-[12px]">
-          <thead>
-            <tr className="text-left text-[11px] text-muted-foreground">
-              <th className="px-6 py-2 font-medium">Account</th>
-              <th className="px-2 py-2 text-right font-medium">Debits</th>
-              <th className="px-6 py-2 text-right font-medium">Credits</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.trialBalance.map((a) => (
-              <tr key={a.code} className="border-t">
-                <td className="px-6 py-2">
-                  <span className="font-mono text-zinc-500">{a.code}</span> {a.name}
-                </td>
-                <td className="px-2 py-2 text-right tnum">{money(a.debits)}</td>
-                <td className="px-6 py-2 text-right tnum">{money(a.credits)}</td>
-              </tr>
-            ))}
-            <tr className="border-t font-medium">
-              <td className="px-6 py-2">Total</td>
-              <td className="px-2 py-2 text-right tnum">{money(debits)}</td>
-              <td className="px-6 py-2 text-right tnum">{money(credits)}</td>
-            </tr>
-          </tbody>
-        </table>
+      ) : null}
+    </li>
+  );
+}
+
+function Ledger({ data }: { data: AuditData }) {
+  const list = charges(data);
+  const billed = list.reduce((s, c) => s + c.billed, 0);
+  const toTeams = list.reduce((s, c) => s + c.teams.reduce((t, x) => t + x.cents, 0), 0);
+  const credited = list.reduce((s, c) => s + c.credited, 0);
+  const waiting = list.reduce((s, c) => s + Math.max(0, c.waiting), 0);
+  const debits = data.trialBalance.reduce((s, a) => s + a.debits, 0);
+  const credits = data.trialBalance.reduce((s, a) => s + a.credits, 0);
+  const stats = [
+    { label: "Billed by vendors", value: billed, tone: "text-zinc-900" },
+    { label: "Charged to teams", value: toTeams, tone: "text-zinc-900" },
+    { label: "Credited back", value: credited, tone: "text-brand-ink" },
+    { label: "Not assigned yet", value: waiting, tone: waiting ? "text-amber-700" : "text-zinc-400" },
+  ];
+  return (
+    <div className="mx-auto max-w-[880px] pb-10">
+      <div className="grid grid-cols-2 gap-3 px-6 pt-6 md:grid-cols-4">
+        {stats.map((s) => (
+          <div key={s.label} className="rounded-xl bg-white px-4 py-3 ring-1 ring-zinc-200">
+            <div className="text-[11.5px] text-zinc-500">{s.label}</div>
+            <div className={cn("mt-0.5 text-[18px] font-semibold tracking-[-0.01em] tnum", s.tone)}>{money(s.value, { cents: false })}</div>
+          </div>
+        ))}
       </div>
-      <div>
-        <div className="border-b px-6 py-3 text-[13px] font-semibold">Journal entries</div>
-        <ol className="divide-y">
-          {data.journal.map((entry) => (
-            <li key={entry.id}>
-              <details className="px-6 py-2.5">
-                <summary className="flex cursor-pointer items-center gap-3 text-[12px]">
-                  <span className="font-mono text-[11px] text-zinc-500">{entry.id}</span>
-                  <span className="min-w-0 flex-1 truncate">{entry.memo}</span>
-                  <span className="hidden text-[11px] text-muted-foreground md:inline">{entry.source === "erp_ap" ? "ERP AP (simulated)" : "Ledger gateway"}</span>
-                  <span className="font-medium tnum">{money(entry.totalCents)}</span>
-                </summary>
-                <div className="mt-2 space-y-2">
-                  <div className="text-[11px] text-muted-foreground">
-                    {dateTimeUtc(entry.postedAt)} · {entry.authorization}
-                    {entry.workItemId ? (
-                      <>
-                        {" · "}
-                        <Link className="text-brand-ink hover:underline" href={"/canvas?task=" + entry.workItemId}>
-                          {entry.workItemId}
-                        </Link>
-                      </>
-                    ) : null}
-                    {entry.proposalId ? " · " + entry.proposalId : ""}
-                    {entry.approvalId ? " · " + entry.approvalId : ""}
-                    {entry.policyId ? " · " + entry.policyId : ""}
-                  </div>
-                  <table className="w-full text-[11.5px]">
-                    <tbody>
-                      {entry.lines.map((l) => (
-                        <tr key={l.id} className="border-t">
-                          <td className="py-1">
-                            <span className="font-mono text-zinc-500">{l.accountCode}</span> {data.accounts.find((a) => a.code === l.accountCode)?.name}
-                            {l.projectId ? <span className="text-muted-foreground"> · {data.projects[l.projectId]?.name}</span> : null}
-                          </td>
-                          <td className="py-1 text-right tnum">{l.debitCents ? money(l.debitCents) : ""}</td>
-                          <td className="w-28 py-1 text-right tnum">{l.creditCents ? money(l.creditCents) : ""}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </details>
-            </li>
-          ))}
-        </ol>
+      <div className="flex items-baseline justify-between px-6 pt-6 pb-2">
+        <h3 className="text-[13px] font-semibold text-zinc-900">Charges</h3>
+        <span className={cn("flex items-center gap-1 text-[11.5px]", debits === credits ? "text-brand-ink" : "text-destructive")}>
+          {debits === credits ? <Check className="size-3" strokeWidth={3} /> : null}
+          {debits === credits ? "Books balance" : "Books out of balance"}
+        </span>
       </div>
+      <ol className="mx-6 divide-y overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200 [&>li>button]:px-4 [&>li>div]:pl-[60px]">
+        {list.map((c) => (
+          <ChargeRow key={c.key} c={c} />
+        ))}
+      </ol>
     </div>
   );
 }

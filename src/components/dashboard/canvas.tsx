@@ -40,8 +40,11 @@ export function SystemCanvas({ data, initialTask = null, onChanged }: { data: Da
   const [autoOpen, setAutoOpen] = useState(initialTask === null);
   const [lastLive, setLastLive] = useState<string | null>(null);
   const live = data.activeWorkItemId && items.some((i) => i.id === data.activeWorkItemId) ? data.activeWorkItemId : null;
+  // A task waiting on its vendor, or one that just closed, stays on screen so you can watch it finish.
+  const pickedState = picked ? (items.find((i) => i.id === picked)?.state ?? "") : "";
+  const pickedDone = pickedState === "DISPUTED" || isDone(pickedState);
   if (live && live !== lastLive) {
-    const following = autoOpen || picked === null || picked === lastLive;
+    const following = autoOpen || picked === null || (picked === lastLive && !pickedDone);
     setLastLive(live);
     if (following) {
       setAutoOpen(false);
@@ -157,11 +160,12 @@ export function SystemCanvas({ data, initialTask = null, onChanged }: { data: Da
           onChanged();
           // One at a time: stay on this case to watch it finish.
           if (oneAtATime) return;
-          // Let the confirmation read for a beat. Stay when the same task still has
-          // something waiting, such as a new rule plus the redone split.
+          // Let the confirmation read for a beat. Stay while the same task still has
+          // something waiting or work in flight (a dispute going out, a budget change),
+          // so the loop closes in front of you. Move on only once it is booked and done.
           await new Promise((r) => window.setTimeout(r, 900));
           const fresh = await one.mutate();
-          if (fresh && buildDecision(fresh)) return;
+          if (fresh && (buildDecision(fresh) || !isDone(fresh.item.state))) return;
           next();
         }}
         agentPanel={

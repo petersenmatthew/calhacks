@@ -40,7 +40,19 @@ export type BurnSpec = { days: number; elapsed: number; budget: number; posted: 
 /** A case with an outside party: where it stands and the messages so far. */
 export type ThreadSpec = {
   steps: { label: string; state: "done" | "now" | "todo"; tone?: Tone }[];
-  messages: { from: string; to: string; subject?: string; body: string; tone?: Tone }[];
+  messages: {
+    from: string;
+    to: string;
+    subject?: string;
+    body: string;
+    tone?: Tone;
+    /** Sender's logo; otherwise an initial. */
+    logo?: string;
+    /** When it was sent, already formatted. */
+    at?: string;
+    /** A short outcome tag on a reply, e.g. "Credited". */
+    tag?: string;
+  }[];
 };
 
 /** An invoice line as the vendor sent it. */
@@ -709,14 +721,28 @@ function threadSpec(w: WorkspaceData, send: ActivityRow, close?: ActivityRow, pk
     { label: replied ? (credited ? "Credited" : "Denied") : "Waiting on " + provider, state: replied ? "done" : "now", tone: replied ? (credited ? "ok" : "bad") : undefined },
     { label: "Closed", state: close ? "done" : replied ? "now" : "todo" },
   ];
-  const messages: ThreadSpec["messages"] = [{ from: "Atlas Research Finance", to: provider + " billing", subject: s(send.args, "subject"), body: s(send.args, "message") }];
+  const vendorLogo = sourceForTool("get_work_item", w.item.providerId)?.logo;
+  const when = (iso?: string | null) => (iso ? dateOnly(iso) + ", " + clockTime(iso).slice(0, 5) : undefined);
+  const messages: ThreadSpec["messages"] = [
+    {
+      from: "Atlas Research Finance",
+      to: d?.sentTo ?? provider + " billing",
+      subject: s(send.args, "subject"),
+      body: s(send.args, "message"),
+      at: when(d?.submittedAt ?? send.createdAt),
+    },
+  ];
   if (replied && d) {
     const ref = d.creditMemoRef ? " (" + d.creditMemoRef + ")" : d.vendorReference ? " (" + d.vendorReference + ")" : "";
+    const inbound = w.vendorMessages.find((m) => m.direction === "inbound");
     messages.push({
       from: provider + " billing",
-      to: "Vendor Liaison",
+      to: "Atlas Research Finance",
       body: credited ? "We reviewed the dispute and issued a credit memo for " + amount + ref + "." : "We reviewed the dispute and are upholding the charge" + ref + ".",
       tone: credited ? "ok" : "bad",
+      logo: vendorLogo,
+      at: when(inbound?.receivedAt ?? d.resolvedAt),
+      tag: credited ? "Credited" : "Denied",
     });
   }
   const credit = close && s(close.result, "outcome") === "VENDOR_CREDIT";
@@ -920,6 +946,8 @@ export function buildFrames(w: WorkspaceData): Frame[] {
   const open = new Map<string, Frame>();
   let timeline: Frame | null = null;
   const dispute: { frame?: Frame; send?: ActivityRow; close?: ActivityRow; pkg?: ActivityRow } = {};
+  /** The Vendor Liaison's close-out; it folds into the ledger posting it caused. */
+  let decision: { row: ActivityRow; reads: ActivityRow[] } | null = null;
 
   const toolFrame = (row: ActivityRow, agent: OrbitNodeId): Frame => {
     const src = sourceForTool(row.toolName, w.item.providerId);
@@ -1020,6 +1048,10 @@ export function buildFrames(w: WorkspaceData): Frame[] {
       target = dispute.frame;
       dispute.close = row;
       fold(target, [row]);
+    } else if (tool === "record_vendor_decision") {
+      decision = { row, reads: pending.get(row.actorId) ?? [] };
+      pending.delete(row.actorId);
+      continue;
     } else {
       target = toolFrame(row, agent);
       frames.push(target);
@@ -1074,7 +1106,25 @@ export function buildFrames(w: WorkspaceData): Frame[] {
     });
   }
 
-  frames.push(...ledgerFrames(w, deniedPostings), ...(dispute.frame ? [] : vendorReplyFrames(w)), ...policyFrames(w));
+  const ledger = ledgerFrames(w, deniedPostings);
+  if (decision) {
+    // One card for booking the vendor's answer and closing the case: the posting, titled by what it means.
+    const { row, reads } = decision;
+    const entry = [...w.journal].reverse().find((e) => e.idempotencyKey.startsWith("dispute:"));
+    const je = entry ? ledger.find((f) => f.id === "je-" + entry.id) : undefined;
+    if (je) {
+      je.node = NODE_OF[row.actorId] ?? je.node;
+      je.spec.eyebrow = (AGENT_NAME[row.actorId] ?? "Vendor Liaison") + " · booked and closed";
+      je.spec.title = row.title;
+      je.spec.summary = s(row.args, "summary") || row.summary || je.spec.summary;
+      fold(je, [row, ...reads]);
+    } else {
+      const f = toolFrame(row, NODE_OF[row.actorId] ?? "vendor");
+      fold(f, reads);
+      frames.push(f);
+    }
+  }
+  frames.push(...ledger, ...(dispute.frame ? [] : vendorReplyFrames(w)), ...policyFrames(w));
   for (const id of Object.keys(NODE_OF)) {
     const live = liveFrame(w, id);
     if (live) frames.push(live);

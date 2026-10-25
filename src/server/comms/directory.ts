@@ -33,7 +33,7 @@ export const CHANNELS = [
 
 export type ChannelName = (typeof CHANNELS)[number]["name"];
 
-export const BOT = { name: "Ledger", title: "ExperimentLedger bot" };
+export const BOT = { name: "Ledger", title: "MOA bot" };
 
 export function person(handle: string) {
   return PEOPLE.find((p) => p.handle === handle);

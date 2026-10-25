@@ -65,7 +65,7 @@ A good system of work:
 
 Build pieces: stateful sync of the records into one shape (cursor per source, stable ids, no duplicates); actors, actions, and resources with permissions checked on every call; agent tools that are CRUD on work items through a state machine; every transition logged as a diff, including denied attempts.
 
-## How ExperimentLedger maps to it
+## How MOA maps to it
 
 Company: Atlas Research (fictional AI lab). Roles: GPU invoice reconciliation (Payables) and shared cost allocation, by a Compute Agent and a Finance Agent.
 

@@ -47,7 +47,7 @@ function briefing(ctx: AppContext, taskId: string | null) {
 }
 
 const INSTRUCTIONS = [
-  "You are the finance team's assistant inside ExperimentLedger. The person you talk to is the controller.",
+  "You are the finance team's assistant inside MOA. The person you talk to is the controller.",
   "Answer from the briefing only. If the briefing does not say, say you do not know.",
   "Be brief: one to three short sentences. Plain text. No headings, no bold, no emojis. Use a short list only when asked to list things.",
   "Refer to tasks by id, for example WI-1009, so the controller can click them.",
@@ -144,7 +144,7 @@ export async function askAboutFrame(ctx: AppContext, messages: ChatMessage[], ta
 /* ------------------------------------------------------------------ talking through a decision */
 
 /** A budget change the controller asked for alongside their decision. */
-export type BudgetChange = { projectId: string; projectName: string; monthlyCents: number };
+export type BudgetChange = { projectId: string; projectName: string; monthlyCents: number; fromCents?: number };
 
 export type DecisionTurn = { reply: string; choiceId: string | null; note: string | null; budget: BudgetChange | null };
 
@@ -165,6 +165,8 @@ const openers = new Map<string, string>();
 
 function decisionBriefing(ctx: AppContext, w: NonNullable<ReturnType<typeof getWorkspace>>, d: Decision) {
   const p = [...w.proposals].reverse()[0];
+  const budgets = getDashboard(ctx).budgets;
+  const projectName = (id: string | null) => (id ? (w.projects[id]?.name ?? id) : "no project");
   return [
     "Task " + w.item.id + ": " + w.item.title + ". " + d.context + ".",
     "The decision on screen: " + d.title + ". " + d.ask + ".",
@@ -180,8 +182,10 @@ function decisionBriefing(ctx: AppContext, w: NonNullable<ReturnType<typeof getW
     ...(p ? ["Proposal " + p.id + " (" + p.status + "): " + p.summary, "Rationale: " + p.rationale] : []),
     ...(w.item.pendingQuestion ? ["Open question: " + w.item.pendingQuestion.question] : []),
     ...w.policies.filter((x) => x.status === "APPROVED").map((x) => "Active policy " + x.policyKey + " v" + x.version + ": " + x.statement),
+    ...w.experiments.map((e) => "This charge ran experiment " + e.name + " (owner " + e.owner + "), which spends from the " + projectName(e.projectId) + " budget (project id " + e.projectId + ")."),
+    "Budgets are set per research project; an experiment spends from its project's budget. Day " + budgets.elapsed + " of " + budgets.daysInMonth + " this month.",
     "Research project monthly compute budgets (the Budget Analyst can change one when the controller says so):",
-    ...ctx.db.select().from(projects).all().map((x) => "- id " + x.id + ": " + x.name + ", " + usd(x.monthlyBudgetCents) + " a month"),
+    ...budgets.projects.map((x) => "- id " + x.id + ": " + x.name + ", budget " + usd(x.budget) + " a month, " + usd(x.posted) + " posted so far, on pace for " + usd(x.projected)),
   ]
     .filter(Boolean)
     .join("\n");
@@ -228,7 +232,10 @@ export async function discussDecision(ctx: AppContext, messages: ChatMessage[], 
           "If they clearly chose one of the options, set choice_id to its id.",
           "If they said yes to an option but also asked for something more (yes, but), set choice_id and also put the extra part in note, in their words, cleaned up. Do not drop it.",
           "If they want something that is not an option at all, leave choice_id null and put their instruction in note.",
-          "If they asked to change a project's monthly budget, set budget_project_id and budget_monthly_usd. If they gave no figure (for example 'lower it'), ask what the new monthly budget should be and set waiting_on_detail.",
+          "If they asked to change a budget, set budget_project_id and budget_monthly_usd. 'That experiment', 'the experiment eating the money' or 'that team' means the project this charge's experiment spends from.",
+          "If they gave no figure (for example 'lower it'), pick one yourself: about 10% below the current monthly budget when lowering, about 10% above when raising, rounded to the nearest $5,000.",
+          "When a budget is involved, reply in two short sentences like: 'MoE routing ablation 07 runs on Frontier Language Models, so I'll take that budget from $520,000 to $470,000 a month. Confirm and I'll send the $1,200 dispute too.' Use the real experiment, project and figures. Do not ask them to confirm the amount; the Confirm button does that, and they can name another figure.",
+          "Only set waiting_on_detail when you truly cannot tell which project they mean.",
           "Say in one short sentence everything that will happen once they hit Confirm, including the extra part. If no one on the team can do the extra part, say so plainly.",
           "If they are asking or unsure, leave everything null.",
         ].join(" ")
@@ -249,17 +256,44 @@ export async function discussDecision(ctx: AppContext, messages: ChatMessage[], 
     openers.set(key, reply);
     return { reply, ...none };
   }
-  // Nothing to confirm while the employee is still asking for a detail.
-  if (out?.waiting_on_detail) return { reply, ...none };
-  const choiceId = out?.choice_id && d.choices.some((c) => c.id === out.choice_id) ? out.choice_id : null;
+  // "Yes, but lower the budget": fill what the model left out, so the demo never stalls on a question.
+  const said0 = messages.at(-1)!.content;
+  const asksBudget = /budget/i.test(said0);
+  const agreed = /\b(do (that|it)|yes|yeah|yep|go ahead|sounds good|approve|ok(ay)?|sure|let'?s do)\b/i.test(said0);
+  const recommended = d.choices.find((c) => c.primary && c.action.type === "approve");
+  const modelChoice = out?.choice_id && d.choices.some((c) => c.id === out.choice_id) ? out.choice_id : null;
+  const chargeProject = w.experiments.find((e) => e.projectId)?.projectId ?? w.item.ownerProjectId;
+  const projectId = out?.budget_project_id ?? (asksBudget ? chargeProject : null);
+  const target = projectId ? ctx.db.select().from(projects).where(eq(projects.id, projectId)).get() : undefined;
+  // Lower unless they clearly asked for more ("eating up the money" is not a raise).
+  const raise = /\b(raise|increase|bump|higher|boost|more budget)\b/i.test(said0) && !/\b(lower|cut|reduce|decrease|trim|less)\b/i.test(said0);
+  const suggested = target ? Math.round((target.monthlyBudgetCents * (raise ? 1.1 : 0.9)) / 500_000) * 5_000 : 0;
+  // No figure in their words: always the same suggestion, said the same way.
+  const gaveFigure = /\d/.test(said0);
+  const filled = asksBudget && Boolean(target) && (!gaveFigure || !out?.budget_monthly_usd || !out?.budget_project_id || (!modelChoice && agreed));
+  // Nothing to confirm while the employee is still asking for a detail, unless we could fill it in.
+  if (out?.waiting_on_detail && !filled) return { reply, ...none };
+  const choiceId = modelChoice ?? (asksBudget && agreed && recommended ? recommended.id : null);
   const said = out?.note?.trim() ?? "";
   // With a choice, the note rides along with it. Without one, it only counts where free text is allowed.
   const note = said.length >= 3 && (choiceId || d.custom) ? said.slice(0, 1000) : null;
-  const project = out?.budget_project_id ? ctx.db.select().from(projects).where(eq(projects.id, out.budget_project_id)).get() : undefined;
-  const usdAmount = out?.budget_monthly_usd ?? 0;
+  const project = target;
+  const usdAmount = asksBudget && !gaveFigure ? suggested : (out?.budget_monthly_usd ?? (asksBudget ? suggested : 0));
   // A budget change only goes through alongside an approval.
   const approving = choiceId ? d.choices.find((c) => c.id === choiceId)?.action.type === "approve" : false;
   const budget =
-    project && approving && usdAmount > 0 && usdAmount < 1e9 ? { projectId: project.id, projectName: project.name, monthlyCents: Math.round(usdAmount * 100) } : null;
-  return { reply, choiceId, note, budget };
+    project && approving && usdAmount > 0 && usdAmount < 1e9
+      ? { projectId: project.id, projectName: project.name, monthlyCents: Math.round(usdAmount * 100), fromCents: project.monthlyBudgetCents }
+      : null;
+  // When we filled the budget in, say it plainly instead of the model's question.
+  const exp = w.experiments.find((e) => e.projectId === budget?.projectId);
+  const chosen = d.choices.find((c) => c.id === choiceId);
+  const finalReply =
+    filled && budget
+      ? (exp ? exp.name + " runs on " + budget.projectName + ", so I'll take that budget" : "I'll take the " + budget.projectName + " budget") +
+        " from " + usd(budget.fromCents ?? 0) + " to " + usd(budget.monthlyCents) + " a month." +
+        (chosen ? " Confirm and I'll " + chosen.label.charAt(0).toLowerCase() + chosen.label.slice(1) + " too." : "")
+      : reply;
+  // The budget change says what the note said; keep the note only for anything else.
+  return { reply: finalReply, choiceId, note: budget && note && /budget/i.test(note) ? null : note, budget };
 }
