@@ -403,12 +403,22 @@
 
 /* Landing: an agent picked up by the scruff squirms; dropped, it squashes and settles. */
 @keyframes px-squirm {
-  0%, 100% { transform: rotate(-11deg) translateX(-1px); }
-  25% { transform: rotate(4deg) translateY(-1px); }
-  50% { transform: rotate(12deg) translateX(1px); }
-  75% { transform: rotate(-3deg) translateY(1px); }
+  0%   { transform: rotate(-17deg) translateY(0) scale(1, 1); }
+  20%  { transform: rotate(-4deg) translateY(-3px) scale(1.06, 0.94); }
+  40%  { transform: rotate(15deg) translateY(1px) scale(0.95, 1.05); }
+  55%  { transform: rotate(19deg) translateY(0) scale(1, 1); }
+  75%  { transform: rotate(3deg) translateY(-3px) scale(1.06, 0.94); }
+  90%  { transform: rotate(-12deg) translateY(1px) scale(0.96, 1.04); }
+  100% { transform: rotate(-17deg) translateY(0) scale(1, 1); }
 }
-.px-held { animation: px-squirm 0.42s steps(4, end) infinite; transform-origin: 50% 8%; filter: drop-shadow(0 10px 6px rgb(30 60 20 / 0.25)); }
+/* Held by the top of the head like a Mii: it dangles, swings, and kicks. The outer wrapper leans with how fast you drag. */
+.px-held { animation: px-squirm 0.6s ease-in-out infinite; transform-origin: 50% 0%; filter: drop-shadow(0 12px 6px rgb(30 60 20 / 0.22)); }
+.px-held .px-kick { animation: px-kick 0.18s steps(2, end) infinite; transform-origin: 50% 100%; }
+@keyframes px-kick {
+  0%, 100% { transform: translateY(0) rotate(-5deg); }
+  50% { transform: translateY(-2px) rotate(5deg); }
+}
+.px-lean { transition: transform 0.18s cubic-bezier(0.3, 1.6, 0.5, 1); transform-origin: 50% 0%; }
 @keyframes px-land {
   0% { transform: scale(1.15, 0.82); }
   45% { transform: scale(0.94, 1.08); }
@@ -416,5 +426,5 @@
 }
 .px-land { animation: px-land 0.36s ease-out both; animation-delay: var(--px-fall, 0s); transform-origin: 50% 100%; }
 @media (prefers-reduced-motion: reduce) {
-  .px-held, .px-land { animation: none; }
+  .px-held, .px-land, .px-held .px-kick { animation: none; }
 }

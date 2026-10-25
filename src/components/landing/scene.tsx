@@ -200,6 +200,8 @@ type Walker = {
   held: boolean;
   /** Bumped on each landing, so the squash replays. */
   landed: number;
+  /** Degrees it swings away from the direction you drag it. */
+  lean: number;
 };
 
 /** Where people may stand, as % of the screen: inside the meadow, clear of the edges. */
@@ -208,7 +210,7 @@ const ZONE = { x0: 8, x1: 92, y0: 72, y1: 92 };
 function start(i: number): Walker {
   const x = ZONE.x0 + ((i + 0.5) / CREW.length) * (ZONE.x1 - ZONE.x0);
   const y = ZONE.y0 + ((i * 37) % 100) / 100 * (ZONE.y1 - ZONE.y0);
-  return { x, y, dur: 0, ease: "linear", left: false, moving: false, held: false, landed: 0 };
+  return { x, y, dur: 0, ease: "linear", left: false, moving: false, held: false, landed: 0, lean: 0 };
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -224,7 +226,8 @@ export function Roamers() {
   const cur = useRef<Walker[]>(walkers);
   const timers = useRef<number[]>([]);
   const box = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ i: number; dx: number; dy: number } | null>(null);
+  const drag = useRef<{ i: number; dx: number; dy: number; lastX: number; t: number } | null>(null);
+  const settle = useRef(0);
   const still = useRef(false);
   const stepRef = useRef<(i: number) => void>(() => {});
 
@@ -271,7 +274,7 @@ export function Roamers() {
     const el = e.currentTarget.getBoundingClientRect();
     const feetX = ((el.left + el.width / 2 - r.left) / r.width) * 100;
     const feetY = ((el.bottom - r.top) / r.height) * 100;
-    drag.current = { i, dx: feetX - p.x, dy: feetY - p.y };
+    drag.current = { i, dx: feetX - p.x, dy: feetY - p.y, lastX: e.clientX, t: e.timeStamp };
     update(i, (w) => ({ ...w, x: feetX, y: feetY, dur: 0, moving: false, held: true }));
   };
 
@@ -280,7 +283,14 @@ export function Roamers() {
     if (!d || d.i !== i) return;
     const p = at(e);
     const x = clamp(p.x + d.dx, 2, 98);
-    update(i, (w) => ({ ...w, x, y: clamp(p.y + d.dy, 12, 99), left: x < w.x ? true : x > w.x ? false : w.left }));
+    // Swing like a pendulum: drag right and the body trails left.
+    const speed = (e.clientX - d.lastX) / Math.max(8, e.timeStamp - d.t);
+    d.lastX = e.clientX;
+    d.t = e.timeStamp;
+    const lean = clamp(-speed * 28, -40, 40);
+    update(i, (w) => ({ ...w, x, y: clamp(p.y + d.dy, 12, 99), lean, left: x < w.x ? true : x > w.x ? false : w.left }));
+    window.clearTimeout(settle.current);
+    settle.current = window.setTimeout(() => update(i, (w) => ({ ...w, lean: 0 })), 90);
   };
 
   const drop = (i: number) => () => {
@@ -290,7 +300,7 @@ export function Roamers() {
       const y = clamp(w.y, ZONE.y0, ZONE.y1);
       // Falls under gravity when let go above the meadow.
       const fall = y > w.y + 1 ? Math.min(0.9, 0.25 + Math.sqrt((y - w.y) / 100) * 0.7) : 0.15;
-      return { ...w, x: clamp(w.x, ZONE.x0, ZONE.x1), y, dur: fall, ease: "cubic-bezier(0.55, 0, 1, 0.45)", held: false, landed: w.landed + 1 };
+      return { ...w, lean: 0, x: clamp(w.x, ZONE.x0, ZONE.x1), y, dur: fall, ease: "cubic-bezier(0.55, 0, 1, 0.45)", held: false, landed: w.landed + 1 };
     });
     if (!still.current) timers.current[i] = window.setTimeout(() => stepRef.current(i), 1600 + Math.random() * 1500);
   };
@@ -318,13 +328,17 @@ export function Roamers() {
               transition: w.dur ? `left ${w.dur}s ${w.ease}, top ${w.dur}s ${w.ease}` : "none",
             }}
           >
-            <div
-              key={w.landed}
-              className={cn(w.held ? "px-held" : w.landed ? "px-land" : undefined)}
-              style={{ "--px-fall": w.dur + "s" } as React.CSSProperties}
-            >
-              <div className={cn(w.moving && "px-run")} style={{ transform: w.left ? "scaleX(-1)" : undefined }}>
-                <PixelAgent actorId={id} size={Math.round(size)} working={w.moving || w.held} className="h-auto" />
+            <div className="px-lean" style={{ transform: "rotate(" + w.lean + "deg)" }}>
+              <div
+                key={w.landed}
+                className={cn(w.held ? "px-held" : w.landed ? "px-land" : undefined)}
+                style={{ "--px-fall": w.dur + "s", animationDelay: w.held ? -(i * 0.13) + "s" : undefined } as React.CSSProperties}
+              >
+                <div className={cn(w.moving && "px-run")} style={{ transform: w.left ? "scaleX(-1)" : undefined }}>
+                  <div className="px-kick">
+                    <PixelAgent actorId={id} size={Math.round(size)} working={w.moving || w.held} className="h-auto" />
+                  </div>
+                </div>
               </div>
             </div>
             {/* a soft shadow under the feet, left on the ground while held */}
