@@ -113,6 +113,9 @@ function controllerStep(ctx: AppContext, c: SeedCase, workItemId: string): boole
     .filter((a) => a.status === "PENDING");
   if (!pending.length) return false;
   for (const approval of pending) {
+    // Approving a rule can settle a proposal it covers, so skip anything already decided.
+    const fresh = ctx.db.select().from(approvalRequests).where(eq(approvalRequests.id, approval.id)).get();
+    if (fresh?.status !== "PENDING") continue;
     if (approval.subjectType === "POLICY") {
       const policy = ctx.db.select().from(policies).where(eq(policies.id, approval.subjectId)).get();
       const ok = Boolean(key.method) && policy?.rule.method === key.method;

@@ -37,6 +37,31 @@ describe("seeded month", () => {
 });
 
 describe("Scenario 1: suspected GPU overbilling", () => {
+  it("turns a standing rule in an approval note into a policy proposal, and ignores a note about this case only", async () => {
+    const run = async (note: string) => {
+      const { ctx, orchestrator } = setup();
+      await orchestrator.drain();
+      const ingest = runScenario(ctx, "overbilling");
+      const id = ingest.status === "work_item_created" ? ingest.workItemId : "";
+      await orchestrator.drain();
+      const [approval] = pendingApprovals(ctx, id);
+      decideApproval(ctx, { approvalId: approval.id, actorId: ACTOR.controller, decision: "APPROVED", reason: note });
+      await orchestrator.drain();
+      expect(workItem(ctx, id).state).toBe("DISPUTED");
+      return { ctx, id, proposed: ctx.db.select().from(policies).where(eq(policies.status, "PROPOSED")).all().filter((p) => p.policyKey === "ALLOC-SHARED") };
+    };
+
+    const rule = await run("Also make sure whoever owns that GPU has to pay for that project, not by usage.");
+    expect(rule.proposed).toHaveLength(1);
+    expect(rule.proposed[0].rule.method).toBe("owner_pays_all");
+    expect(rule.proposed[0].proposedBy).toBe(ACTOR.policy);
+    expect(rule.proposed[0].learnedFromWorkItemId).toBe(rule.id);
+    expect(pendingApprovals(rule.ctx, rule.id).map((a) => a.subjectId)).toEqual([rule.proposed[0].id]);
+
+    const once = await run("Send it today, please.");
+    expect(once.proposed).toHaveLength(0);
+  });
+
   it("in one-at-a-time mode, holds every later case until the current one leaves the team", async () => {
     const { ctx, orchestrator } = setup(":memory:", { defaultRunMode: "one" });
     await orchestrator.drain();
@@ -132,7 +157,10 @@ describe("Scenarios 2 and 3: shared allocation, human correction, and persistent
 
     const pending = pendingApprovals(first.ctx, id);
     expect(pending.map((p) => p.subjectType).sort()).toEqual(["POLICY", "PROPOSAL"]);
-    for (const p of pending) decideApproval(first.ctx, { approvalId: p.id, actorId: ACTOR.controller, decision: "APPROVED" });
+    // Approving the rule is enough: the reworked split follows it, so it needs no second sign-off.
+    const policyApproval = pending.find((p) => p.subjectType === "POLICY")!;
+    decideApproval(first.ctx, { approvalId: policyApproval.id, actorId: ACTOR.controller, decision: "APPROVED" });
+    expect(pendingApprovals(first.ctx, id)).toHaveLength(0);
     await first.orchestrator.drain();
 
     expect(workItem(first.ctx, id).state).toBe("RESOLVED");

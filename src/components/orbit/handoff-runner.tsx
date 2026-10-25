@@ -62,11 +62,15 @@ export function handoffsFrom(events: ActivityRow[]): Handoff[] {
     const from = NODE_OF[e.actorId];
     if (!from) return;
     if (e.toolName === "handoff_to_finance") {
-      let label = from === "policy" ? "Policy check" : "Findings";
-      const finding = rows
-        .slice(0, i)
-        .reverse()
-        .find((f) => f.workItemId === e.workItemId && f.toolName === "submit_compute_findings" && f.status === "ok");
+      let label = from === "policy" ? "Redo it with the new rule" : "Findings";
+      // Only the investigators hand over findings; the Controls Lead hands back a rule.
+      const finding =
+        from === "policy"
+          ? undefined
+          : rows
+              .slice(0, i)
+              .reverse()
+              .find((f) => f.workItemId === e.workItemId && f.toolName === "submit_compute_findings" && f.status === "ok");
       if (finding) {
         const gap = Number(get(finding.result, "computed.discrepancy_cents") ?? 0);
         const assessment = String(get(finding.args, "charge_assessment") ?? "");
@@ -90,13 +94,25 @@ const SPEED = 0.22; // canvas px per ms
 const SIZE = 48;
 const OFF = 10; // degrees: start and stop beside the seat, not on it
 const JUMP = 13; // degrees either side of a seat it passes, where it jumps over
+const STOP_RUN = 750; // broadcast: ms to run from one seat to the next
+const STOP_GIVE = 900; // broadcast: ms spent handing the rule to each seat
+
+/** A broadcast stops beside every other seat in turn, then runs home. */
+function broadcastStops(h: Handoff, seats: Record<OrbitNodeId, Seat>) {
+  const a = seats[h.from].angle;
+  const others = (Object.entries(seats) as [OrbitNodeId, Seat][])
+    .filter(([id]) => id !== h.from)
+    .map(([id, s]) => ({ node: id, deg: s.angle - OFF + 360 * Math.ceil((a + OFF - (s.angle - OFF)) / 360) }))
+    .sort((x, y) => x.deg - y.deg);
+  return { start: a + OFF, stops: others, home: a - OFF + 360 };
+}
 
 function plan(h: Handoff, seats: Record<OrbitNodeId, Seat>, R: number) {
   const a = seats[h.from].angle;
   if (h.kind === "broadcast") {
-    const span = 360 - 2 * OFF;
-    const run = Math.min(6000, (span * Math.PI * R) / 180 / SPEED);
-    return { start: a + OFF, end: a + OFF + span, span, dir: 1, run, give: 500, back: 0, total: HOP + run + 500 + FADE };
+    const { start, stops, home } = broadcastStops(h, seats);
+    const run = (stops.length + 1) * STOP_RUN + stops.length * STOP_GIVE;
+    return { start, end: home, span: home - start, dir: 1, run, give: 0, back: 0, total: HOP + run + FADE, stops };
   }
   const b = seats[h.to].angle;
   const delta = ((b - a + 540) % 360) - 180;
@@ -107,7 +123,7 @@ function plan(h: Handoff, seats: Record<OrbitNodeId, Seat>, R: number) {
   const run = Math.min(3400, Math.max(1100, (Math.abs(span) * Math.PI * R) / 180 / SPEED));
   const give = h.kind === "question" ? 1700 : 1300;
   const back = run * 0.7;
-  return { start, end, span, dir, run, give, back, total: HOP + run + give + back + FADE };
+  return { start, end, span, dir, run, give, back, total: HOP + run + give + back + FADE, stops: undefined as { node: OrbitNodeId; deg: number }[] | undefined };
 }
 type Plan = ReturnType<typeof plan>;
 
@@ -116,6 +132,7 @@ const clamp = (t: number) => Math.max(0, Math.min(1, t));
 
 /** Where the runner is t ms into a run. */
 function pose(p: Plan, t: number) {
+  if (p.stops) return broadcastPose(p, p.stops, t);
   const tRun = t - HOP;
   const tGive = tRun - p.run;
   const tBack = tGive - p.give;
@@ -132,6 +149,26 @@ function pose(p: Plan, t: number) {
             ? p.end
             : p.start;
   return { phase, deg, tRun, tGive, tBack, tFade };
+}
+
+/** Broadcast: run to each stop, pause there to hand over the rule, then run home. */
+function broadcastPose(p: Plan, stops: { node: OrbitNodeId; deg: number }[], t: number) {
+  const tRun = t - HOP;
+  const tFade = tRun - p.run;
+  const base = { tRun, tGive: 0, tBack: 0, tFade, stop: -1 };
+  if (tRun < 0) return { ...base, phase: "hop", deg: p.start };
+  if (tFade >= 0) return { ...base, phase: "fade", deg: p.end };
+  const points = [p.start, ...stops.map((s) => s.deg), p.end];
+  let left = tRun;
+  for (let i = 0; i < points.length - 1; i++) {
+    if (left < STOP_RUN) return { ...base, phase: "run", deg: points[i] + (points[i + 1] - points[i]) * ease(left / STOP_RUN) };
+    left -= STOP_RUN;
+    if (i < stops.length) {
+      if (left < STOP_GIVE) return { ...base, phase: "give", deg: points[i + 1], tGive: left, stop: i };
+      left -= STOP_GIVE;
+    }
+  }
+  return { ...base, phase: "fade", deg: p.end };
 }
 
 /* ------------------------------------------------------------------ component */
@@ -222,27 +259,22 @@ export function HandoffRunner({
   useEffect(() => {
     if (!current) return;
     let raf = 0;
-    let lastDeg: number | null = null;
+    let lastStop = -1;
     let arrived = false;
     const tick = (t: number) => {
-      const { h: run, p: pl, onPass: pass, onArrive: arrive, seats: s } = live.current;
+      const { h: run, p: pl, onPass: pass, onArrive: arrive } = live.current;
       // A run whose hand-off is gone (the task changed) ends here.
       if (!run || !pl || t - current.at >= pl.total) {
         next.current();
         return;
       }
       const at = pose(pl, t - current.at);
-      if (run.kind === "broadcast" && at.phase === "run" && pass) {
-        const prev = lastDeg ?? pl.start;
-        for (const [id, seat] of Object.entries(s) as [OrbitNodeId, Seat][]) {
-          if (id === run.from) continue;
-          // Seat angles unwrapped to the run's range.
-          const target = seat.angle + 360 * Math.ceil((pl.start - seat.angle) / 360);
-          if (target > prev && target <= at.deg) pass(id);
-        }
-        lastDeg = at.deg;
+      // A broadcast hands the rule to each seat as it stops there; that seat nods.
+      if (pl.stops && "stop" in at && at.stop >= 0 && at.stop !== lastStop && at.tGive > 380) {
+        lastStop = at.stop;
+        pass?.(pl.stops[at.stop].node);
       }
-      if (!arrived && at.phase === "give") {
+      if (!arrived && at.phase === "give" && !pl.stops) {
         arrived = true;
         arrive?.(run);
       }
@@ -262,8 +294,10 @@ export function HandoffRunner({
   let scene: React.ReactNode = null;
   if (h && p && current && !hidden) {
     const t = now - current.at;
-    const { phase, deg, tRun, tGive, tBack, tFade } = pose(p, t);
+    const at = pose(p, t);
+    const { phase, deg, tRun, tGive, tBack, tFade } = at;
     const broadcast = h.kind === "broadcast";
+    const stopNode = broadcast && "stop" in at && at.stop >= 0 ? p.stops?.[at.stop].node : undefined;
 
     // Moving toward the receiver on "run", away on "back".
     const moving = phase === "run" || phase === "back";
@@ -287,13 +321,17 @@ export function HandoffRunner({
 
     // The note rides above the runner, then flies into the receiver's seat.
     const giveT = phase === "give" && !broadcast ? clamp(tGive / 520) : 0;
-    const noteVisible = phase === "hop" || phase === "run" || (phase === "give" && !broadcast && giveT < 1);
+    const noteVisible = phase === "hop" || phase === "run" || (phase === "give" && (broadcast || giveT < 1));
     const headY = pos.y - SIZE - lift - 10;
     const note =
       phase === "give"
         ? { x: pos.x + (seatTo.x - pos.x) * ease(giveT), y: headY + (seatTo.y - 20 - headY) * ease(giveT) - Math.sin(Math.PI * giveT) * 40, s: 1 - 0.75 * giveT }
         : { x: pos.x, y: headY, s: phase === "hop" ? clamp(t / HOP) : 1 };
-    const reply = !broadcast && phase === "give" && tGive > 480 ? (h.kind === "question" ? "Hmm, let me look" : "Got it") : null;
+    const reply = phase === "give" && tGive > 480 ? (broadcast ? "Got it" : h.kind === "question" ? "Hmm, let me look" : "Got it") : null;
+    const replyAt = stopNode ? pt(seats[stopNode].angle) : seatTo;
+    // Broadcast: a copy of the rule flies from the runner into the seat it stopped at.
+    const copyT = stopNode ? clamp(tGive / 450) : 0;
+    const copy = stopNode && copyT < 1 ? { x: pos.x + (replyAt.x - pos.x) * ease(copyT), y: pos.y - SIZE / 2 + (replyAt.y - 10 - (pos.y - SIZE / 2)) * ease(copyT) - Math.sin(Math.PI * copyT) * 36 } : null;
     const Prop = broadcast ? ScrollText : Mail;
 
     // Dust puffs behind the feet while running.
@@ -302,7 +340,7 @@ export function HandoffRunner({
           const tt = phase === "run" ? tRun - lag : tBack - lag;
           const len = phase === "run" ? p.run : p.back;
           if (tt < 0) return null;
-          const d = phase === "run" ? p.start + p.span * ease(clamp(tt / len)) : p.end - p.span * ease(clamp(tt / len));
+          const d = broadcast ? pose(p, t - lag).deg : phase === "run" ? p.start + p.span * ease(clamp(tt / len)) : p.end - p.span * ease(clamp(tt / len));
           const q = pt(d);
           return <span key={i} className="absolute size-1.5 rounded-[1px] bg-zinc-300" style={{ left: q.x - 3, top: q.y - 4, opacity: 0.7 - i * 0.22 }} />;
         })
@@ -338,10 +376,17 @@ export function HandoffRunner({
         {reply ? (
           <div
             className="orbit-spawn absolute rounded-lg bg-zinc-900 px-2.5 py-1 text-[15px] font-medium whitespace-nowrap text-white"
-            style={{ left: seatTo.x, top: seatTo.y - 48, transform: "translate(-50%, -100%)" }}
+            style={{ left: replyAt.x, top: replyAt.y - 48, transform: "translate(-50%, -100%)" }}
           >
             {reply}
           </div>
+        ) : null}
+        {copy ? (
+          <ScrollText
+            className="absolute size-6 rounded-[3px] bg-white p-0.5 text-brand-ink shadow-[0_1px_4px_rgb(0_0_0/0.18)]"
+            strokeWidth={2.25}
+            style={{ left: copy.x - 12, top: copy.y - 12, transform: "scale(" + (1 - 0.4 * copyT) + ")" }}
+          />
         ) : null}
       </>
     );

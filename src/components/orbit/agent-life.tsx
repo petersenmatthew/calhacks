@@ -58,7 +58,9 @@ export function spriteMood(r: Reaction | undefined): SpriteMood | undefined {
 }
 
 function approvalLabel(a: Approval) {
-  const first = a.summary.split(/(?<=[a-z0-9)])\.\s/)[0];
+  // Summaries often open with history ("PR-2001 was rejected..."); lead with the sentence about what is actually waiting.
+  const sentences = a.summary.split(/(?<=[a-z0-9)])\.\s/);
+  const first = sentences.find((s) => s.startsWith(a.subjectId)) ?? sentences[0];
   return first.length > 52 ? first.slice(0, 50).trimEnd() + "..." : first;
 }
 

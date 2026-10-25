@@ -92,6 +92,20 @@ export type FrameSpec = {
   contract?: ContractPreview;
   /** The employee is reading this contract right now: the frame is just the PDF scrolling by. */
   reading?: ContractPreview;
+  /** A rule the Controls Lead learned: what taught it, the rule before and after, and the approval waiting on it. */
+  policyChange?: PolicyChange;
+};
+
+export type PolicyChange = {
+  /** The controller's own words that taught the rule. */
+  quote?: { text: string; who: string };
+  /** Where the rule came from when nobody said it ("6 months of AP history"). */
+  source?: string;
+  before?: { version: number; text: string };
+  after: { version: number; text: string };
+  /** Pending approval the controller can decide from the frame. */
+  approvalId?: string;
+  status: string;
 };
 
 export type ContractPreview = {
@@ -197,6 +211,19 @@ const LABELS: Record<string, string> = {
   get_posted_charges: "Postings",
   forecast_project_burn: "Forecast",
   record_budget_note: "Budget note",
+  finish_guidance: "Your note",
+  finish_onboarding: "Onboarding",
+  get_vendor_thread: "Vendor reply",
+  get_dispute_status: "Dispute status",
+  send_vendor_follow_up: "Follow-up",
+  escalate_dispute: "Escalation",
+  reply_to_vendor: "Reply sent",
+  note_vendor_update: "Vendor update",
+  record_vendor_decision: "Vendor decision",
+  ask_controller: "Question",
+  set_project_budget: "New budget",
+  query_ap_history: "AP history",
+  propose_materiality_policy: "New policy",
 };
 
 const AGENT_NAME: Record<string, string> = {
@@ -892,14 +919,17 @@ function vendorReplyFrames(w: WorkspaceData): Frame[] {
 function policyFrames(w: WorkspaceData): Frame[] {
   return w.policies.map((p) => {
     const approver = p.approvedBy ? (w.actors[p.approvedBy]?.name ?? p.approvedBy) : null;
-    const statusCheck: Check =
-      p.status === "APPROVED"
-        ? { label: "Approved", detail: approver ? "by " + approver : "", ok: true }
-        : p.status === "PROPOSED"
-          ? { label: "Waiting for controller approval" }
-          : p.status === "REJECTED"
-            ? { label: "Rejected", ok: false }
-            : { label: "Superseded", detail: "Replaced by a newer version" };
+    const prior = w.policies.find((x) => x.id === p.supersedesId) ?? w.policies.filter((x) => x.policyKey === p.policyKey && x.version < p.version).at(-1);
+    // What taught it: the controller's latest note on a proposal of the case it learned from (a correction, or a note left with an approval).
+    const correction = p.learnedFromWorkItemId
+      ? w.approvals
+          .filter((a) => a.subjectType === "PROPOSAL" && a.decisionReason && !/^Covered by /.test(a.decisionReason) && a.decidedAt && a.decidedAt <= p.createdAt)
+          .at(-1)
+      : undefined;
+    const learned = p.proposedBy.startsWith("agent.");
+    const pending = w.approvals.find((a) => a.subjectType === "POLICY" && a.subjectId === p.id && a.status === "PENDING");
+    const status =
+      p.status === "APPROVED" ? "Approved" + (approver ? " by " + approver : "") : p.status === "PROPOSED" ? "Waiting for your approval" : p.status === "REJECTED" ? "Rejected" : "Replaced by a newer version";
     return {
       id: "policy-" + p.id,
       node: "policy" as const,
@@ -907,15 +937,16 @@ function policyFrames(w: WorkspaceData): Frame[] {
       createdAt: p.createdAt,
       tone: p.status === "PROPOSED" ? ("warn" as const) : p.status === "REJECTED" ? ("denied" as const) : ("ok" as const),
       spec: {
-        eyebrow: "Policy · " + p.status.toLowerCase(),
-        title: p.title + " v" + p.version,
-        summary: p.statement,
-        checks: [
-          statusCheck,
-          ...p.rule.conditions.map((c) => ({ label: c })),
-          { label: "Auto-post limit", detail: money(p.rule.autoPostLimitCents) },
-          ...(p.learnedFromWorkItemId ? [{ label: "Learned from " + p.learnedFromWorkItemId, detail: "From controller feedback", ok: true }] : []),
-        ],
+        eyebrow: learned ? "Controls Lead · " + (correction ? (correction.status === "APPROVED" ? "from your note" : "from your correction") : p.learnedFromWorkItemId ? "from " + p.learnedFromWorkItemId : "from AP history") : "Company policy",
+        title: (prior ? "New rule: " : learned ? "Learned: " : "") + p.title,
+        policyChange: {
+          quote: correction ? { text: correction.decisionReason!, who: (correction.decidedBy ? (w.actors[correction.decidedBy]?.name ?? "You") : "You") + ", on " + correction.workItemId } : undefined,
+          source: correction ? undefined : p.rationale,
+          before: prior ? { version: prior.version, text: prior.statement } : undefined,
+          after: { version: p.version, text: p.statement },
+          approvalId: pending?.id,
+          status,
+        },
       },
     };
   });
@@ -973,6 +1004,14 @@ export function frameText(spec: FrameSpec): string {
   if (spec.checks) out.push(...spec.checks.map((c) => (c.ok === true ? "[pass] " : c.ok === false ? "[fail] " : "[info] ") + c.label + (c.detail ? ": " + c.detail : "")));
   if (spec.summary) out.push("Summary: " + spec.summary);
   if (spec.reading) out.push("Reading contract " + spec.reading.id + ": " + spec.reading.name);
+  const pc = spec.policyChange;
+  if (pc) {
+    if (pc.quote) out.push("Learned from: " + pc.quote.who + ' said "' + pc.quote.text + '"');
+    if (pc.source) out.push("Learned from: " + pc.source);
+    if (pc.before) out.push("Before (v" + pc.before.version + "): " + pc.before.text);
+    out.push("Now (v" + pc.after.version + "): " + pc.after.text);
+    out.push("Status: " + pc.status);
+  }
   if (spec.evidence?.length) out.push("Evidence: " + spec.evidence.join("; "));
   if (spec.sources?.length) out.push("Records read first: " + spec.sources.join(", "));
   return out.join("\n");

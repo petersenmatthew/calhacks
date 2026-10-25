@@ -38,7 +38,9 @@ function taskFor(agentId: string, trigger: Record<string, unknown>, workItemId: 
     if (t === "finance_question") return "Answer the Cost Allocator's question on " + workItemId;
     return "Reconstruct reservation usage for " + workItemId;
   }
-  if (agentId === ACTOR.policy) return "Turn the controller's correction on " + workItemId + " into policy";
+  if (agentId === ACTOR.policy) {
+    return t === "controller_guidance" ? "Check whether the controller's note on " + workItemId + " sets a rule for next time" : "Turn the controller's correction on " + workItemId + " into policy";
+  }
   if (agentId === ACTOR.vendorLiaison) {
     if (t === "vendor_reply") return "Read the vendor's reply and close " + workItemId;
     if (t === "vendor_message") return "Handle the vendor's email on " + workItemId;
@@ -64,7 +66,9 @@ export async function runAgentJob(ctx: AppContext, job: JobRow) {
   const item = onboarding ? null : getWorkItem(ctx, job.workItemId);
   const workItemId = job.workItemId;
   const agentName = getActor(ctx, agentId)?.name ?? agentId;
-  if (item && !(ACTIVE_STATES[agentId] ?? ACTIVE_STATES[ACTOR.finance]).has(item.state)) {
+  // A note the controller left with a decision is read whatever state the case has moved on to.
+  const anyState = agentId === ACTOR.policy && job.payload?.trigger === "controller_guidance";
+  if (item && !anyState && !(ACTIVE_STATES[agentId] ?? ACTIVE_STATES[ACTOR.finance]).has(item.state)) {
     recordActivity(ctx, {
       workItemId: item.id,
       actorId: ACTOR.orchestrator,
