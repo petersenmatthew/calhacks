@@ -15,6 +15,20 @@ import type { AgentRunContext } from "./tools";
 /** Model runs started in the last hour, across all sandboxes (public demo cap). */
 const llmRuns = ((globalThis as unknown as { __moaLlmRuns?: { starts: number[] } }).__moaLlmRuns ??= { starts: [] });
 
+/**
+ * Whether one more live model call fits the public demo's hourly budget (always, elsewhere), counting it if so.
+ * Counted across the whole process: every visitor's sandbox shares one model budget.
+ */
+export function takeLiveModelRun(ctx: AppContext) {
+  if (!ctx.config.publicDemo) return true;
+  const now = Date.now();
+  const recent = llmRuns.starts.filter((t) => now - t < 3_600_000);
+  const ok = recent.length < ctx.config.maxLlmRunsPerHour;
+  if (ok) recent.push(now);
+  llmRuns.starts = recent;
+  return ok;
+}
+
 export const MAX_AGENT_RUNS_PER_ITEM = 10;
 
 const WORKING_STATES = ["NEW", "INVESTIGATING", "PROPOSED"];
@@ -83,14 +97,7 @@ export async function runAgentJob(ctx: AppContext, job: JobRow) {
   }
   let mode = getExecutionMode(ctx);
   // A public demo caps live model runs per hour; past the cap, agents run the scripted replay instead of failing.
-  if (mode === "llm" && ctx.config.publicDemo) {
-    // Counted across the whole process: every visitor's sandbox shares one model budget.
-    const now = Date.now();
-    const recent = llmRuns.starts.filter((t) => now - t < 3_600_000);
-    if (recent.length >= ctx.config.maxLlmRunsPerHour) mode = "deterministic";
-    else recent.push(now);
-    llmRuns.starts = recent;
-  }
+  if (mode === "llm" && !takeLiveModelRun(ctx)) mode = "deterministic";
   const runId = nextId(ctx, "RUN", 8001);
   const task = taskFor(agentId, job.payload, workItemId);
   tx(ctx, () => {

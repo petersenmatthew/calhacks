@@ -5,6 +5,7 @@ import { syncHttpFeed, syncSimulatedFeeds, type SyncSummary } from "./sync/feeds
 import { runFollowUps } from "./workflow/follow-ups";
 import { dispatchOutbox } from "./comms/dispatch";
 import { pollVendorInbox } from "./comms/inbox";
+import { runMockVendor } from "./workflow/mock-vendor";
 
 /*
  * The part of the system that starts work on its own. On every tick it pulls
@@ -41,6 +42,9 @@ export async function runScheduledWork(ctx: AppContext, options: { feedUrl?: str
   } catch (error) {
     report(ctx, "Could not read vendor replies from the mailbox", error);
   }
+  // No mailbox connected: a simulated provider answers disputes. It runs in the background so a
+  // model call never holds up the rest of the tick; it keeps one reply in flight per dispute.
+  void runMockVendor(ctx).catch((error) => report(ctx, "The simulated vendor could not reply", error));
   try {
     await dispatchOutbox(ctx);
   } catch (error) {
