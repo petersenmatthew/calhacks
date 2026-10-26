@@ -1,0 +1,6 @@
+data
+.next
+site/.next
+site/out
+node_modules
+.env*

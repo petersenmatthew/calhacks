@@ -1,0 +1,3 @@
+/* The app's styles, so the landing page looks the same here as in the app. */
+@import "../../src/app/globals.css";
+@source "../../src/components";

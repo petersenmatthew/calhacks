@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { MeadowScene, Roamers } from "./scene";
 
 /*
@@ -144,13 +145,14 @@ export function Landing() {
 
   return (
     <div className="relative h-dvh overflow-hidden bg-[#45b4ee]">
-      {/* eslint-disable-next-line @next/next/no-page-custom-font */}
-      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" />
       <MeadowScene />
       <Roamers />
+      <Link href="/about" className="absolute top-5 right-6 z-[250] text-[15px] font-semibold text-white/90 hover:text-white">
+        About
+      </Link>
 
       <main className="pointer-events-none absolute inset-x-0 top-0 z-[200] flex h-[62%] flex-col items-center justify-center px-6 text-center">
-        <h1 className="text-[96px] leading-none font-semibold tracking-[-0.02em] text-white sm:text-[160px]" style={{ fontFamily: "'Fraunces', Georgia, serif" }}>
+        <h1 className="text-[96px] leading-none font-semibold tracking-[-0.05em] text-white sm:text-[160px]">
           moa
         </h1>
         <p className="mt-3 max-w-[440px] text-[17px] leading-relaxed font-medium text-white sm:text-[20px]">Autonomous finance for AI research labs</p>

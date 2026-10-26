@@ -1,0 +1,7 @@
+/.next/
+/out/
+/public/
+/app/icon.svg
+next-env.d.ts
+AGENTS.md
+CLAUDE.md

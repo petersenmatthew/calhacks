@@ -44,7 +44,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     // Read in the browser (storage is browser-only), then open on the next frame. Checked on every
     // page change, since the shell stays mounted when the landing page's Start moves to the canvas.
     // Coming from that Start: always show it. Otherwise only the first time.
-    if (pathname === "/welcome") return;
+    if (pathname === "/" || pathname === "/about") return;
     const fromLanding = new URLSearchParams(window.location.search).get("intro") === "1";
     if (fromLanding) window.history.replaceState(null, "", window.location.pathname);
     if (!fromLanding && hasSeenOnboarding()) return;
@@ -73,13 +73,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         : "canvas";
 
   // The landing page stands on its own: no app header, no intro dialog.
-  if (pathname === "/welcome") return <>{children}</>;
+  if (pathname === "/" || pathname === "/about") return <>{children}</>;
 
   return (
     <ShellContext.Provider value={{ period, setPeriod, lastView }}>
       <div className="flex h-dvh flex-col overflow-hidden">
         <header className="flex h-14 shrink-0 items-center gap-4 border-b border-zinc-200/80 px-4">
-          <Link href="/welcome" className="flex items-center gap-1.5 pr-1 text-[17px] font-semibold tracking-[-0.03em] text-zinc-950">
+          <Link href="/" className="flex items-center gap-1.5 pr-1 text-[17px] font-semibold tracking-[-0.03em] text-zinc-950">
             <LogoFlower />
             moa
           </Link>

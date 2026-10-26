@@ -13,7 +13,8 @@
     "eval:live": "AGENT_MODE=llm node --env-file=.env.local --import tsx scripts/eval.ts --case=O-01,E-01",
     "contracts:pdf": "python3 scripts/contracts/build_contract_pdfs.py",
     "db:generate": "drizzle-kit generate",
-    "db:reset": "node -e \"require('fs').rmSync('data',{recursive:true,force:true})\""
+    "db:reset": "node -e \"require('fs').rmSync('data',{recursive:true,force:true})\"",
+    "build:site": "mkdir -p site/public && cp -R public/landing site/public/ && cp src/app/icon.svg site/app/icon.svg && next build site"
   },
   "dependencies": {
     "@openai/agents": "^0.21.0",
