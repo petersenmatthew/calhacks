@@ -14,4 +14,4 @@ npm run dev
 # open http://localhost:3000
 ```
 
-Copy `.env.example` to `.env.local`. Every variable is optional.
+Copy `.env.example` to `.env.local` & set `OPENAI_API_KEY`, others are optional.
