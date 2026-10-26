@@ -2,7 +2,7 @@
 
 autonomous finance for AI research labs.
 
-a **m**ixture **o**f **a**ccountant ai agents audit, manage, and run your gpu payables.
+a **M**ixture **O**f **A**ccountant ai agents audit, manage, and run your gpu payables.
 
 ![moa landing page](docs/images/landing.png)
 
