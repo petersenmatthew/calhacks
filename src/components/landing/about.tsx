@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { PixelAgent } from "../pixel-agent";
+import { LogoFlower } from "./meadow";
 import { MeadowScene, Roamers } from "./scene";
 
 /*
@@ -51,24 +52,21 @@ export function About() {
   return (
     <div className="h-dvh overflow-y-auto bg-[#fbf8ef]">
 
-      <header className="relative h-[320px] overflow-hidden sm:h-[420px]">
-        {/* The whole scene at its own shape, pinned to the top, so the title sits in the sky. */}
-        <div className="absolute top-0 left-1/2 aspect-video w-[max(100%,760px)] -translate-x-1/2">
+      {/* Grows with the width; the scene is cut just below the hills, so they always sit along the bottom edge. */}
+      <header className="relative h-[clamp(300px,30vw,520px)] overflow-hidden bg-[#45b4ee]">
+        <div className="absolute bottom-0 left-1/2 aspect-video w-[max(100%,760px)]" style={{ transform: "translate(-50%, 38%)" }}>
           <MeadowScene />
+          {/* In scene coordinates: the title rests just above the dithered band at row 62 of 180. */}
+          <div className="absolute inset-x-0 bottom-[65.6%] px-6 pb-[0.4%] text-center">
+            <h1 className="text-[52px] leading-[0.9] font-semibold tracking-[-0.04em] text-white sm:text-[80px]">About moa</h1>
+          </div>
         </div>
-        <nav className="absolute inset-x-0 top-0 z-10 flex items-center justify-between px-6 py-5">
-          <Link href="/" className="text-[24px] leading-none font-semibold tracking-[-0.03em] text-white">
+        <nav className="absolute inset-x-0 top-0 z-10 px-6 py-5">
+          <Link href="/" className="inline-flex items-center gap-2 text-[24px] leading-none font-semibold tracking-[-0.03em] text-white">
+            <LogoFlower size={22} />
             moa
           </Link>
-          <a href={REPO_URL} className="text-[15px] font-semibold text-white/90 hover:text-white">
-            GitHub
-          </a>
         </nav>
-        <div className="absolute inset-x-0 top-[28%] px-6 text-center">
-          <h1 className="text-[52px] leading-none font-semibold tracking-[-0.04em] text-white sm:text-[80px]">
-            About moa
-          </h1>
-        </div>
       </header>
 
       <main className="mx-auto max-w-[760px] px-6 py-16 sm:py-20">
@@ -162,12 +160,13 @@ export function About() {
         </Section>
       </main>
 
-      <footer className="relative h-[460px] overflow-hidden">
+      {/* Grows with the width so the sky stays in view on wide screens; the base colour matches the top of the sky. */}
+      <footer className="relative h-[clamp(460px,48vw,720px)] overflow-hidden bg-[#45b4ee]">
         <div className="absolute bottom-0 left-1/2 aspect-video w-[max(100%,820px)] -translate-x-1/2">
           <MeadowScene />
         </div>
         <Roamers />
-        <div className="pointer-events-none absolute inset-x-0 top-[10%] z-[200] flex flex-col items-center px-6 text-center">
+        <div className="pointer-events-none absolute inset-x-0 top-[16%] z-[200] flex flex-col items-center px-6 text-center">
           <p className="text-[28px] font-semibold tracking-[-0.03em] text-white sm:text-[34px]">
             See it work
           </p>

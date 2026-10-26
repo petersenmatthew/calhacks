@@ -19,6 +19,8 @@ const YOUTUBE_SRC = `https://www.youtube-nocookie.com/embed/${YOUTUBE_ID}?autopl
  */
 function DemoPlayer() {
   const frame = useRef<HTMLIFrameElement>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const [full, setFull] = useState(false);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playing, setPlaying] = useState(true);
@@ -78,11 +80,44 @@ function DemoPlayer() {
     send("seekTo", [t, true]);
   };
 
+  // Fullscreen the whole player, controls included. iPhone Safari only allows fullscreen for native
+  // video, so there the button opens the video on YouTube at the current time instead.
+  useEffect(() => {
+    const doc = document as Document & { webkitFullscreenElement?: Element };
+    const onChange = () => setFull(Boolean(doc.fullscreenElement || doc.webkitFullscreenElement));
+    document.addEventListener("fullscreenchange", onChange);
+    document.addEventListener("webkitfullscreenchange", onChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onChange);
+      document.removeEventListener("webkitfullscreenchange", onChange);
+    };
+  }, []);
+
+  const toggleFull = () => {
+    const doc = document as Document & { webkitFullscreenEnabled?: boolean; webkitExitFullscreen?: () => void };
+    if (full) {
+      if (document.exitFullscreen) document.exitFullscreen();
+      else doc.webkitExitFullscreen?.();
+      return;
+    }
+    const el = box.current as (HTMLDivElement & { webkitRequestFullscreen?: () => void }) | null;
+    if (el && (document.fullscreenEnabled || doc.webkitFullscreenEnabled)) {
+      if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+      else el.webkitRequestFullscreen?.();
+      const orientation = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> };
+      orientation?.lock?.("landscape").catch(() => {});
+      return;
+    }
+    send("pauseVideo");
+    setPlaying(false);
+    window.open(`https://www.youtube.com/watch?v=${YOUTUBE_ID}&t=${Math.floor(time)}s`, "_blank", "noopener");
+  };
+
   const pct = duration ? (time / duration) * 100 : 0;
 
   return (
-    <>
-      <div className="aspect-video w-full bg-cover bg-top" style={{ backgroundImage: "url(/landing/poster.png)" }}>
+    <div ref={box} className={full ? "flex h-full w-full flex-col bg-black" : undefined}>
+      <div className={(full ? "min-h-0 flex-1" : "aspect-video") + " w-full bg-cover bg-top"} style={{ backgroundImage: "url(/landing/poster.png)" }}>
         <iframe
           ref={frame}
           src={YOUTUBE_SRC}
@@ -120,8 +155,18 @@ function DemoPlayer() {
           className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full accent-[#1f3b5a] [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#1f3b5a]"
           style={{ background: `linear-gradient(to right, #1f3b5a ${pct}%, #1f3b5a26 ${pct}%)` }}
         />
+        <button
+          type="button"
+          onClick={toggleFull}
+          aria-label={full ? "Exit full screen" : "Full screen"}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg hover:bg-[#1f3b5a]/10"
+        >
+          <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            {full ? <path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" /> : <path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" />}
+          </svg>
+        </button>
       </div>
-    </>
+    </div>
   );
 }
 
