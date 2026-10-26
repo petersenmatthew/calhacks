@@ -99,18 +99,13 @@ const appSeed = () => (process.env.SEED === "all" ? "all" : "demo");
 
 function createRuntime(file: string): Runtime {
   const llmAvailable = Boolean(process.env.OPENAI_API_KEY);
-  // Factory Droid runs the employees when its key is set, unless AGENT_ENGINE=openai.
-  const agentEngine = process.env.FACTORY_API_KEY && process.env.AGENT_ENGINE !== "openai" ? "droid" : "openai";
-  const agentsCanRunLive = llmAvailable || agentEngine === "droid";
   const ctx = createAppContext({
     file,
     config: {
       stepDelayMs: Number(process.env.DETERMINISTIC_STEP_DELAY_MS ?? 700),
       llmAvailable,
       model: process.env.OPENAI_MODEL || getDefaultModel(),
-      agentEngine,
-      droidModel: process.env.DROID_MODEL || null,
-      defaultMode: envMode() ?? (agentsCanRunLive ? "llm" : "deterministic"),
+      defaultMode: envMode() ?? (llmAvailable ? "llm" : "deterministic"),
       schedulerIntervalMs: process.env.AUTONOMY === "off" ? 0 : Number(process.env.SCHEDULER_INTERVAL_MS ?? 5000),
       feedUrl: process.env.BILLING_FEED_URL || null,
       // A public deployment never sends Slack or email, whatever the environment holds.

@@ -9,28 +9,18 @@ import { ControlError } from "./security/errors";
 
 export type ExecutionMode = "llm" | "deterministic";
 
-/** Employees can run live when the OpenAI key is set or Droid is the engine. */
-export function agentsCanRunLive(ctx: AppContext) {
-  return ctx.config.llmAvailable || ctx.config.agentEngine === "droid";
-}
-
-/** Label for the live engine, e.g. "Factory Droid (default model)". */
-export function agentModelLabel(ctx: AppContext) {
-  return ctx.config.agentEngine === "droid" ? "droid/" + (ctx.config.droidModel ?? "default") : ctx.config.model;
-}
-
 export function getExecutionMode(ctx: AppContext): ExecutionMode {
   const row = ctx.db.select().from(settings).where(eq(settings.key, "execution_mode")).get();
   const mode = (row?.value as ExecutionMode | undefined) ?? ctx.config.defaultMode;
-  if (mode === "llm" && !agentsCanRunLive(ctx)) return "deterministic";
+  if (mode === "llm" && !ctx.config.llmAvailable) return "deterministic";
   return mode;
 }
 
 export function setExecutionMode(ctx: AppContext, actorId: string, mode: ExecutionMode) {
   return guard(ctx, { actorId, action: "settings.execution_mode" }, () => {
     authorize(ctx, actorId, "settings:update");
-    if (mode === "llm" && !agentsCanRunLive(ctx)) {
-      throw new ControlError("Neither OPENAI_API_KEY nor FACTORY_API_KEY is configured on the server", "CONFIGURATION", "FAILED");
+    if (mode === "llm" && !ctx.config.llmAvailable) {
+      throw new ControlError("OPENAI_API_KEY is not configured on the server", "CONFIGURATION", "FAILED");
     }
     ctx.db
       .insert(settings)

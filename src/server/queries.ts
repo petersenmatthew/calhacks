@@ -32,7 +32,7 @@ import {
   workItemTransitions,
 } from "./db/schema";
 import { ACTOR } from "./security/actors";
-import { agentModelLabel, agentsCanRunLive, getAgentSettings, getExecutionMode, getRunMode } from "./settings";
+import { getAgentSettings, getExecutionMode, getRunMode } from "./settings";
 import { activeWorkItemId } from "./workflow/jobs";
 import { toolsForAgent } from "./agents/tools";
 import { connectionsFor } from "@/lib/connections";
@@ -157,9 +157,8 @@ export function getSettingsView(ctx: AppContext) {
   return {
     mode: getExecutionMode(ctx),
     runMode: getRunMode(ctx),
-    llmAvailable: agentsCanRunLive(ctx),
-    model: agentModelLabel(ctx),
-    engine: ctx.config.agentEngine,
+    llmAvailable: ctx.config.llmAvailable,
+    model: ctx.config.model,
     stepDelayMs: ctx.config.stepDelayMs,
     publicDemo: ctx.config.publicDemo,
   };

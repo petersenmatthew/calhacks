@@ -7,12 +7,8 @@ export interface AppConfig {
   stepDelayMs: number;
   /** True when OPENAI_API_KEY is configured. */
   llmAvailable: boolean;
-  /** Model used for LLM agents on the OpenAI engine, and for the assistant and simulated vendor. */
+  /** Model used for LLM agents, the assistant, and the simulated vendor. */
   model: string;
-  /** What runs the employees in LLM mode: the OpenAI Agents SDK, or Factory Droid (when FACTORY_API_KEY is set). */
-  agentEngine: "openai" | "droid";
-  /** Droid model id; null uses the Droid default. */
-  droidModel: string | null;
   /** Default execution mode when nothing is stored in settings. */
   defaultMode: "llm" | "deterministic";
   /** How often the scheduler syncs feeds and runs follow-ups. 0 disables it. */
@@ -87,8 +83,6 @@ export function createAppContext(options: { file: string; config?: Partial<AppCo
       stepDelayMs: options.config?.stepDelayMs ?? 0,
       llmAvailable,
       model: options.config?.model ?? "gpt-5.6-luna",
-      agentEngine: options.config?.agentEngine ?? "openai",
-      droidModel: options.config?.droidModel ?? null,
       defaultMode: options.config?.defaultMode ?? (llmAvailable ? "llm" : "deterministic"),
       schedulerIntervalMs: options.config?.schedulerIntervalMs ?? 0,
       feedUrl: options.config?.feedUrl ?? null,
